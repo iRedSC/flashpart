@@ -7,7 +7,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { FolderPlus, RefreshCw, Send, Trash2 } from "lucide-react";
+import { FolderPlus, RefreshCw, Send, Trash2, Upload } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
@@ -20,6 +20,7 @@ import {
 } from "../components/ui/dialog";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
+import { Switch } from "../components/ui/switch";
 import {
   TableBody,
   TableCell,
@@ -32,6 +33,17 @@ import { cn } from "../lib/utils";
 import type { Id } from "../../convex/_generated/dataModel";
 
 type Product = ReturnType<typeof useAppData>["products"][number];
+type CsvProduct = {
+  sku: string;
+  name: string;
+  price: number;
+};
+type ExistingEntryBehavior = "overwrite" | "ignore";
+type ImportResult = {
+  ignored: number;
+  inserted: number;
+  overwritten: number;
+};
 
 const columnHelper = createColumnHelper<Product>();
 const statusTone: Record<Product["status"], "default" | "secondary" | "destructive" | "outline"> = {
@@ -45,6 +57,81 @@ const statusTone: Record<Product["status"], "default" | "secondary" | "destructi
   needsReview: "outline",
 };
 
+function parseCsvLine(line: string) {
+  const values: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const nextChar = line[index + 1];
+
+    if (char === '"' && inQuotes && nextChar === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      values.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  values.push(current.trim());
+  return values;
+}
+
+function parseProductCsv(text: string) {
+  const rows = text
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(parseCsvLine);
+
+  if (rows.length === 0) {
+    return {
+      error: "Choose a CSV file with sku, name, and price columns.",
+      products: [] as CsvProduct[],
+      skippedRows: 0,
+    };
+  }
+
+  const header = rows[0].map((value) => value.toLowerCase());
+  const hasHeader = header.includes("sku") && header.includes("name") && header.includes("price");
+  const skuIndex = hasHeader ? header.indexOf("sku") : 0;
+  const nameIndex = hasHeader ? header.indexOf("name") : 1;
+  const priceIndex = hasHeader ? header.indexOf("price") : 2;
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  const products: CsvProduct[] = [];
+  let skippedRows = 0;
+
+  for (const row of dataRows) {
+    const sku = row[skuIndex]?.trim() ?? "";
+    const name = row[nameIndex]?.trim() ?? "";
+    const rawPrice = row[priceIndex]?.replace(/[$,]/g, "").trim() ?? "";
+    const price = Number.parseFloat(rawPrice);
+
+    if (!sku || !name || !Number.isFinite(price)) {
+      skippedRows += 1;
+      continue;
+    }
+
+    products.push({ name, price, sku });
+  }
+
+  return {
+    error:
+      products.length === 0
+        ? "No valid products found. Use columns: sku, name, price."
+        : null,
+    products,
+    skippedRows,
+  };
+}
+
 export function ProductsPage() {
   const {
     assignProductsToGroup,
@@ -53,12 +140,23 @@ export function ProductsPage() {
     isProductPending,
     isLoading,
     products,
+    importProducts,
     publishProducts,
     updateProduct,
   } = useAppData();
   const parentRef = React.useRef<HTMLDivElement>(null);
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [addToGroupOpen, setAddToGroupOpen] = React.useState(false);
+  const [importOpen, setImportOpen] = React.useState(false);
+  const [importMode, setImportMode] =
+    React.useState<ExistingEntryBehavior>("ignore");
+  const [importSkuPrefix, setImportSkuPrefix] = React.useState("");
+  const [importFileName, setImportFileName] = React.useState("");
+  const [importRows, setImportRows] = React.useState<CsvProduct[]>([]);
+  const [importSkippedRows, setImportSkippedRows] = React.useState(0);
+  const [importError, setImportError] = React.useState<string | null>(null);
+  const [importResult, setImportResult] = React.useState<ImportResult | null>(null);
+  const [isImporting, setIsImporting] = React.useState(false);
   const [selectedGroupId, setSelectedGroupId] = React.useState<Id<"groups"> | "">("");
   const groupById = React.useMemo(
     () => new Map(groups.map((group) => [group._id, group.name])),
@@ -240,10 +338,89 @@ export function ProductsPage() {
     clearSelection();
   }
 
+  function resetImportDialog() {
+    setImportMode("ignore");
+    setImportSkuPrefix("");
+    setImportFileName("");
+    setImportRows([]);
+    setImportSkippedRows(0);
+    setImportError(null);
+    setImportResult(null);
+    setIsImporting(false);
+  }
+
+  async function handleImportFileChange(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = event.currentTarget.files?.[0];
+
+    setImportResult(null);
+
+    if (!file) {
+      setImportFileName("");
+      setImportRows([]);
+      setImportSkippedRows(0);
+      setImportError(null);
+      return;
+    }
+
+    try {
+      const parsed = parseProductCsv(await file.text());
+
+      setImportFileName(file.name);
+      setImportRows(parsed.products);
+      setImportSkippedRows(parsed.skippedRows);
+      setImportError(parsed.error);
+    } catch {
+      setImportFileName(file.name);
+      setImportRows([]);
+      setImportSkippedRows(0);
+      setImportError("The CSV file could not be read.");
+    }
+  }
+
+  async function handleImportProducts() {
+    if (importRows.length === 0) {
+      return;
+    }
+
+    setIsImporting(true);
+    setImportError(null);
+
+    try {
+      const skuPrefix = importSkuPrefix.trim();
+      const result = await importProducts({
+        existingEntryBehavior: importMode,
+        products: importRows.map((product) => ({
+          ...product,
+          sku: skuPrefix ? `${skuPrefix}-${product.sku}` : product.sku,
+        })),
+      });
+
+      if (result) {
+        setImportResult(result);
+      }
+    } catch (error) {
+      setImportError(
+        error instanceof Error ? error.message : "Products could not be imported.",
+      );
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Button
+            className="text-slate-950"
+            onClick={() => setImportOpen(true)}
+            variant="outline"
+          >
+            <Upload className="h-4 w-4" />
+            Import CSV
+          </Button>
           {hasSelection ? (
             <span>{selectedCount.toLocaleString()} selected</span>
           ) : null}
@@ -275,6 +452,112 @@ export function ProductsPage() {
           </Button>
         </div>
       </div>
+
+      <Dialog
+        onOpenChange={(open) => {
+          setImportOpen(open);
+          if (!open) {
+            resetImportDialog();
+          }
+        }}
+        open={importOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import products</DialogTitle>
+            <DialogDescription>
+              Upload a CSV with sku, name, and price columns. Existing SKUs can be
+              overwritten or ignored.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <label className="text-sm font-medium" htmlFor="product-csv">
+                CSV file
+              </label>
+              <Input
+                accept=".csv,text/csv"
+                id="product-csv"
+                onChange={(event) =>
+                  void handleImportFileChange(event).catch(() => undefined)
+                }
+                type="file"
+              />
+              <p className="text-xs text-slate-500">
+                Header row is optional when columns are ordered as SKU, name, price.
+              </p>
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium" htmlFor="sku-prefix">
+                Prefix
+              </label>
+              <Input
+                id="sku-prefix"
+                onChange={(event) => {
+                  setImportSkuPrefix(event.currentTarget.value);
+                  setImportResult(null);
+                }}
+                placeholder="PREFIX"
+                value={importSkuPrefix}
+              />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3">
+              <label className="text-sm font-medium" htmlFor="overwrite-existing">
+                Overwrite existing product data
+              </label>
+              <Switch
+                checked={importMode === "overwrite"}
+                id="overwrite-existing"
+                onCheckedChange={(checked) =>
+                  setImportMode(checked ? "overwrite" : "ignore")
+                }
+              />
+            </div>
+
+            {importFileName ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                <p className="font-medium">{importFileName}</p>
+                <p className="mt-1 text-slate-500">
+                  {importRows.length.toLocaleString()} valid product
+                  {importRows.length === 1 ? "" : "s"}
+                  {importSkippedRows > 0
+                    ? `, ${importSkippedRows.toLocaleString()} row${
+                        importSkippedRows === 1 ? "" : "s"
+                      } skipped`
+                    : ""}
+                </p>
+              </div>
+            ) : null}
+
+            {importError ? (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {importError}
+              </p>
+            ) : null}
+
+            {importResult ? (
+              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                Imported {importResult.inserted.toLocaleString()} new, overwrote{" "}
+                {importResult.overwritten.toLocaleString()}, ignored{" "}
+                {importResult.ignored.toLocaleString()}.
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setImportOpen(false)} variant="outline">
+              Close
+            </Button>
+            <Button
+              disabled={importRows.length === 0 || isImporting}
+              onClick={() => void handleImportProducts().catch(() => undefined)}
+            >
+              {isImporting ? "Importing..." : "Import products"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         onOpenChange={(open) => {

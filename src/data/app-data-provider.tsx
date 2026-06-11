@@ -16,6 +16,12 @@ type Settings = Omit<ConvexSettings, "duplicatePolicy"> & {
 type ShopifyConnection = FunctionReturnType<typeof convexApi.shopify.currentConnection>;
 
 type ProductStatus = Product["status"];
+type ImportedProduct = {
+  sku: string;
+  name: string;
+  price: number;
+};
+type ExistingEntryBehavior = "overwrite" | "ignore";
 
 type OptimisticState = {
   products: Product[];
@@ -59,6 +65,14 @@ type AppDataContextValue = {
     duplicatePolicy?: DuplicatePolicy;
   }) => Promise<null>;
   deleteProducts: (ids: Id<"products">[]) => Promise<{ deleted: number } | null>;
+  importProducts: (args: {
+    products: ImportedProduct[];
+    existingEntryBehavior: ExistingEntryBehavior;
+  }) => Promise<{
+    ignored: number;
+    inserted: number;
+    overwritten: number;
+  } | null>;
   assignProductsToGroup: (
     groupId: Id<"groups">,
     productIds: Id<"products">[],
@@ -141,6 +155,7 @@ export function AppDataProvider({
   const settings = useQuery(convexApi.settings.get, queryArgs);
   const shopifyConnection = useQuery(convexApi.shopify.currentConnection, queryArgs);
   const updateProductMutation = useMutation(convexApi.products.update);
+  const importProductsMutation = useMutation(convexApi.products.importProducts);
   const deleteProductsMutation = useMutation(convexApi.products.removeMany);
   const assignProductsMutation = useMutation(convexApi.groups.assignProducts);
   const publishProductsMutation = useMutation(
@@ -283,6 +298,16 @@ export function AppDataProvider({
               ? "Deleting product"
               : `Deleting ${ids.length.toLocaleString()} products`,
           productIds: ids,
+        }),
+      importProducts: (args) =>
+        runOptimistic({
+          apply: (state) => state,
+          commit: () =>
+            importProductsMutation({
+              ...args,
+              sessionToken: session.sessionToken,
+            }),
+          label: `Importing ${args.products.length.toLocaleString()} products`,
         }),
       assignProductsToGroup: (groupId, productIds) =>
         runOptimistic({
@@ -435,6 +460,7 @@ export function AppDataProvider({
       assignProductsMutation,
       createGroupMutation,
       deleteProductsMutation,
+      importProductsMutation,
       groups,
       listingJobs,
       lastMutationError,

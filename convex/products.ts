@@ -3,6 +3,12 @@ import { mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import { duplicatePolicy, productStatus } from "./schema";
 
+const importedProduct = v.object({
+  sku: v.string(),
+  name: v.string(),
+  price: v.number(),
+});
+
 const sampleProducts = [
   ["FP-1001", "Drive Belt, 3/8 in.", 12.99],
   ["FP-1002", "Brush Cap Assembly", 6.75],
@@ -77,6 +83,68 @@ export const update = mutation({
       duplicatePolicy: args.duplicatePolicy,
       updatedAt: Date.now(),
     });
+  },
+});
+
+export const importProducts = mutation({
+  args: {
+    sessionToken: v.string(),
+    products: v.array(importedProduct),
+    existingEntryBehavior: v.union(v.literal("overwrite"), v.literal("ignore")),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+
+    const settings = await ctx.db
+      .query("appSettings")
+      .withIndex("by_key", (q) => q.eq("key", "singleton"))
+      .unique();
+    const now = Date.now();
+    let inserted = 0;
+    let overwritten = 0;
+    let ignored = 0;
+
+    for (const product of args.products) {
+      const sku = product.sku.trim();
+      const name = product.name.trim();
+
+      if (!sku || !name || !Number.isFinite(product.price)) {
+        continue;
+      }
+
+      const existing = await ctx.db
+        .query("products")
+        .withIndex("by_sku", (q) => q.eq("sku", sku))
+        .first();
+
+      if (existing) {
+        if (args.existingEntryBehavior === "ignore") {
+          ignored += 1;
+          continue;
+        }
+
+        await ctx.db.patch(existing._id, {
+          name,
+          price: product.price,
+          updatedAt: now,
+        });
+        overwritten += 1;
+        continue;
+      }
+
+      await ctx.db.insert("products", {
+        sku,
+        name,
+        price: product.price,
+        status: "imported",
+        duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",
+        createdAt: now,
+        updatedAt: now,
+      });
+      inserted += 1;
+    }
+
+    return { ignored, inserted, overwritten };
   },
 });
 

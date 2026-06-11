@@ -60,6 +60,9 @@ export const convexApi = {
       typeof api.products.seedSampleProducts
     >("products.js:seedSampleProducts"),
     update: deployedFunction<typeof api.products.update>("products.js:update"),
+    importProducts: deployedFunction<typeof api.products.importProducts>(
+      "products.js:importProducts",
+    ),
     removeMany: deployedFunction<typeof api.products.removeMany>(
       "products.js:removeMany",
     ),
