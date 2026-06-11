@@ -116,12 +116,13 @@ export function GroupsPage() {
                     aria-label={`Assign count for ${group.name}`}
                     className="w-28"
                     min={1}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
                       setAssignCounts((current) => ({
                         ...current,
-                        [group._id]: event.currentTarget.value,
-                      }))
-                    }
+                        [group._id]: value,
+                      }));
+                    }}
                     type="number"
                     value={assignCounts[group._id] ?? "10"}
                   />
