@@ -1,0 +1,17 @@
+{
+  "name": "Flashpart",
+  "short_name": "Flashpart",
+  "description": "Capture tool part photos and queue Shopify draft listings.",
+  "start_url": "/products",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "48x48",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
