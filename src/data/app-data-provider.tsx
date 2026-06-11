@@ -8,8 +8,35 @@ import { convexApi } from "../lib/convex-api";
 type Product = FunctionReturnType<typeof convexApi.products.list>[number];
 type Group = FunctionReturnType<typeof convexApi.groups.list>[number];
 type ListingJob = FunctionReturnType<typeof convexApi.listingJobs.list>[number];
-type Settings = FunctionReturnType<typeof convexApi.settings.get>;
+type DuplicatePolicy = "blockExisting" | "updateExisting";
+type ConvexSettings = FunctionReturnType<typeof convexApi.settings.get>;
+type Settings = Omit<ConvexSettings, "duplicatePolicy"> & {
+  duplicatePolicy: DuplicatePolicy;
+};
 type ShopifyConnection = FunctionReturnType<typeof convexApi.shopify.currentConnection>;
+
+type ProductStatus = Product["status"];
+
+type OptimisticState = {
+  products: Product[];
+  groups: Group[];
+  listingJobs: ListingJob[];
+  settings: Settings | null;
+  shopifyConnection: ShopifyConnection;
+};
+
+type OptimisticOperation = {
+  id: string;
+  label: string;
+  productIds?: Id<"products">[];
+  apply: (state: OptimisticState) => OptimisticState;
+};
+
+type OptimisticMutationError = {
+  id: string;
+  label: string;
+  message: string;
+};
 
 type AppDataContextValue = {
   session: AuthSession;
@@ -19,16 +46,28 @@ type AppDataContextValue = {
   settings: Settings | null;
   shopifyConnection: ShopifyConnection;
   isLoading: boolean;
-  seedSampleProducts: () => Promise<{ inserted: number } | null>;
+  pendingOperationCount: number;
+  pendingOperations: Pick<OptimisticOperation, "id" | "label">[];
+  lastMutationError: OptimisticMutationError | null;
+  clearMutationError: () => void;
+  isProductPending: (id: Id<"products">) => boolean;
   updateProduct: (args: {
     id: Id<"products">;
     sku?: string;
     name?: string;
     price?: number;
-    duplicatePolicy?: "blockExisting" | "updateExisting";
+    duplicatePolicy?: DuplicatePolicy;
   }) => Promise<null>;
+  deleteProducts: (ids: Id<"products">[]) => Promise<{ deleted: number } | null>;
+  assignProductsToGroup: (
+    groupId: Id<"groups">,
+    productIds: Id<"products">[],
+  ) => Promise<{ assigned: number } | null>;
+  publishProducts: (
+    productIds: Id<"products">[],
+  ) => Promise<{ queued: number } | null>;
   setDuplicatePolicy: (
-    duplicatePolicy: "blockExisting" | "updateExisting",
+    duplicatePolicy: DuplicatePolicy,
   ) => Promise<{ updatedProducts: number } | null>;
   disconnectShopify: () => Promise<null>;
   createGroup: (name: string) => Promise<Id<"groups">>;
@@ -43,6 +82,47 @@ type AppDataContextValue = {
 };
 
 const AppDataContext = React.createContext<AppDataContextValue | null>(null);
+
+function messageFromError(error: unknown) {
+  return error instanceof Error ? error.message : "The change could not be saved.";
+}
+
+function patchProducts(
+  products: Product[],
+  ids: Id<"products">[],
+  patch: Partial<Product>,
+) {
+  const idSet = new Set(ids);
+  const updatedAt = Date.now();
+
+  return products.map((product) =>
+    idSet.has(product._id) ? { ...product, ...patch, updatedAt } : product,
+  );
+}
+
+function updateProductFields(
+  products: Product[],
+  id: Id<"products">,
+  patch: Partial<Product>,
+) {
+  return patchProducts(products, [id], patch);
+}
+
+function completedForGroups(product: Product) {
+  return product.status === "draftCreated" || product.status === "needsReview";
+}
+
+function recomputeGroupCounts(groups: Group[], products: Product[]) {
+  return groups.map((group) => {
+    const groupProducts = products.filter((product) => product.groupId === group._id);
+
+    return {
+      ...group,
+      productCount: groupProducts.length,
+      completedCount: groupProducts.filter(completedForGroups).length,
+    };
+  });
+}
 
 export function AppDataProvider({
   children,
@@ -60,10 +140,12 @@ export function AppDataProvider({
   const listingJobs = useQuery(convexApi.listingJobs.list, queryArgs);
   const settings = useQuery(convexApi.settings.get, queryArgs);
   const shopifyConnection = useQuery(convexApi.shopify.currentConnection, queryArgs);
-  const seedSampleProductsMutation = useMutation(
-    convexApi.products.seedSampleProducts,
-  );
   const updateProductMutation = useMutation(convexApi.products.update);
+  const deleteProductsMutation = useMutation(convexApi.products.removeMany);
+  const assignProductsMutation = useMutation(convexApi.groups.assignProducts);
+  const publishProductsMutation = useMutation(
+    convexApi.listingJobs.enqueueCreateDrafts,
+  );
   const setDuplicatePolicyMutation = useMutation(
     convexApi.settings.setDuplicatePolicy,
   );
@@ -73,50 +155,301 @@ export function AppDataProvider({
     convexApi.groups.assignFirstUngrouped,
   );
   const recordCaptureMutation = useMutation(convexApi.captures.record);
+  const operationIdRef = React.useRef(0);
+  const [optimisticOperations, setOptimisticOperations] = React.useState<
+    OptimisticOperation[]
+  >([]);
+  const [lastMutationError, setLastMutationError] =
+    React.useState<OptimisticMutationError | null>(null);
+  const baseData = React.useMemo<OptimisticState>(
+    () => ({
+      products: products ?? [],
+      groups: groups ?? [],
+      listingJobs: listingJobs ?? [],
+      settings: (settings as Settings | undefined) ?? null,
+      shopifyConnection: shopifyConnection ?? null,
+    }),
+    [groups, listingJobs, products, settings, shopifyConnection],
+  );
+  const optimisticData = React.useMemo<OptimisticState>(() => {
+    const patched = optimisticOperations.reduce(
+      (state, operation) => operation.apply(state),
+      baseData,
+    );
+
+    return {
+      ...patched,
+      groups: recomputeGroupCounts(patched.groups, patched.products),
+    };
+  }, [baseData, optimisticOperations]);
+  const pendingProductIds = React.useMemo(() => {
+    const ids = new Set<Id<"products">>();
+
+    for (const operation of optimisticOperations) {
+      for (const productId of operation.productIds ?? []) {
+        ids.add(productId);
+      }
+    }
+
+    return ids;
+  }, [optimisticOperations]);
+  const runOptimistic = React.useCallback(
+    async <T,>({
+      apply,
+      commit,
+      label,
+      productIds,
+    }: {
+      apply: (state: OptimisticState) => OptimisticState;
+      commit: () => Promise<T>;
+      label: string;
+      productIds?: Id<"products">[];
+    }) => {
+      const id = `optimistic-${Date.now()}-${operationIdRef.current++}`;
+
+      setLastMutationError(null);
+      setOptimisticOperations((current) => [
+        ...current,
+        { apply, id, label, productIds },
+      ]);
+
+      try {
+        return await commit();
+      } catch (error) {
+        setLastMutationError({
+          id,
+          label,
+          message: messageFromError(error),
+        });
+        throw error;
+      } finally {
+        setOptimisticOperations((current) =>
+          current.filter((operation) => operation.id !== id),
+        );
+      }
+    },
+    [],
+  );
 
   const value = React.useMemo<AppDataContextValue>(
     () => ({
-      products: products ?? [],
+      products: optimisticData.products,
       session,
-      groups: groups ?? [],
-      listingJobs: listingJobs ?? [],
-      settings: settings ?? null,
-      shopifyConnection: shopifyConnection ?? null,
+      groups: optimisticData.groups,
+      listingJobs: optimisticData.listingJobs,
+      settings: optimisticData.settings,
+      shopifyConnection: optimisticData.shopifyConnection,
       isLoading:
         products === undefined ||
         groups === undefined ||
         listingJobs === undefined ||
         settings === undefined ||
         shopifyConnection === undefined,
-      seedSampleProducts: () => seedSampleProductsMutation(queryArgs),
-      updateProduct: (args) =>
-        updateProductMutation({ ...args, sessionToken: session.sessionToken }),
+      pendingOperationCount: optimisticOperations.length,
+      pendingOperations: optimisticOperations.map(({ id, label }) => ({ id, label })),
+      lastMutationError,
+      clearMutationError: () => setLastMutationError(null),
+      isProductPending: (id) => pendingProductIds.has(id),
+      updateProduct: (args) => {
+        const { id, ...patch } = args;
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: updateProductFields(state.products, id, patch),
+          }),
+          commit: () =>
+            updateProductMutation({
+              ...args,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving product edit",
+          productIds: [id],
+        });
+      },
+      deleteProducts: (ids) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: state.products.filter((product) => !ids.includes(product._id)),
+          }),
+          commit: () =>
+            deleteProductsMutation({
+              ids,
+              sessionToken: session.sessionToken,
+            }),
+          label:
+            ids.length === 1
+              ? "Deleting product"
+              : `Deleting ${ids.length.toLocaleString()} products`,
+          productIds: ids,
+        }),
+      assignProductsToGroup: (groupId, productIds) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: state.products.map((product) =>
+              productIds.includes(product._id)
+                ? {
+                    ...product,
+                    groupId,
+                    status:
+                      product.status === "imported"
+                        ? ("grouped" satisfies ProductStatus)
+                        : product.status,
+                    updatedAt: Date.now(),
+                  }
+                : product,
+            ),
+          }),
+          commit: () =>
+            assignProductsMutation({
+              groupId,
+              productIds,
+              sessionToken: session.sessionToken,
+            }),
+          label:
+            productIds.length === 1
+              ? "Assigning product to group"
+              : `Assigning ${productIds.length.toLocaleString()} products to group`,
+          productIds,
+        }),
+      publishProducts: (productIds) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: patchProducts(state.products, productIds, {
+              status: "processing",
+            }),
+          }),
+          commit: () =>
+            publishProductsMutation({
+              productIds,
+              sessionToken: session.sessionToken,
+            }),
+          label:
+            productIds.length === 1
+              ? "Queuing Shopify draft"
+              : `Queuing ${productIds.length.toLocaleString()} Shopify drafts`,
+          productIds,
+        }),
       setDuplicatePolicy: (duplicatePolicy) =>
-        setDuplicatePolicyMutation({
-          duplicatePolicy,
-          sessionToken: session.sessionToken,
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: patchProducts(state.products, state.products.map((product) => product._id), {
+              duplicatePolicy,
+            }),
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  duplicatePolicy,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setDuplicatePolicyMutation({
+              duplicatePolicy,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving existing SKU behavior",
         }),
-      disconnectShopify: () => disconnectShopifyMutation(queryArgs),
+      disconnectShopify: () =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            shopifyConnection: null,
+          }),
+          commit: () => disconnectShopifyMutation(queryArgs),
+          label: "Disconnecting Shopify",
+        }),
       createGroup: (name) =>
-        createGroupMutation({ name, sessionToken: session.sessionToken }),
-      assignFirstUngrouped: (groupId, count) =>
-        assignFirstUngroupedMutation({
-          groupId,
-          count,
-          sessionToken: session.sessionToken,
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            groups: [
+              {
+                _creationTime: Date.now(),
+                _id: `optimistic-group-${operationIdRef.current}` as Id<"groups">,
+                completedCount: 0,
+                createdAt: Date.now(),
+                name,
+                productCount: 0,
+                status: "active",
+                updatedAt: Date.now(),
+              },
+              ...state.groups,
+            ],
+          }),
+          commit: () =>
+            createGroupMutation({ name, sessionToken: session.sessionToken }),
+          label: "Creating group",
         }),
+      assignFirstUngrouped: (groupId, count) => {
+        const candidateIds = optimisticData.products
+          .filter((product) => product.groupId === undefined)
+          .slice(0, Math.max(0, count))
+          .map((product) => product._id);
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: state.products.map((product) =>
+              candidateIds.includes(product._id)
+                ? {
+                    ...product,
+                    groupId,
+                    status: "grouped",
+                    updatedAt: Date.now(),
+                  }
+                : product,
+            ),
+          }),
+          commit: () =>
+            assignFirstUngroupedMutation({
+              groupId,
+              count,
+              sessionToken: session.sessionToken,
+            }),
+          label: `Assigning up to ${count.toLocaleString()} ungrouped products`,
+          productIds: candidateIds,
+        });
+      },
       recordCapture: (args) =>
-        recordCaptureMutation({ ...args, sessionToken: session.sessionToken }),
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: updateProductFields(state.products, args.productId, {
+              status: "captured",
+            }),
+          }),
+          commit: () =>
+            recordCaptureMutation({ ...args, sessionToken: session.sessionToken }),
+          label: "Recording capture",
+          productIds: [args.productId],
+        }),
     }),
     [
       assignFirstUngroupedMutation,
+      assignProductsMutation,
       createGroupMutation,
+      deleteProductsMutation,
       groups,
       listingJobs,
+      lastMutationError,
+      optimisticData.groups,
+      optimisticData.listingJobs,
+      optimisticData.products,
+      optimisticData.settings,
+      optimisticData.shopifyConnection,
+      optimisticOperations,
+      pendingProductIds,
       products,
+      publishProductsMutation,
       queryArgs,
       recordCaptureMutation,
-      seedSampleProductsMutation,
+      runOptimistic,
       session.sessionToken,
       session,
       setDuplicatePolicyMutation,

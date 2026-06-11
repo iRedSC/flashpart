@@ -7,16 +7,17 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { RefreshCw, Rows3 } from "lucide-react";
+import { FolderPlus, RefreshCw, Send, Trash2 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "../components/ui/card";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
 import {
@@ -28,6 +29,7 @@ import {
 } from "../components/ui/table";
 import { useAppData } from "../data/app-data-provider";
 import { cn } from "../lib/utils";
+import type { Id } from "../../convex/_generated/dataModel";
 
 type Product = ReturnType<typeof useAppData>["products"][number];
 
@@ -43,23 +45,21 @@ const statusTone: Record<Product["status"], "default" | "secondary" | "destructi
   needsReview: "outline",
 };
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(value);
-}
-
 export function ProductsPage() {
   const {
+    assignProductsToGroup,
+    deleteProducts,
     groups,
+    isProductPending,
     isLoading,
     products,
-    seedSampleProducts,
+    publishProducts,
     updateProduct,
   } = useAppData();
   const parentRef = React.useRef<HTMLDivElement>(null);
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
+  const [addToGroupOpen, setAddToGroupOpen] = React.useState(false);
+  const [selectedGroupId, setSelectedGroupId] = React.useState<Id<"groups"> | "">("");
   const groupById = React.useMemo(
     () => new Map(groups.map((group) => [group._id, group.name])),
     [groups],
@@ -101,7 +101,7 @@ export function ProductsPage() {
                 void updateProduct({
                   id: row.original._id,
                   sku: event.currentTarget.value,
-                });
+                }).catch(() => undefined);
               }
             }}
           />
@@ -119,7 +119,7 @@ export function ProductsPage() {
                 void updateProduct({
                   id: row.original._id,
                   name: event.currentTarget.value,
-                });
+                }).catch(() => undefined);
               }
             }}
           />
@@ -140,7 +140,7 @@ export function ProductsPage() {
                 void updateProduct({
                   id: row.original._id,
                   price,
-                });
+                }).catch(() => undefined);
               }
             }}
           />
@@ -149,9 +149,16 @@ export function ProductsPage() {
       columnHelper.accessor("status", {
         header: "Status",
         cell: ({ row }) => (
-          <Badge variant={statusTone[row.original.status]}>
-            {row.original.status}
-          </Badge>
+          <div className="flex flex-wrap gap-1">
+            <Badge variant={statusTone[row.original.status]}>
+              {row.original.status}
+            </Badge>
+            {isProductPending(row.original._id) ? (
+              <Badge className="border-amber-300 text-amber-800" variant="outline">
+                saving
+              </Badge>
+            ) : null}
+          </div>
         ),
       }),
       columnHelper.display({
@@ -175,7 +182,7 @@ export function ProductsPage() {
           ),
       }),
     ],
-    [groupById, updateProduct],
+    [groupById, isProductPending, updateProduct],
   );
   const table = useReactTable({
     columns,
@@ -195,114 +202,193 @@ export function ProductsPage() {
     getScrollElement: () => parentRef.current,
     overscan: 12,
   });
-  const groupedCount = products.filter((product) => product.groupId).length;
-  const totalValue = products.reduce((total, product) => total + product.price, 0);
-  const selectedCount = table.getSelectedRowModel().rows.length;
+  const selectedRows = table.getSelectedRowModel().rows;
+  const selectedCount = selectedRows.length;
+  const selectedProductIds = selectedRows.map((row) => row.original._id);
+  const hasSelection = selectedCount > 0;
+
+  function clearSelection() {
+    setRowSelection({});
+  }
+
+  async function handleDeleteSelected() {
+    if (selectedProductIds.length === 0) {
+      return;
+    }
+
+    await deleteProducts(selectedProductIds);
+    clearSelection();
+  }
+
+  async function handleAddToGroup() {
+    if (!selectedGroupId || selectedProductIds.length === 0) {
+      return;
+    }
+
+    await assignProductsToGroup(selectedGroupId, selectedProductIds);
+    setAddToGroupOpen(false);
+    setSelectedGroupId("");
+    clearSelection();
+  }
+
+  async function handlePublishSelected() {
+    if (selectedProductIds.length === 0) {
+      return;
+    }
+
+    await publishProducts(selectedProductIds);
+    clearSelection();
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-semibold tracking-tight">Products</h2>
-          <p className="text-slate-500">
-            All imported vendor rows. Edit SKU, name, and price.
-          </p>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          {hasSelection ? (
+            <span>{selectedCount.toLocaleString()} selected</span>
+          ) : null}
+          {isLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
         </div>
         <div className="flex gap-2">
-          <Button onClick={() => void seedSampleProducts()} variant="outline">
-            <Rows3 className="h-4 w-4" />
-            Seed sample rows
+          <Button
+            disabled={!hasSelection}
+            onClick={() => void handleDeleteSelected().catch(() => undefined)}
+            variant="destructive"
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </Button>
+          <Button
+            disabled={!hasSelection}
+            onClick={() => setAddToGroupOpen(true)}
+            variant="outline"
+          >
+            <FolderPlus className="h-4 w-4" />
+            Add to group
+          </Button>
+          <Button
+            disabled={!hasSelection}
+            onClick={() => void handlePublishSelected().catch(() => undefined)}
+          >
+            <Send className="h-4 w-4" />
+            Publish
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <SummaryCard label="Products" value={products.length.toLocaleString()} />
-        <SummaryCard label="Grouped" value={groupedCount.toLocaleString()} />
-        <SummaryCard label="Imported value" value={formatCurrency(totalValue)} />
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Product table
-            {isLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
-          </CardTitle>
-          <CardDescription>
-            Virtualized rows keep the table responsive as imports grow.
-            {" "}
-            {selectedCount.toLocaleString()} selected.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div
-            className="h-[560px] overflow-auto rounded-md border border-slate-200"
-            ref={parentRef}
-          >
-            <table className="grid w-full min-w-[1040px] text-sm">
-              <TableHeader className="sticky top-0 z-10 grid bg-white">
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <TableRow
-                    className="grid grid-cols-[48px_170px_1.5fr_140px_150px_160px_170px]"
-                    key={headerGroup.id}
-                  >
-                    {headerGroup.headers.map((header) => (
-                      <TableHead key={header.id}>
-                        {header.isPlaceholder
-                          ? null
-                          : flexRender(
-                              header.column.columnDef.header,
-                              header.getContext(),
-                            )}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableHeader>
-              <TableBody
-                className="relative grid"
-                style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
-              >
-                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                  const row = rows[virtualRow.index];
-
-                  return (
-                    <TableRow
-                      className={cn(
-                        "absolute left-0 grid w-full grid-cols-[48px_170px_1.5fr_140px_150px_160px_170px]",
-                        virtualRow.index % 2 === 0 && "bg-slate-50/50",
-                      )}
-                      data-index={virtualRow.index}
-                      key={row.id}
-                      style={{ transform: `translateY(${virtualRow.start}px)` }}
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <TableCell key={cell.id}>
-                          {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext(),
-                          )}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </table>
+      <Dialog
+        onOpenChange={(open) => {
+          setAddToGroupOpen(open);
+          if (!open) {
+            setSelectedGroupId("");
+          }
+        }}
+        open={addToGroupOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add to group</DialogTitle>
+            <DialogDescription>
+              Assign {selectedCount.toLocaleString()} selected product
+              {selectedCount === 1 ? "" : "s"} to a group.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {groups.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                No groups yet. Create one on the Groups page first.
+              </p>
+            ) : (
+              groups.map((group) => (
+                <button
+                  className={cn(
+                    "rounded-lg border px-4 py-3 text-left text-sm transition-colors",
+                    selectedGroupId === group._id
+                      ? "border-slate-950 bg-slate-50"
+                      : "border-slate-200 hover:bg-slate-50",
+                  )}
+                  key={group._id}
+                  onClick={() => setSelectedGroupId(group._id)}
+                  type="button"
+                >
+                  <span className="font-medium">{group.name}</span>
+                  <span className="mt-1 block text-slate-500">
+                    {group.productCount.toLocaleString()} products
+                  </span>
+                </button>
+              ))
+            )}
           </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+          <DialogFooter>
+            <Button onClick={() => setAddToGroupOpen(false)} variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={!selectedGroupId || groups.length === 0}
+              onClick={() => void handleAddToGroup().catch(() => undefined)}
+            >
+              Add to group
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardDescription>{label}</CardDescription>
-        <CardTitle className="text-2xl">{value}</CardTitle>
-      </CardHeader>
-    </Card>
+      <div
+        className="h-[560px] overflow-auto rounded-md border border-slate-200"
+        ref={parentRef}
+      >
+        <table className="grid w-full min-w-[1040px] text-sm">
+          <TableHeader className="sticky top-0 z-10 grid bg-white">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow
+                className="grid grid-cols-[48px_170px_1.5fr_140px_150px_160px_170px]"
+                key={headerGroup.id}
+              >
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id}>
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(
+                          header.column.columnDef.header,
+                          header.getContext(),
+                        )}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody
+            className="relative grid"
+            style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+          >
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const row = rows[virtualRow.index];
+
+              return (
+                <TableRow
+                  className={cn(
+                    "absolute left-0 grid w-full grid-cols-[48px_170px_1.5fr_140px_150px_160px_170px]",
+                    virtualRow.index % 2 === 0 && "bg-slate-50/50",
+                    isProductPending(row.original._id) && "bg-amber-50/70",
+                  )}
+                  data-index={virtualRow.index}
+                  key={row.id}
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </table>
+      </div>
+    </div>
   );
 }

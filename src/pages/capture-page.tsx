@@ -116,7 +116,10 @@ export function CapturePage() {
               </div>
             </div>
 
-            <form className="space-y-4" onSubmit={handleCapture}>
+            <form
+              className="space-y-4"
+              onSubmit={(event) => void handleCapture(event).catch(() => undefined)}
+            >
               <Input
                 accept="image/*"
                 capture="environment"

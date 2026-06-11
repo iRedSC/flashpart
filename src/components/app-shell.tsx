@@ -1,8 +1,9 @@
-import { Boxes, Camera, ListChecks, Settings } from "lucide-react";
+import { AlertTriangle, Boxes, Camera, ListChecks, Settings, X } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import type { AuthSession } from "../lib/auth-session";
+import { useAppData } from "../data/app-data-provider";
 
 const navigation = [
   { to: "/products", label: "Products", icon: Boxes },
@@ -16,6 +17,8 @@ type AppShellProps = {
 };
 
 export function AppShell({ onSignOut, session }: AppShellProps) {
+  const { clearMutationError, lastMutationError } = useAppData();
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <header className="border-b border-slate-200 bg-white">
@@ -57,6 +60,28 @@ export function AppShell({ onSignOut, session }: AppShellProps) {
           </div>
         </div>
       </header>
+      {lastMutationError ? (
+        <div className="border-b border-red-200 bg-red-50">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3 text-sm text-red-900">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>
+                {lastMutationError.label} failed. The UI was reverted.{" "}
+                {lastMutationError.message}
+              </span>
+            </div>
+            <Button
+              aria-label="Dismiss mutation error"
+              onClick={clearMutationError}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <main className="mx-auto max-w-7xl px-6 py-6">
         <Outlet />
       </main>

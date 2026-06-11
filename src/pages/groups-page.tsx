@@ -27,8 +27,12 @@ export function GroupsPage() {
       return;
     }
 
-    await createGroup(name.trim());
-    setName("");
+    try {
+      await createGroup(name.trim());
+      setName("");
+    } catch {
+      // The shared data provider reports the error and reverts optimistic state.
+    }
   }
 
   function countForGroup(groupId: Id<"groups">) {
@@ -126,7 +130,7 @@ export function GroupsPage() {
                       void assignFirstUngrouped(
                         group._id,
                         Number.isFinite(assignCount) ? assignCount : 0,
-                      )
+                      ).catch(() => undefined)
                     }
                     variant="outline"
                   >

@@ -71,6 +71,36 @@ export const assignFirstUngrouped = mutation({
   },
 });
 
+export const assignProducts = mutation({
+  args: {
+    sessionToken: v.string(),
+    groupId: v.id("groups"),
+    productIds: v.array(v.id("products")),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const now = Date.now();
+    let assigned = 0;
+
+    for (const productId of args.productIds) {
+      const product = await ctx.db.get(productId);
+
+      if (!product) {
+        continue;
+      }
+
+      await ctx.db.patch(productId, {
+        groupId: args.groupId,
+        status: product.status === "imported" ? "grouped" : product.status,
+        updatedAt: now,
+      });
+      assigned += 1;
+    }
+
+    return { assigned };
+  },
+});
+
 export const nextProduct = query({
   args: {
     sessionToken: v.string(),

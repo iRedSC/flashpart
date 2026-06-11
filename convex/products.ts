@@ -80,6 +80,28 @@ export const update = mutation({
   },
 });
 
+export const removeMany = mutation({
+  args: {
+    sessionToken: v.string(),
+    ids: v.array(v.id("products")),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    let deleted = 0;
+
+    for (const id of args.ids) {
+      const product = await ctx.db.get(id);
+
+      if (product) {
+        await ctx.db.delete(id);
+        deleted += 1;
+      }
+    }
+
+    return { deleted };
+  },
+});
+
 export const setDuplicatePolicyForAll = mutation({
   args: {
     sessionToken: v.string(),

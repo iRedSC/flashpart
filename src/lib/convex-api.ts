@@ -44,9 +44,15 @@ export const convexApi = {
     assignFirstUngrouped: deployedFunction<
       typeof api.groups.assignFirstUngrouped
     >("groups.js:assignFirstUngrouped"),
+    assignProducts: deployedFunction<typeof api.groups.assignProducts>(
+      "groups.js:assignProducts",
+    ),
   },
   listingJobs: {
     list: deployedFunction<typeof api.listingJobs.list>("listingJobs.js:list"),
+    enqueueCreateDrafts: deployedFunction<
+      typeof api.listingJobs.enqueueCreateDrafts
+    >("listingJobs.js:enqueueCreateDrafts"),
   },
   products: {
     list: deployedFunction<typeof api.products.list>("products.js:list"),
@@ -54,6 +60,9 @@ export const convexApi = {
       typeof api.products.seedSampleProducts
     >("products.js:seedSampleProducts"),
     update: deployedFunction<typeof api.products.update>("products.js:update"),
+    removeMany: deployedFunction<typeof api.products.removeMany>(
+      "products.js:removeMany",
+    ),
   },
   settings: {
     get: deployedFunction<typeof api.settings.get>("settings.js:get"),

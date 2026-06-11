@@ -10,6 +10,44 @@ export const list = query({
   },
 });
 
+export const enqueueCreateDrafts = mutation({
+  args: {
+    sessionToken: v.string(),
+    productIds: v.array(v.id("products")),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const now = Date.now();
+    let queued = 0;
+
+    for (const productId of args.productIds) {
+      const product = await ctx.db.get(productId);
+
+      if (!product || product.shopifyProductId) {
+        continue;
+      }
+
+      await ctx.db.insert("listingJobs", {
+        productId,
+        groupId: product.groupId,
+        captureId: product.captureId,
+        type: "createShopifyDraft",
+        status: "queued",
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.patch(productId, {
+        status: "processing",
+        updatedAt: now,
+      });
+      queued += 1;
+    }
+
+    return { queued };
+  },
+});
+
 export const markRunning = mutation({
   args: {
     sessionToken: v.string(),

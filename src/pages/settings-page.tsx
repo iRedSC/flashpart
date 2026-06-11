@@ -104,7 +104,7 @@ export function SettingsPage() {
               onCheckedChange={(checked) =>
                 void setDuplicatePolicy(
                   checked ? "updateExisting" : "blockExisting",
-                )
+                ).catch(() => undefined)
               }
             />
           </div>
@@ -154,7 +154,7 @@ export function SettingsPage() {
                 {isConnecting ? "Connecting..." : "Continue to Shopify"}
               </Button>
               <Button
-                onClick={() => void disconnectShopify()}
+                onClick={() => void disconnectShopify().catch(() => undefined)}
                 disabled={!shopifyConnection}
                 type="button"
                 variant="outline"
