@@ -1,10 +1,11 @@
-import { Boxes, Camera, ListChecks } from "lucide-react";
+import { Boxes, Camera, ListChecks, Settings } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { cn } from "../lib/utils";
 
 const navigation = [
   { to: "/products", label: "Products", icon: Boxes },
   { to: "/groups", label: "Groups", icon: ListChecks },
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function AppShell() {

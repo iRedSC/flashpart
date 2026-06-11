@@ -18,6 +18,33 @@ export const duplicatePolicy = v.union(
 );
 
 export default defineSchema({
+  appSettings: defineTable({
+    key: v.literal("singleton"),
+    duplicatePolicy,
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
+
+  shopifyConnections: defineTable({
+    shopDomain: v.string(),
+    accessToken: v.string(),
+    scopes: v.array(v.string()),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
+  })
+    .index("by_shop_domain", ["shopDomain"])
+    .index("by_active", ["isActive"]),
+
+  shopifyOAuthStates: defineTable({
+    shopDomain: v.string(),
+    state: v.string(),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_state", ["state"])
+    .index("by_shop_domain", ["shopDomain"]),
+
   products: defineTable({
     sku: v.string(),
     name: v.string(),

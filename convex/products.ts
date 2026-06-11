@@ -32,6 +32,10 @@ export const seedSampleProducts = mutation({
     }
 
     const now = Date.now();
+    const settings = await ctx.db
+      .query("appSettings")
+      .withIndex("by_key", (q) => q.eq("key", "singleton"))
+      .unique();
 
     for (const [sku, name, price] of sampleProducts) {
       await ctx.db.insert("products", {
@@ -39,7 +43,7 @@ export const seedSampleProducts = mutation({
         name,
         price,
         status: "imported",
-        duplicatePolicy: "blockExisting",
+        duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",
         createdAt: now,
         updatedAt: now,
       });

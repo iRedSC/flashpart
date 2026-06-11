@@ -10,8 +10,12 @@
 
 import type * as captures from "../captures.js";
 import type * as groups from "../groups.js";
+import type * as http from "../http.js";
 import type * as listingJobs from "../listingJobs.js";
 import type * as products from "../products.js";
+import type * as settings from "../settings.js";
+import type * as shopify from "../shopify.js";
+import type * as shopifyModel from "../shopifyModel.js";
 
 import type {
   ApiFromModules,
@@ -22,8 +26,12 @@ import type {
 declare const fullApi: ApiFromModules<{
   captures: typeof captures;
   groups: typeof groups;
+  http: typeof http;
   listingJobs: typeof listingJobs;
   products: typeof products;
+  settings: typeof settings;
+  shopify: typeof shopify;
+  shopifyModel: typeof shopifyModel;
 }>;
 
 /**

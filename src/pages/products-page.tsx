@@ -3,6 +3,7 @@ import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
+  type RowSelectionState,
   useReactTable,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -16,6 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
+import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
 import {
   TableBody,
@@ -54,16 +56,39 @@ export function ProductsPage() {
     isLoading,
     products,
     seedSampleProducts,
-    setDuplicatePolicyForAll,
     updateProduct,
   } = useAppData();
   const parentRef = React.useRef<HTMLDivElement>(null);
+  const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const groupById = React.useMemo(
     () => new Map(groups.map((group) => [group._id, group.name])),
     [groups],
   );
   const columns = React.useMemo(
     () => [
+      columnHelper.display({
+        id: "select",
+        header: ({ table }) => (
+          <Checkbox
+            aria-label="Select all products"
+            checked={
+              table.getIsAllRowsSelected()
+                ? true
+                : table.getIsSomeRowsSelected()
+                  ? "indeterminate"
+                  : false
+            }
+            onCheckedChange={(value) => table.toggleAllRowsSelected(!!value)}
+          />
+        ),
+        cell: ({ row }) => (
+          <Checkbox
+            aria-label={`Select ${row.original.sku}`}
+            checked={row.getIsSelected()}
+            onCheckedChange={(value) => row.toggleSelected(!!value)}
+          />
+        ),
+      }),
       columnHelper.accessor("sku", {
         header: "SKU",
         cell: ({ row }) => (
@@ -129,24 +154,6 @@ export function ProductsPage() {
           </Badge>
         ),
       }),
-      columnHelper.accessor("duplicatePolicy", {
-        header: "Existing SKU",
-        cell: ({ row }) => (
-          <select
-            className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm"
-            value={row.original.duplicatePolicy}
-            onChange={(event) => {
-              void updateProduct({
-                duplicatePolicy: event.currentTarget.value as Product["duplicatePolicy"],
-                id: row.original._id,
-              });
-            }}
-          >
-            <option value="blockExisting">Block</option>
-            <option value="updateExisting">Update</option>
-          </select>
-        ),
-      }),
       columnHelper.display({
         id: "group",
         header: "Group",
@@ -173,7 +180,13 @@ export function ProductsPage() {
   const table = useReactTable({
     columns,
     data: products,
+    enableRowSelection: true,
     getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row._id,
+    onRowSelectionChange: setRowSelection,
+    state: {
+      rowSelection,
+    },
   });
   const rows = table.getRowModel().rows;
   const rowVirtualizer = useVirtualizer({
@@ -184,6 +197,7 @@ export function ProductsPage() {
   });
   const groupedCount = products.filter((product) => product.groupId).length;
   const totalValue = products.reduce((total, product) => total + product.price, 0);
+  const selectedCount = table.getSelectedRowModel().rows.length;
 
   return (
     <div className="space-y-6">
@@ -191,25 +205,13 @@ export function ProductsPage() {
         <div>
           <h2 className="text-3xl font-semibold tracking-tight">Products</h2>
           <p className="text-slate-500">
-            All imported vendor rows. Edit SKU, name, price, and duplicate behavior.
+            All imported vendor rows. Edit SKU, name, and price.
           </p>
         </div>
         <div className="flex gap-2">
           <Button onClick={() => void seedSampleProducts()} variant="outline">
             <Rows3 className="h-4 w-4" />
             Seed sample rows
-          </Button>
-          <Button
-            onClick={() => void setDuplicatePolicyForAll("blockExisting")}
-            variant="secondary"
-          >
-            Block existing SKUs
-          </Button>
-          <Button
-            onClick={() => void setDuplicatePolicyForAll("updateExisting")}
-            variant="secondary"
-          >
-            Update existing SKUs
           </Button>
         </div>
       </div>
@@ -228,6 +230,8 @@ export function ProductsPage() {
           </CardTitle>
           <CardDescription>
             Virtualized rows keep the table responsive as imports grow.
+            {" "}
+            {selectedCount.toLocaleString()} selected.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -239,7 +243,7 @@ export function ProductsPage() {
               <TableHeader className="sticky top-0 z-10 grid bg-white">
                 {table.getHeaderGroups().map((headerGroup) => (
                   <TableRow
-                    className="grid grid-cols-[170px_1.5fr_140px_150px_150px_160px_170px]"
+                    className="grid grid-cols-[48px_170px_1.5fr_140px_150px_160px_170px]"
                     key={headerGroup.id}
                   >
                     {headerGroup.headers.map((header) => (
@@ -265,7 +269,7 @@ export function ProductsPage() {
                   return (
                     <TableRow
                       className={cn(
-                        "absolute left-0 grid w-full grid-cols-[170px_1.5fr_140px_150px_150px_160px_170px]",
+                        "absolute left-0 grid w-full grid-cols-[48px_170px_1.5fr_140px_150px_160px_170px]",
                         virtualRow.index % 2 === 0 && "bg-slate-50/50",
                       )}
                       data-index={virtualRow.index}

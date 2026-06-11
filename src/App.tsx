@@ -5,6 +5,7 @@ import { AppDataProvider } from "./data/app-data-provider";
 import { CapturePage } from "./pages/capture-page";
 import { GroupsPage } from "./pages/groups-page";
 import { ProductsPage } from "./pages/products-page";
+import { SettingsPage } from "./pages/settings-page";
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL;
 
@@ -24,6 +25,7 @@ export function App() {
               <Route index element={<Navigate replace to="/products" />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/groups" element={<GroupsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
               <Route path="/capture/:groupId" element={<CapturePage />} />
             </Route>
           </Routes>
