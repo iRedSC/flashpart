@@ -1,3 +1,4 @@
+import * as React from "react";
 import { Boxes, ListChecks, LogOut, Settings } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Button } from "../ui/button";
@@ -20,6 +21,25 @@ export function MobileShell({ onSignOut }: MobileShellProps) {
   const location = useLocation();
   const isCaptureRoute = location.pathname.startsWith("/capture/");
 
+  // Keep viewport scroll locked so rubber-banding only happens inside page scroll areas.
+  React.useEffect(() => {
+    if (isCaptureRoute) {
+      return;
+    }
+
+    const { documentElement: html, body } = document;
+    const previousHtmlOverflow = html.style.overflow;
+    const previousBodyOverflow = body.style.overflow;
+
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+
+    return () => {
+      html.style.overflow = previousHtmlOverflow;
+      body.style.overflow = previousBodyOverflow;
+    };
+  }, [isCaptureRoute]);
+
   // Capture is a full-screen, single-task flow: no header, no tab bar.
   if (isCaptureRoute) {
     return (
@@ -32,7 +52,7 @@ export function MobileShell({ onSignOut }: MobileShellProps) {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-slate-50 text-slate-950">
-      <header className="fixed inset-x-0 top-0 z-20 border-b border-slate-200 bg-white pt-[env(safe-area-inset-top)]">
+      <header className="z-20 shrink-0 border-b border-slate-200 bg-white pt-[env(safe-area-inset-top)]">
         <div className="flex h-14 items-center justify-between px-4">
           <div className="flex items-center gap-2">
             <LogoMark className="h-7 w-7" />
@@ -49,15 +69,13 @@ export function MobileShell({ onSignOut }: MobileShellProps) {
           </Button>
         </div>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col pt-[calc(3.5rem+env(safe-area-inset-top))]">
-        <MutationErrorBanner />
-        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none px-4 py-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))]">
-          <Outlet />
-        </main>
-      </div>
+      <MutationErrorBanner />
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4">
+        <Outlet />
+      </main>
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+        className="z-20 shrink-0 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
       >
         <div className="grid h-16 grid-cols-3">
           {tabs.map((tab) => (
