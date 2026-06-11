@@ -1,9 +1,10 @@
-import { AlertTriangle, Boxes, Camera, ListChecks, Settings, X } from "lucide-react";
+import { Boxes, ListChecks, Settings } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Button } from "./ui/button";
-import { cn } from "../lib/utils";
-import type { AuthSession } from "../lib/auth-session";
-import { useAppData } from "../data/app-data-provider";
+import { Button } from "../ui/button";
+import { LogoMark } from "../logo-mark";
+import { cn } from "../../lib/utils";
+import type { AuthSession } from "../../lib/auth-session";
+import { MutationErrorBanner } from "./mutation-error-banner";
 
 const navigation = [
   { to: "/products", label: "Products", icon: Boxes },
@@ -11,21 +12,19 @@ const navigation = [
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-type AppShellProps = {
+type DesktopShellProps = {
   session: AuthSession;
   onSignOut: () => void;
 };
 
-export function AppShell({ onSignOut, session }: AppShellProps) {
-  const { clearMutationError, lastMutationError } = useAppData();
-
+export function DesktopShell({ onSignOut, session }: DesktopShellProps) {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
             <div className="flex items-center gap-2">
-              <Camera className="h-6 w-6" />
+              <LogoMark className="h-7 w-7" />
               <h1 className="text-xl font-semibold tracking-tight">Flashpart</h1>
             </div>
             <p className="text-sm text-slate-500">
@@ -60,28 +59,7 @@ export function AppShell({ onSignOut, session }: AppShellProps) {
           </div>
         </div>
       </header>
-      {lastMutationError ? (
-        <div className="border-b border-red-200 bg-red-50">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3 text-sm text-red-900">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              <span>
-                {lastMutationError.label} failed. The UI was reverted.{" "}
-                {lastMutationError.message}
-              </span>
-            </div>
-            <Button
-              aria-label="Dismiss mutation error"
-              onClick={clearMutationError}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      ) : null}
+      <MutationErrorBanner />
       <main className="mx-auto max-w-7xl px-6 py-6">
         <Outlet />
       </main>

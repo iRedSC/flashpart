@@ -37,6 +37,9 @@ export const convexApi = {
   },
   captures: {
     record: deployedFunction<typeof api.captures.record>("captures.js:record"),
+    generateUploadUrl: deployedFunction<typeof api.captures.generateUploadUrl>(
+      "captures.js:generateUploadUrl",
+    ),
   },
   groups: {
     list: deployedFunction<typeof api.groups.list>("groups.js:list"),

@@ -73,8 +73,10 @@ export function SettingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-3xl font-semibold tracking-tight">Settings</h2>
-        <p className="text-slate-500">
+        <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
+          Settings
+        </h2>
+        <p className="text-sm text-slate-500 md:text-base">
           Store-wide MVP controls for duplicate SKUs and Shopify connection state.
         </p>
       </div>

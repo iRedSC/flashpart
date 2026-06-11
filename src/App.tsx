@@ -1,8 +1,8 @@
 import { ConvexProvider, ConvexReactClient } from "convex/react";
 import * as React from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthPage } from "./components/auth/auth-page";
-import { AppShell } from "./components/app-shell";
+import { AppShell, RootRedirect } from "./components/shell/app-shell";
 import { AppDataProvider } from "./data/app-data-provider";
 import {
   clearStoredSession,
@@ -41,7 +41,7 @@ export function App() {
               <Route
                 element={<AppShell onSignOut={handleSignOut} session={session} />}
               >
-                <Route index element={<Navigate replace to="/products" />} />
+                <Route index element={<RootRedirect />} />
                 <Route path="/products" element={<ProductsPage />} />
                 <Route path="/groups" element={<GroupsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />

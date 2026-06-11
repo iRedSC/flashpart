@@ -411,7 +411,11 @@ export function ProductsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
+      <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 md:hidden">
+        Products is a desktop tool. Swipe the table sideways here; photo capture
+        lives in Groups.
+      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2 md:gap-4">
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Button
             className="text-slate-950"
@@ -426,7 +430,7 @@ export function ProductsPage() {
           ) : null}
           {isLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             disabled={!hasSelection}
             onClick={() => void handleDeleteSelected().catch(() => undefined)}

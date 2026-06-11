@@ -1,5 +1,13 @@
-const CACHE_NAME = "flashpart-shell-v1";
-const APP_SHELL = ["/", "/products", "/groups", "/manifest.webmanifest"];
+const CACHE_NAME = "flashpart-shell-v2";
+const APP_SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/favicon.svg",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/icon-maskable-512.png",
+  "/icons/apple-touch-icon.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -23,6 +31,13 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
+    return;
+  }
+
+  // SPA navigations (including /groups and /capture/*) fall back to the
+  // cached shell so the installed app still opens offline.
+  if (event.request.mode === "navigate") {
+    event.respondWith(fetch(event.request).catch(() => caches.match("/")));
     return;
   }
 

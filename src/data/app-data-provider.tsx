@@ -88,9 +88,11 @@ type AppDataContextValue = {
   assignFirstUngrouped: (
     groupId: Id<"groups">,
   ) => Promise<{ assigned: number } | null>;
+  uploadCaptureImage: (file: File) => Promise<Id<"_storage">>;
   recordCapture: (args: {
     productId: Id<"products">;
     groupId: Id<"groups">;
+    rawImageStorageId?: Id<"_storage">;
   }) => Promise<Id<"captures">>;
 };
 
@@ -169,6 +171,9 @@ export function AppDataProvider({
     convexApi.groups.assignFirstUngrouped,
   );
   const recordCaptureMutation = useMutation(convexApi.captures.record);
+  const generateUploadUrlMutation = useMutation(
+    convexApi.captures.generateUploadUrl,
+  );
   const operationIdRef = React.useRef(0);
   const [optimisticOperations, setOptimisticOperations] = React.useState<
     OptimisticOperation[]
@@ -438,6 +443,26 @@ export function AppDataProvider({
           productIds: candidateIds,
         });
       },
+      uploadCaptureImage: async (file) => {
+        const uploadUrl = await generateUploadUrlMutation({
+          sessionToken: session.sessionToken,
+        });
+        const response = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+        });
+
+        if (!response.ok) {
+          throw new Error("Photo upload failed. Check your connection and retry.");
+        }
+
+        const { storageId } = (await response.json()) as {
+          storageId: Id<"_storage">;
+        };
+
+        return storageId;
+      },
       recordCapture: (args) =>
         runOptimistic({
           apply: (state) => ({
@@ -467,6 +492,7 @@ export function AppDataProvider({
       optimisticData.settings,
       optimisticData.shopifyConnection,
       optimisticOperations,
+      generateUploadUrlMutation,
       pendingProductIds,
       products,
       publishProductsMutation,
