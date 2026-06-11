@@ -4,7 +4,6 @@ import {
   Check,
   CheckCircle2,
   ChevronLeft,
-  Loader2,
   RefreshCcw,
 } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
@@ -27,17 +26,15 @@ const INLINE_CAMERA_UNAVAILABLE =
 
 export function CapturePage() {
   const { groupId } = useParams();
-  const { groups, products, recordCapture, uploadCaptureImage } = useAppData();
+  const { groups, products, submitCapture } = useAppData();
   const isMobile = useIsMobile();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = React.useRef<MediaStream | null>(null);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [isCameraReady, setIsCameraReady] = React.useState(false);
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [cameraError, setCameraError] = React.useState<string | null>(null);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
-  const [uploadStage, setUploadStage] = React.useState<string | null>(null);
   const previewUrl = React.useMemo(
     () => (selectedFile ? URL.createObjectURL(selectedFile) : null),
     [selectedFile],
@@ -149,49 +146,29 @@ export function CapturePage() {
     isMobile && "min-h-dvh px-4 pb-[env(safe-area-inset-bottom)]",
   );
 
-  async function handleSave(withPhoto: boolean) {
-    if (!typedGroupId || !nextProduct || isSubmitting) {
+  function handleSave(withPhoto: boolean) {
+    if (!typedGroupId || !nextProduct) {
       return;
     }
 
+    if (withPhoto && !selectedFile) {
+      return;
+    }
+
+    const capturedProductId = nextProduct._id;
+    const fileToUpload = withPhoto ? selectedFile : undefined;
+
     triggerHaptic();
     setUploadError(null);
-    setUploadStage(null);
-    setIsSubmitting(true);
+    setSelectedFile(null);
 
-    try {
-      let shopifyFile:
-        | Awaited<ReturnType<typeof uploadCaptureImage>>
-        | undefined;
+    void submitCapture({
+      groupId: typedGroupId,
+      productId: capturedProductId,
+      file: fileToUpload ?? undefined,
+    });
 
-      if (withPhoto && selectedFile) {
-        try {
-          setUploadStage("Uploading photo to Shopify...");
-          shopifyFile = await uploadCaptureImage(selectedFile);
-          setUploadStage("Saving Shopify file metadata...");
-        } catch (error) {
-          setUploadError(
-            error instanceof Error
-              ? error.message
-              : "Shopify photo upload failed. Check your connection and retry.",
-          );
-          return;
-        }
-      }
-
-      await recordCapture({
-        groupId: typedGroupId,
-        productId: nextProduct._id,
-        ...shopifyFile,
-      });
-      setSelectedFile(null);
-      triggerHaptic();
-    } catch {
-      // The shared data provider reports the error and reverts optimistic state.
-    } finally {
-      setIsSubmitting(false);
-      setUploadStage(null);
-    }
+    triggerHaptic();
   }
 
   async function handleCaptureFromCamera() {
@@ -409,7 +386,7 @@ export function CapturePage() {
                 <Button
                   aria-label="Capture photo"
                   className="absolute bottom-4 left-1/2 h-16 w-16 -translate-x-1/2 rounded-full p-0 shadow-lg"
-                  disabled={!isCameraReady || isSubmitting}
+                  disabled={!isCameraReady}
                   onClick={() => void handleCaptureFromCamera()}
                   type="button"
                 >
@@ -422,10 +399,6 @@ export function CapturePage() {
           {uploadError ? (
             <p className="text-sm font-medium text-red-600">{uploadError}</p>
           ) : null}
-          {uploadStage ? (
-            <p className="text-sm font-medium text-slate-600">{uploadStage}</p>
-          ) : null}
-
           <div
             className={cn(
               "flex flex-col gap-1",
@@ -434,22 +407,17 @@ export function CapturePage() {
           >
             <Button
               className="h-14 w-full rounded-xl text-base"
-              disabled={!selectedFile || isSubmitting}
-              onClick={() => void handleSave(true)}
+              disabled={!selectedFile}
+              onClick={() => handleSave(true)}
               size="lg"
               type="button"
             >
-              {isSubmitting ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <Check className="h-5 w-5" />
-              )}
+              <Check className="h-5 w-5" />
               Save photo &amp; next part
             </Button>
             <Button
               className="h-11 w-full text-slate-500"
-              disabled={isSubmitting}
-              onClick={() => void handleSave(false)}
+              onClick={() => handleSave(false)}
               type="button"
               variant="ghost"
             >

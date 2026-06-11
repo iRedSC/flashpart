@@ -112,6 +112,11 @@ type AppDataContextValue = {
     shopifyFileUrl?: string;
     shopifyStagedResourceUrl?: string;
   }) => Promise<Id<"captures">>;
+  submitCapture: (args: {
+    productId: Id<"products">;
+    groupId: Id<"groups">;
+    file?: File;
+  }) => Promise<Id<"captures">>;
 };
 
 const AppDataContext = React.createContext<AppDataContextValue | null>(null);
@@ -242,6 +247,47 @@ export function AppDataProvider({
 
     return ids;
   }, [optimisticOperations]);
+  const uploadCaptureFile = React.useCallback(
+    async (file: File): Promise<ShopifyFileUpload> => {
+      const target = await prepareFileUploadAction({
+        fileSize: file.size,
+        filename: file.name || "capture.jpg",
+        mimeType: file.type || "image/jpeg",
+        sessionToken: session.sessionToken,
+      });
+
+      const body = new FormData();
+
+      for (const parameter of target.parameters) {
+        body.append(parameter.name, parameter.value);
+      }
+
+      body.append("file", file);
+
+      const response = await fetch(target.url, {
+        method: "POST",
+        body,
+      });
+
+      if (!response.ok) {
+        throw new Error("Shopify photo upload failed. Check your connection and retry.");
+      }
+
+      const fileRecord = await finalizeFileUploadAction({
+        alt: file.name || "Product photo",
+        originalSource: target.resourceUrl,
+        sessionToken: session.sessionToken,
+      });
+
+      return {
+        shopifyFileId: fileRecord.id,
+        shopifyFileStatus: fileRecord.status,
+        shopifyFileUrl: fileRecord.url,
+        shopifyStagedResourceUrl: target.resourceUrl,
+      };
+    },
+    [finalizeFileUploadAction, prepareFileUploadAction, session.sessionToken],
+  );
   const runOptimistic = React.useCallback(
     async <T,>({
       apply,
@@ -513,44 +559,7 @@ export function AppDataProvider({
           productIds: candidateIds,
         });
       },
-      uploadCaptureImage: async (file) => {
-        const target = await prepareFileUploadAction({
-          fileSize: file.size,
-          filename: file.name || "capture.jpg",
-          mimeType: file.type || "image/jpeg",
-          sessionToken: session.sessionToken,
-        });
-
-        const body = new FormData();
-
-        for (const parameter of target.parameters) {
-          body.append(parameter.name, parameter.value);
-        }
-
-        body.append("file", file);
-
-        const response = await fetch(target.url, {
-          method: "POST",
-          body,
-        });
-
-        if (!response.ok) {
-          throw new Error("Shopify photo upload failed. Check your connection and retry.");
-        }
-
-        const fileRecord = await finalizeFileUploadAction({
-          alt: file.name || "Product photo",
-          originalSource: target.resourceUrl,
-          sessionToken: session.sessionToken,
-        });
-
-        return {
-          shopifyFileId: fileRecord.id,
-          shopifyFileStatus: fileRecord.status,
-          shopifyFileUrl: fileRecord.url,
-          shopifyStagedResourceUrl: target.resourceUrl,
-        };
-      },
+      uploadCaptureImage: uploadCaptureFile,
       recordCapture: (args) =>
         runOptimistic({
           apply: (state) => ({
@@ -562,6 +571,29 @@ export function AppDataProvider({
           commit: () =>
             recordCaptureMutation({ ...args, sessionToken: session.sessionToken }),
           label: "Recording capture",
+          productIds: [args.productId],
+        }),
+      submitCapture: (args) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: updateProductFields(state.products, args.productId, {
+              status: "captured",
+            }),
+          }),
+          commit: async () => {
+            const shopifyFile = args.file
+              ? await uploadCaptureFile(args.file)
+              : undefined;
+
+            return recordCaptureMutation({
+              groupId: args.groupId,
+              productId: args.productId,
+              sessionToken: session.sessionToken,
+              ...shopifyFile,
+            });
+          },
+          label: args.file ? "Uploading capture photo" : "Recording capture",
           productIds: [args.productId],
         }),
     }),
@@ -591,6 +623,7 @@ export function AppDataProvider({
       runOptimistic,
       session.sessionToken,
       session,
+      uploadCaptureFile,
       setDuplicatePolicyMutation,
       setShopifyPublishTargetMutation,
       disconnectShopifyMutation,
