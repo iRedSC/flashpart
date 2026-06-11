@@ -7,9 +7,22 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { FolderPlus, RefreshCw, Send, Trash2, Upload } from "lucide-react";
+import {
+  FolderPlus,
+  MoreVertical,
+  RefreshCw,
+  Send,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -145,6 +158,7 @@ export function ProductsPage() {
     updateProduct,
   } = useAppData();
   const parentRef = React.useRef<HTMLDivElement>(null);
+  const cardListRef = React.useRef<HTMLDivElement>(null);
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [addToGroupOpen, setAddToGroupOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
@@ -300,6 +314,12 @@ export function ProductsPage() {
     getScrollElement: () => parentRef.current,
     overscan: 12,
   });
+  const cardVirtualizer = useVirtualizer({
+    count: rows.length,
+    estimateSize: () => 124,
+    getScrollElement: () => cardListRef.current,
+    overscan: 8,
+  });
   const selectedRows = table.getSelectedRowModel().rows;
   const selectedCount = selectedRows.length;
   const selectedProductIds = selectedRows.map((row) => row.original._id);
@@ -411,14 +431,10 @@ export function ProductsPage() {
 
   return (
     <div className="space-y-4">
-      <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 md:hidden">
-        Products is a desktop tool. Swipe the table sideways here; photo capture
-        lives in Groups.
-      </p>
       <div className="flex flex-wrap items-center justify-between gap-2 md:gap-4">
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Button
-            className="text-slate-950"
+            className="hidden text-slate-950 md:inline-flex"
             onClick={() => setImportOpen(true)}
             variant="outline"
           >
@@ -430,8 +446,9 @@ export function ProductsPage() {
           ) : null}
           {isLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-nowrap gap-2">
           <Button
+            className="px-3 md:px-4"
             disabled={!hasSelection}
             onClick={() => void handleDeleteSelected().catch(() => undefined)}
             variant="destructive"
@@ -440,6 +457,7 @@ export function ProductsPage() {
             Delete
           </Button>
           <Button
+            className="px-3 md:px-4"
             disabled={!hasSelection}
             onClick={() => setAddToGroupOpen(true)}
             variant="outline"
@@ -448,6 +466,7 @@ export function ProductsPage() {
             Add to group
           </Button>
           <Button
+            className="px-3 md:px-4"
             disabled={!hasSelection}
             onClick={() => void handlePublishSelected().catch(() => undefined)}
           >
@@ -620,8 +639,122 @@ export function ProductsPage() {
         </DialogContent>
       </Dialog>
 
+      <div className="h-[560px] overflow-auto md:hidden" ref={cardListRef}>
+        <div
+          className="relative"
+          style={{ height: `${cardVirtualizer.getTotalSize()}px` }}
+        >
+          {cardVirtualizer.getVirtualItems().map((virtualRow) => {
+            const row = rows[virtualRow.index];
+            const product = row.original;
+
+            return (
+              <div
+                className="absolute left-0 top-0 w-full pb-2"
+                data-index={virtualRow.index}
+                key={row.id}
+                ref={cardVirtualizer.measureElement}
+                style={{ transform: `translateY(${virtualRow.start}px)` }}
+              >
+                <div
+                  className={cn(
+                    "rounded-xl border border-slate-200 bg-white p-3 shadow-sm",
+                    row.getIsSelected() && "border-slate-950",
+                    isProductPending(product._id) && "bg-amber-50/70",
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      aria-label={`Select ${product.sku}`}
+                      checked={row.getIsSelected()}
+                      className="mt-1"
+                      onCheckedChange={(value) => row.toggleSelected(!!value)}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {product.name}
+                      </p>
+                      <p className="font-mono text-xs text-slate-500">
+                        {product.sku}
+                      </p>
+                    </div>
+                    <span className="text-sm font-medium">
+                      ${product.price.toFixed(2)}
+                    </span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          aria-label={`Actions for ${product.sku}`}
+                          className="-mr-1 -mt-1 h-8 w-8 shrink-0 p-0"
+                          variant="ghost"
+                        >
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            setRowSelection({ [product._id]: true });
+                            setAddToGroupOpen(true);
+                          }}
+                        >
+                          <FolderPlus />
+                          Add to group
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            void publishProducts([product._id]).catch(
+                              () => undefined,
+                            )
+                          }
+                        >
+                          <Send />
+                          Publish
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-red-600 focus:bg-red-50 focus:text-red-600"
+                          onSelect={() =>
+                            void deleteProducts([product._id]).catch(
+                              () => undefined,
+                            )
+                          }
+                        >
+                          <Trash2 />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                    <Badge variant={statusTone[product.status]}>
+                      {product.status}
+                    </Badge>
+                    {isProductPending(product._id) ? (
+                      <Badge
+                        className="border-amber-300 text-amber-800"
+                        variant="outline"
+                      >
+                        saving
+                      </Badge>
+                    ) : null}
+                    <span>
+                      {product.groupId
+                        ? groupById.get(product.groupId) ?? "Assigned"
+                        : "Ungrouped"}
+                    </span>
+                    <span className="font-mono">
+                      {product.shopifyProductId ?? "Draft pending"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div
-        className="h-[560px] overflow-auto rounded-md border border-slate-200"
+        className="hidden h-[560px] overflow-auto rounded-md border border-slate-200 md:block"
         ref={parentRef}
       >
         <table className="grid w-full min-w-[1040px] text-sm">
