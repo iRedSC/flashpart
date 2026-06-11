@@ -87,7 +87,6 @@ type AppDataContextValue = {
   createGroup: (name: string) => Promise<Id<"groups">>;
   assignFirstUngrouped: (
     groupId: Id<"groups">,
-    count: number,
   ) => Promise<{ assigned: number } | null>;
   recordCapture: (args: {
     productId: Id<"products">;
@@ -411,10 +410,9 @@ export function AppDataProvider({
             createGroupMutation({ name, sessionToken: session.sessionToken }),
           label: "Creating group",
         }),
-      assignFirstUngrouped: (groupId, count) => {
+      assignFirstUngrouped: (groupId) => {
         const candidateIds = optimisticData.products
           .filter((product) => product.groupId === undefined)
-          .slice(0, Math.max(0, count))
           .map((product) => product._id);
 
         return runOptimistic({
@@ -434,10 +432,9 @@ export function AppDataProvider({
           commit: () =>
             assignFirstUngroupedMutation({
               groupId,
-              count,
               sessionToken: session.sessionToken,
             }),
-          label: `Assigning up to ${count.toLocaleString()} ungrouped products`,
+          label: "Assigning ungrouped products",
           productIds: candidateIds,
         });
       },

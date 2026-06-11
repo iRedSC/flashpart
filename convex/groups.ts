@@ -49,14 +49,11 @@ export const assignFirstUngrouped = mutation({
   args: {
     sessionToken: v.string(),
     groupId: v.id("groups"),
-    count: v.number(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
     const products = await ctx.db.query("products").collect();
-    const candidates = products
-      .filter((product) => product.groupId === undefined)
-      .slice(0, Math.max(0, args.count));
+    const candidates = products.filter((product) => product.groupId === undefined);
     const now = Date.now();
 
     for (const product of candidates) {

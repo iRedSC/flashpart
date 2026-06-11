@@ -12,12 +12,10 @@ import {
 } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { useAppData } from "../data/app-data-provider";
-import type { Id } from "../../convex/_generated/dataModel";
 
 export function GroupsPage() {
   const { assignFirstUngrouped, createGroup, groups, products } = useAppData();
   const [name, setName] = React.useState("");
-  const [assignCounts, setAssignCounts] = React.useState<Record<string, string>>({});
   const ungroupedCount = products.filter((product) => !product.groupId).length;
 
   async function handleCreateGroup(event: React.FormEvent<HTMLFormElement>) {
@@ -33,10 +31,6 @@ export function GroupsPage() {
     } catch {
       // The shared data provider reports the error and reverts optimistic state.
     }
-  }
-
-  function countForGroup(groupId: Id<"groups">) {
-    return Number.parseInt(assignCounts[groupId] ?? "10", 10);
   }
 
   return (
@@ -76,7 +70,6 @@ export function GroupsPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {groups.map((group) => {
-          const assignCount = countForGroup(group._id);
           const complete =
             group.productCount === 0
               ? 0
@@ -112,26 +105,9 @@ export function GroupsPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    aria-label={`Assign count for ${group.name}`}
-                    className="w-28"
-                    min={1}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      setAssignCounts((current) => ({
-                        ...current,
-                        [group._id]: value,
-                      }));
-                    }}
-                    type="number"
-                    value={assignCounts[group._id] ?? "10"}
-                  />
                   <Button
                     onClick={() =>
-                      void assignFirstUngrouped(
-                        group._id,
-                        Number.isFinite(assignCount) ? assignCount : 0,
-                      ).catch(() => undefined)
+                      void assignFirstUngrouped(group._id).catch(() => undefined)
                     }
                     variant="outline"
                   >
