@@ -91,7 +91,10 @@ type DropTarget = {
 };
 const UNGROUPED_FILTER = "ungrouped";
 const desktopGridColumns =
-  "grid-cols-[36px_48px_170px_1.5fr_140px_150px_160px_170px]";
+  "grid-cols-[36px_48px_180px_minmax(240px,1.6fr)_120px_160px_minmax(150px,1fr)_minmax(220px,1.2fr)]";
+const desktopRowHeight = 58;
+const desktopCellClass =
+  "flex min-w-0 items-center overflow-hidden px-4 py-0";
 
 const columnHelper = createColumnHelper<Product>();
 
@@ -161,9 +164,12 @@ function DesktopProductRow({
       )}
       data-index={virtualRow.index}
       ref={setNodeRef}
-      style={{ transform: `translateY(${virtualRow.start}px)` }}
+      style={{
+        height: `${desktopRowHeight}px`,
+        transform: `translateY(${virtualRow.start}px)`,
+      }}
     >
-      <TableCell className="flex items-center px-2">
+      <TableCell className="flex items-center px-2 py-0">
         <DragHandle
           attributes={attributes}
           label={`Reorder ${row.original.sku}`}
@@ -171,7 +177,7 @@ function DesktopProductRow({
         />
       </TableCell>
       {row.getVisibleCells().map((cell) => (
-        <TableCell key={cell.id}>
+        <TableCell className={desktopCellClass} key={cell.id}>
           {flexRender(cell.column.columnDef.cell, cell.getContext())}
         </TableCell>
       ))}
@@ -242,8 +248,12 @@ function MobileProductCard({
             onCheckedChange={(value) => row.toggleSelected(!!value)}
           />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{product.name}</p>
-            <p className="font-mono text-xs text-slate-500">{product.sku}</p>
+            <p className="truncate text-sm font-medium" title={product.name}>
+              {product.name}
+            </p>
+            <p className="truncate font-mono text-xs text-slate-500">
+              {product.sku}
+            </p>
           </div>
           {product.shopifyFileUrl ? (
             <button
@@ -427,6 +437,8 @@ export function ProductsPage() {
   const [activeDragIds, setActiveDragIds] = React.useState<
     Id<"products">[] | null
   >(null);
+  const [activeDragProductId, setActiveDragProductId] =
+    React.useState<Id<"products"> | null>(null);
   const [dropTarget, setDropTarget] = React.useState<DropTarget | null>(null);
   const dragSourceIds = React.useMemo(
     () => new Set(activeDragIds ?? []),
@@ -508,6 +520,7 @@ export function ProductsPage() {
             aria-label={`SKU for ${row.original.name}`}
             className="h-8 font-mono"
             defaultValue={row.original.sku}
+            title={row.original.sku}
             onBlur={(event) => {
               if (event.currentTarget.value !== row.original.sku) {
                 void updateProduct({
@@ -526,6 +539,7 @@ export function ProductsPage() {
             aria-label={`Name for ${row.original.sku}`}
             className="h-8"
             defaultValue={row.original.name}
+            title={row.original.name}
             onBlur={(event) => {
               if (event.currentTarget.value !== row.original.name) {
                 void updateProduct({
@@ -564,7 +578,7 @@ export function ProductsPage() {
           const latestJob = latestJobByProductId.get(row.original._id);
 
           return (
-            <div className="flex flex-wrap gap-1">
+            <div className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap">
               <ProductStatusBadge
                 error={row.original.error}
                 hasCapture={Boolean(row.original.shopifyFileId)}
@@ -583,49 +597,61 @@ export function ProductsPage() {
       columnHelper.display({
         id: "group",
         header: "Group",
-        cell: ({ row }) =>
-          row.original.groupId ? (
-            groupById.get(row.original.groupId) ?? "Assigned"
-          ) : (
-            <span className="text-slate-400">Ungrouped</span>
-          ),
+        cell: ({ row }) => {
+          if (!row.original.groupId) {
+            return <span className="truncate text-slate-400">Ungrouped</span>;
+          }
+
+          const groupName = groupById.get(row.original.groupId) ?? "Assigned";
+
+          return (
+            <span className="min-w-0 truncate" title={groupName}>
+              {groupName}
+            </span>
+          );
+        },
       }),
       columnHelper.display({
         id: "shopify",
         header: "Shopify",
-        cell: ({ row }) => (
-          <div className="flex items-center gap-2">
-            {row.original.shopifyFileUrl ? (
-              <button
-                aria-label={`View photo for ${row.original.sku}`}
-                className="shrink-0 rounded transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950"
-                onClick={() => setPhotoProductId(row.original._id)}
-                type="button"
-              >
-                <img
-                  alt={`Shopify file for ${row.original.sku}`}
-                  className="h-8 w-8 rounded object-cover"
-                  src={row.original.shopifyFileUrl}
-                />
-              </button>
-            ) : null}
-            <div className="min-w-0">
-              {row.original.shopifyProductId ? (
-                <span className="block truncate font-mono text-xs">
-                  {row.original.shopifyProductHandle ??
-                    row.original.shopifyProductId}
+        cell: ({ row }) => {
+          const shopifyLabel =
+            row.original.shopifyProductHandle ?? row.original.shopifyProductId;
+
+          return (
+            <div className="flex w-full min-w-0 items-center gap-2">
+              {row.original.shopifyFileUrl ? (
+                <button
+                  aria-label={`View photo for ${row.original.sku}`}
+                  className="shrink-0 rounded transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950"
+                  onClick={() => setPhotoProductId(row.original._id)}
+                  type="button"
+                >
+                  <img
+                    alt={`Shopify file for ${row.original.sku}`}
+                    className="h-8 w-8 rounded object-cover"
+                    src={row.original.shopifyFileUrl}
+                  />
+                </button>
+              ) : null}
+              {shopifyLabel ? (
+                <span
+                  className="min-w-0 truncate font-mono text-xs"
+                  title={shopifyLabel}
+                >
+                  {shopifyLabel}
                 </span>
               ) : (
-                <span className="text-slate-400">Listing pending</span>
+                <span className="truncate text-slate-400">Listing pending</span>
               )}
               {row.original.shopifyFileStatus ? (
-                <span className="block text-xs text-slate-400">
+                <span className="shrink-0 whitespace-nowrap text-xs text-slate-400">
                   file {row.original.shopifyFileStatus}
                 </span>
               ) : null}
             </div>
-          </div>
-        ),
+          );
+        },
       }),
     ],
     [groupById, isProductPending, latestJobByProductId, updateProduct],
@@ -644,7 +670,7 @@ export function ProductsPage() {
   const rows = table.getRowModel().rows;
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
-    estimateSize: () => 58,
+    estimateSize: () => desktopRowHeight,
     getScrollElement: () => parentRef.current,
     overscan: 12,
   });
@@ -668,11 +694,13 @@ export function ProductsPage() {
       ? "Ungrouped"
       : groupById.get(groupFilter as Id<"groups">) ?? "Group";
   const dragCount = activeDragIds?.length ?? 0;
-  const dragLabel =
-    dragCount === 1
-      ? products.find((product) => product._id === activeDragIds?.[0])?.name ??
-        "1 product"
-      : `${dragCount.toLocaleString()} products`;
+  const activeDragRow = activeDragProductId
+    ? rows.find((row) => row.id === activeDragProductId) ?? null
+    : null;
+  const activeDragProduct = activeDragRow?.original ?? null;
+  const activeDragGroupLabel = activeDragProduct?.groupId
+    ? groupById.get(activeDragProduct.groupId) ?? "Assigned"
+    : "Ungrouped";
 
   function clearSelection() {
     setRowSelection({});
@@ -702,6 +730,7 @@ export function ProductsPage() {
     setActiveDragIds(
       selectedVisibleIds.includes(activeId) ? selectedVisibleIds : [activeId],
     );
+    setActiveDragProductId(activeId);
   }
 
   function handleDragOver(event: DragOverEvent) {
@@ -725,6 +754,7 @@ export function ProductsPage() {
     const draggedIds = activeDragIds;
 
     setActiveDragIds(null);
+    setActiveDragProductId(null);
     setDropTarget(null);
 
     const overId = event.over?.id as Id<"products"> | undefined;
@@ -761,6 +791,7 @@ export function ProductsPage() {
 
   function handleDragCancel() {
     setActiveDragIds(null);
+    setActiveDragProductId(null);
     setDropTarget(null);
   }
 
@@ -1190,10 +1221,46 @@ export function ProductsPage() {
           </div>
         </SortableContext>
         <DragOverlay dropAnimation={null}>
-          {activeDragIds ? (
-            <div className="flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium shadow-lg">
-              <GripVertical className="h-4 w-4 text-slate-400" />
-              <span className="max-w-56 truncate">{dragLabel}</span>
+          {activeDragProduct ? (
+            <div className="pointer-events-none relative h-full rounded-xl border border-slate-200 bg-white/75 p-3 shadow-lg backdrop-blur-sm">
+              <div className="flex items-start gap-2">
+                <GripVertical className="mt-1 h-4 w-4 shrink-0 text-slate-400" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {activeDragProduct.name}
+                  </p>
+                  <p className="truncate font-mono text-xs text-slate-500">
+                    {activeDragProduct.sku}
+                  </p>
+                </div>
+                {activeDragProduct.shopifyFileUrl ? (
+                  <img
+                    alt=""
+                    className="h-12 w-12 shrink-0 rounded-lg object-cover"
+                    src={activeDragProduct.shopifyFileUrl}
+                  />
+                ) : null}
+                <span className="text-sm font-medium">
+                  ${activeDragProduct.price.toFixed(2)}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                <ProductStatusBadge
+                  error={activeDragProduct.error}
+                  hasCapture={Boolean(activeDragProduct.shopifyFileId)}
+                  latestJob={latestJobByProductId.get(activeDragProduct._id)}
+                  status={activeDragProduct.status}
+                />
+                <span>{activeDragGroupLabel}</span>
+                <span className="font-mono">
+                  {activeDragProduct.shopifyProductId ?? "Draft pending"}
+                </span>
+              </div>
+              {dragCount > 1 ? (
+                <span className="absolute -right-2 -top-2 rounded-full bg-slate-950 px-2 py-0.5 text-xs font-medium text-white shadow">
+                  {dragCount.toLocaleString()}
+                </span>
+              ) : null}
             </div>
           ) : null}
         </DragOverlay>
@@ -1213,7 +1280,7 @@ export function ProductsPage() {
             className="hidden h-[560px] overflow-auto rounded-md border border-slate-200 md:block"
             ref={parentRef}
           >
-            <table className="grid w-full min-w-[1080px] text-sm">
+            <table className="grid w-full min-w-[1200px] text-sm">
               <TableHeader className="sticky top-0 z-10 grid bg-white">
                 {table.getHeaderGroups().map((headerGroup) => (
                   <TableRow
@@ -1222,7 +1289,10 @@ export function ProductsPage() {
                   >
                     <TableHead aria-hidden className="px-2" />
                     {headerGroup.headers.map((header) => (
-                      <TableHead key={header.id}>
+                      <TableHead
+                        className="flex items-center whitespace-nowrap"
+                        key={header.id}
+                      >
                         {header.isPlaceholder
                           ? null
                           : flexRender(
@@ -1268,10 +1338,26 @@ export function ProductsPage() {
           </div>
         </SortableContext>
         <DragOverlay dropAnimation={null}>
-          {activeDragIds ? (
-            <div className="flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium shadow-lg">
-              <GripVertical className="h-4 w-4 text-slate-400" />
-              <span className="max-w-56 truncate">{dragLabel}</span>
+          {activeDragRow ? (
+            <div
+              className={cn(
+                "pointer-events-none relative grid h-full w-full rounded-md border border-slate-200 bg-white/75 text-sm shadow-lg backdrop-blur-sm",
+                desktopGridColumns,
+              )}
+            >
+              <div className="flex items-center px-2">
+                <GripVertical className="h-4 w-4 text-slate-400" />
+              </div>
+              {activeDragRow.getVisibleCells().map((cell) => (
+                <div className={desktopCellClass} key={cell.id}>
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </div>
+              ))}
+              {dragCount > 1 ? (
+                <span className="absolute -right-2 -top-2 rounded-full bg-slate-950 px-2 py-0.5 text-xs font-medium text-white shadow">
+                  {dragCount.toLocaleString()}
+                </span>
+              ) : null}
             </div>
           ) : null}
         </DragOverlay>
