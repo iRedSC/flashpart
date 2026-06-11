@@ -15,8 +15,7 @@ export function MutationErrorBanner() {
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>
-            {lastMutationError.label} failed. The UI was reverted.{" "}
-            {lastMutationError.message}
+            {lastMutationError.label} failed. {lastMutationError.message}
           </span>
         </div>
         <Button

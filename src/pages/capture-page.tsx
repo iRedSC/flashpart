@@ -12,7 +12,6 @@ import { Button } from "../components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
@@ -327,9 +326,6 @@ export function CapturePage() {
         <Card>
           <CardHeader>
             <CardTitle>Group not found</CardTitle>
-            <CardDescription>
-              Choose an active photo group before starting capture.
-            </CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild variant="outline">
@@ -521,9 +517,6 @@ export function CapturePage() {
           <CheckCircle2 className="h-14 w-14 text-slate-950" />
           <div>
             <h3 className="text-xl font-semibold">Group complete</h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Every assigned part has been captured or moved into processing.
-            </p>
           </div>
           <Button asChild className="h-12 rounded-xl px-6" variant="outline">
             <Link onClick={() => triggerHaptic()} to="/groups">

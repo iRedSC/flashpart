@@ -22,14 +22,9 @@ export function DesktopShell({ onSignOut, session }: DesktopShellProps) {
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <LogoMark className="h-7 w-7" />
-              <h1 className="text-xl font-semibold tracking-tight">Flashpart</h1>
-            </div>
-            <p className="text-sm text-slate-500">
-              Import parts, group photo work, and queue Shopify draft listings.
-            </p>
+          <div className="flex items-center gap-2">
+            <LogoMark className="h-7 w-7" />
+            <h1 className="text-xl font-semibold tracking-tight">Flashpart</h1>
           </div>
           <div className="flex items-center gap-4">
             <nav className="flex items-center gap-2">

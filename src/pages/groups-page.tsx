@@ -40,9 +40,6 @@ export function GroupsPage() {
         <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
           Groups
         </h2>
-        <p className="text-sm text-slate-500 md:text-base">
-          Pick a group to start capturing photos.
-        </p>
       </div>
 
       {/* On mobile, capture comes first; creating groups is secondary. */}
@@ -114,9 +111,6 @@ export function GroupsPage() {
           <Card>
             <CardHeader>
               <CardTitle>No groups yet</CardTitle>
-              <CardDescription>
-                Create a group below, assign rows, then start capturing.
-              </CardDescription>
             </CardHeader>
           </Card>
         ) : null}
@@ -125,9 +119,6 @@ export function GroupsPage() {
       <Card className="order-3 md:order-2">
         <CardHeader>
           <CardTitle>Create a group</CardTitle>
-          <CardDescription>
-            Groups are the photo segments used by the mobile capture flow.
-          </CardDescription>
         </CardHeader>
         <CardContent>
           <form

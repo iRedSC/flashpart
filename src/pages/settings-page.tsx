@@ -76,17 +76,12 @@ export function SettingsPage() {
         <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
           Settings
         </h2>
-        <p className="text-sm text-slate-500 md:text-base">
-          Store-wide MVP controls for duplicate SKUs and Shopify connection state.
-        </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Existing SKU behavior</CardTitle>
-          <CardDescription>
-            This applies globally to imported products instead of living in the table.
-          </CardDescription>
+          <CardDescription>Applies to all imported products.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
@@ -119,7 +114,7 @@ export function SettingsPage() {
             <div>
               <CardTitle>Shopify store</CardTitle>
               <CardDescription>
-                Link the internal Shopify store that receives draft product listings.
+                Draft listings are created in this store.
               </CardDescription>
             </div>
             <Badge variant={shopifyConnection?.isActive ? "default" : "secondary"}>
@@ -138,8 +133,7 @@ export function SettingsPage() {
               />
             </label>
             <p className="text-sm text-slate-500">
-              You will be redirected to Shopify to authorize the app. Convex
-              verifies the callback and stores the access token server-side.
+              You'll be redirected to Shopify to authorize the app.
             </p>
             {shopifyConnection ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">

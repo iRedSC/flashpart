@@ -117,11 +117,6 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
             </CardContent>
           )}
         </Card>
-
-        <p className="mt-6 text-center text-xs text-slate-400">
-          Internal tool. Sessions are shared between the desktop site and the
-          installed app.
-        </p>
       </div>
     </main>
   );
