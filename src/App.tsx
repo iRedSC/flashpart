@@ -9,6 +9,8 @@ import {
   readStoredSession,
   type AuthSession,
 } from "./lib/auth-session";
+import { usePreventPinchZoom } from "./lib/use-prevent-pinch-zoom";
+import { useIsMobile } from "./lib/use-is-mobile";
 import { CapturePage } from "./pages/capture-page";
 import { GroupsPage } from "./pages/groups-page";
 import { ProductsPage } from "./pages/products-page";
@@ -23,6 +25,9 @@ if (!convexUrl) {
 const convex = new ConvexReactClient(convexUrl);
 
 export function App() {
+  const isMobile = useIsMobile();
+  usePreventPinchZoom(isMobile);
+
   const [session, setSession] = React.useState<AuthSession | null>(
     readStoredSession,
   );

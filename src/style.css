@@ -37,6 +37,11 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 
+html.native-mobile,
+html.native-mobile body {
+  touch-action: pan-x pan-y;
+}
+
 button,
 a,
 label,
