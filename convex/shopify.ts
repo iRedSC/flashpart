@@ -2,6 +2,12 @@ import { ConvexError, v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import { action, httpAction, mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
+import {
+  createShopifyFile,
+  createStagedImageUpload,
+  deleteShopifyFiles,
+  getShopifyFile,
+} from "./shopifyClient";
 
 const SHOPIFY_SCOPES = ["read_products", "write_products", "read_files", "write_files"];
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
@@ -18,6 +24,19 @@ const shopifyModel = {
   ) as any,
   storeConnectionFromOAuth: makeFunctionReference(
     "shopifyModel.js:storeConnectionFromOAuth",
+  ) as any,
+  currentActiveConnection: makeFunctionReference(
+    "shopifyModel.js:currentActiveConnection",
+  ) as any,
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const productModel = {
+  getFileForDeletion: makeFunctionReference(
+    "products.js:getFileForDeletion",
+  ) as any,
+  markShopifyFileDeleted: makeFunctionReference(
+    "products.js:markShopifyFileDeleted",
   ) as any,
 };
 
@@ -106,6 +125,9 @@ const htmlResponse = (title: string, message: string, status = 200) =>
     },
   );
 
+const wait = (milliseconds: number) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+
 export const startShopifyInstall = action({
   args: {
     sessionToken: v.string(),
@@ -163,6 +185,102 @@ export const currentConnection = query({
       createdAt: currentConnection.createdAt,
       updatedAt: currentConnection.updatedAt,
     };
+  },
+});
+
+export const prepareFileUpload = action({
+  args: {
+    sessionToken: v.string(),
+    filename: v.string(),
+    mimeType: v.string(),
+    fileSize: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const connection = await ctx.runQuery(shopifyModel.currentActiveConnection, {
+      sessionToken: args.sessionToken,
+    });
+
+    if (!connection) {
+      throw new ConvexError("Connect Shopify before uploading photos.");
+    }
+
+    return await createStagedImageUpload(connection, {
+      filename: args.filename,
+      fileSize: args.fileSize,
+      mimeType: args.mimeType || "image/jpeg",
+    });
+  },
+});
+
+export const finalizeFileUpload = action({
+  args: {
+    sessionToken: v.string(),
+    originalSource: v.string(),
+    alt: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const connection = await ctx.runQuery(shopifyModel.currentActiveConnection, {
+      sessionToken: args.sessionToken,
+    });
+
+    if (!connection) {
+      throw new ConvexError("Connect Shopify before saving photos.");
+    }
+
+    let file = await createShopifyFile(connection, {
+      alt: args.alt,
+      originalSource: args.originalSource,
+    });
+
+    for (let attempt = 0; attempt < 4 && file.status !== "ready"; attempt += 1) {
+      await wait(750);
+      file = await getShopifyFile(connection, file.id);
+    }
+
+    return file;
+  },
+});
+
+export const deleteProductFile = action({
+  args: {
+    sessionToken: v.string(),
+    productId: v.id("products"),
+    confirmPublishedDelete: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const [connection, file] = await Promise.all([
+      ctx.runQuery(shopifyModel.currentActiveConnection, {
+        sessionToken: args.sessionToken,
+      }),
+      ctx.runQuery(productModel.getFileForDeletion, {
+        productId: args.productId,
+        sessionToken: args.sessionToken,
+      }),
+    ]);
+
+    if (!connection) {
+      throw new ConvexError("Connect Shopify before deleting stored photos.");
+    }
+
+    if (!file?.shopifyFileId) {
+      throw new ConvexError("This product does not have a Shopify file to delete.");
+    }
+
+    if (file.shopifyStatus === "published" && !args.confirmPublishedDelete) {
+      throw new ConvexError(
+        "This product is published. Confirm before deleting its Shopify file.",
+      );
+    }
+
+    const deletedFileIds = await deleteShopifyFiles(connection, [file.shopifyFileId]);
+
+    await ctx.runMutation(productModel.markShopifyFileDeleted, {
+      deletedAt: Date.now(),
+      productId: args.productId,
+      shopifyFileId: file.shopifyFileId,
+    });
+
+    return { deletedFileIds };
   },
 });
 

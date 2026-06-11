@@ -15,7 +15,9 @@ export const list = query({
       );
       const completed = groupProducts.filter(
         (product) =>
-          product.status === "draftCreated" || product.status === "needsReview",
+          product.status === "draftCreated" ||
+          product.status === "published" ||
+          product.status === "needsReview",
       ).length;
 
       return {

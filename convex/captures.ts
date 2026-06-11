@@ -1,23 +1,17 @@
 import { v } from "convex/values";
 import { mutation } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
-
-export const generateUploadUrl = mutation({
-  args: {
-    sessionToken: v.string(),
-  },
-  handler: async (ctx, args) => {
-    await requireSessionUser(ctx, args.sessionToken);
-    return await ctx.storage.generateUploadUrl();
-  },
-});
+import { shopifyFileStatus } from "./schema";
 
 export const record = mutation({
   args: {
     sessionToken: v.string(),
     productId: v.id("products"),
     groupId: v.id("groups"),
-    rawImageStorageId: v.optional(v.id("_storage")),
+    shopifyFileId: v.optional(v.string()),
+    shopifyFileStatus: v.optional(shopifyFileStatus),
+    shopifyFileUrl: v.optional(v.string()),
+    shopifyStagedResourceUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
@@ -25,7 +19,10 @@ export const record = mutation({
     const captureId = await ctx.db.insert("captures", {
       productId: args.productId,
       groupId: args.groupId,
-      rawImageStorageId: args.rawImageStorageId,
+      shopifyFileId: args.shopifyFileId,
+      shopifyFileStatus: args.shopifyFileStatus,
+      shopifyFileUrl: args.shopifyFileUrl,
+      shopifyStagedResourceUrl: args.shopifyStagedResourceUrl,
       status: "uploaded",
       createdAt: now,
       updatedAt: now,
@@ -33,19 +30,12 @@ export const record = mutation({
 
     await ctx.db.patch(args.productId, {
       captureId,
-      rawImageStorageId: args.rawImageStorageId,
+      shopifyFileId: args.shopifyFileId,
+      shopifyFileStatus: args.shopifyFileStatus,
+      shopifyFileUrl: args.shopifyFileUrl,
+      shopifyStagedResourceUrl: args.shopifyStagedResourceUrl,
+      error: undefined,
       status: "captured",
-      updatedAt: now,
-    });
-
-    await ctx.db.insert("listingJobs", {
-      productId: args.productId,
-      groupId: args.groupId,
-      captureId,
-      type: "processPhoto",
-      status: "queued",
-      attempts: 0,
-      createdAt: now,
       updatedAt: now,
     });
 
@@ -83,7 +73,7 @@ export const markProcessed = mutation({
   args: {
     sessionToken: v.string(),
     captureId: v.id("captures"),
-    processedImageUrl: v.string(),
+    shopifyFileUrl: v.string(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
@@ -96,12 +86,14 @@ export const markProcessed = mutation({
     const now = Date.now();
 
     await ctx.db.patch(args.captureId, {
-      processedImageUrl: args.processedImageUrl,
+      shopifyFileStatus: "ready",
+      shopifyFileUrl: args.shopifyFileUrl,
       status: "processed",
       updatedAt: now,
     });
     await ctx.db.patch(capture.productId, {
-      processedImageUrl: args.processedImageUrl,
+      shopifyFileStatus: "ready",
+      shopifyFileUrl: args.shopifyFileUrl,
       status: "needsReview",
       updatedAt: now,
     });

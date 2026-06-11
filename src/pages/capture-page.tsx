@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import { useAppData } from "../data/app-data-provider";
+import { canvasToFile, cropImageFileToSquare } from "../lib/capture-image";
 import { triggerHaptic } from "../lib/haptics";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { cn } from "../lib/utils";
@@ -23,73 +24,6 @@ import type { Id } from "../../convex/_generated/dataModel";
 
 const INLINE_CAMERA_UNAVAILABLE =
   "Inline camera is not available here. Use the camera picker instead.";
-
-function canvasToFile(
-  canvas: HTMLCanvasElement,
-  fileName: string,
-): Promise<File> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          reject(new Error("Photo could not be processed. Please try again."));
-          return;
-        }
-
-        resolve(
-          new File([blob], fileName, {
-            lastModified: Date.now(),
-            type: "image/jpeg",
-          }),
-        );
-      },
-      "image/jpeg",
-      0.92,
-    );
-  });
-}
-
-async function cropImageFileToSquare(file: File): Promise<File> {
-  const imageUrl = URL.createObjectURL(file);
-  const image = new Image();
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () =>
-        reject(new Error("Photo could not be loaded. Please try again."));
-      image.src = imageUrl;
-    });
-
-    const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
-    const sourceX = (image.naturalWidth - sourceSize) / 2;
-    const sourceY = (image.naturalHeight - sourceSize) / 2;
-    const canvas = document.createElement("canvas");
-
-    canvas.width = sourceSize;
-    canvas.height = sourceSize;
-    canvas
-      .getContext("2d")
-      ?.drawImage(
-        image,
-        sourceX,
-        sourceY,
-        sourceSize,
-        sourceSize,
-        0,
-        0,
-        sourceSize,
-        sourceSize,
-      );
-
-    return await canvasToFile(
-      canvas,
-      `${file.name.replace(/\.[^.]+$/, "")}.jpg`,
-    );
-  } finally {
-    URL.revokeObjectURL(imageUrl);
-  }
-}
 
 export function CapturePage() {
   const { groupId } = useParams();
@@ -103,6 +37,7 @@ export function CapturePage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [cameraError, setCameraError] = React.useState<string | null>(null);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
+  const [uploadStage, setUploadStage] = React.useState<string | null>(null);
   const previewUrl = React.useMemo(
     () => (selectedFile ? URL.createObjectURL(selectedFile) : null),
     [selectedFile],
@@ -143,7 +78,8 @@ export function CapturePage() {
       product.status === "captured" ||
       product.status === "processing" ||
       product.status === "needsReview" ||
-      product.status === "draftCreated",
+      product.status === "draftCreated" ||
+      product.status === "published",
   ).length;
   const progress =
     groupProducts.length === 0
@@ -220,19 +156,24 @@ export function CapturePage() {
 
     triggerHaptic();
     setUploadError(null);
+    setUploadStage(null);
     setIsSubmitting(true);
 
     try {
-      let rawImageStorageId: Id<"_storage"> | undefined;
+      let shopifyFile:
+        | Awaited<ReturnType<typeof uploadCaptureImage>>
+        | undefined;
 
       if (withPhoto && selectedFile) {
         try {
-          rawImageStorageId = await uploadCaptureImage(selectedFile);
+          setUploadStage("Uploading photo to Shopify...");
+          shopifyFile = await uploadCaptureImage(selectedFile);
+          setUploadStage("Saving Shopify file metadata...");
         } catch (error) {
           setUploadError(
             error instanceof Error
               ? error.message
-              : "Photo upload failed. Check your connection and retry.",
+              : "Shopify photo upload failed. Check your connection and retry.",
           );
           return;
         }
@@ -241,7 +182,7 @@ export function CapturePage() {
       await recordCapture({
         groupId: typedGroupId,
         productId: nextProduct._id,
-        rawImageStorageId,
+        ...shopifyFile,
       });
       setSelectedFile(null);
       triggerHaptic();
@@ -249,6 +190,7 @@ export function CapturePage() {
       // The shared data provider reports the error and reverts optimistic state.
     } finally {
       setIsSubmitting(false);
+      setUploadStage(null);
     }
   }
 
@@ -479,6 +421,9 @@ export function CapturePage() {
 
           {uploadError ? (
             <p className="text-sm font-medium text-red-600">{uploadError}</p>
+          ) : null}
+          {uploadStage ? (
+            <p className="text-sm font-medium text-slate-600">{uploadStage}</p>
           ) : null}
 
           <div

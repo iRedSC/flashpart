@@ -36,7 +36,7 @@ export const processPhotoAndCreateDraft = task({
     });
 
     return {
-      processedImageUrl: null,
+      shopifyFileUrl: null,
       shopifyProductId: null,
       status: "stubbed",
     };

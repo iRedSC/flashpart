@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import { duplicatePolicy, productStatus } from "./schema";
 
@@ -167,6 +167,62 @@ export const removeMany = mutation({
     }
 
     return { deleted };
+  },
+});
+
+export const getFileForDeletion = internalQuery({
+  args: {
+    sessionToken: v.string(),
+    productId: v.id("products"),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const product = await ctx.db.get(args.productId);
+
+    if (!product) {
+      return null;
+    }
+
+    return {
+      captureId: product.captureId,
+      shopifyFileId: product.shopifyFileId,
+      shopifyStatus: product.shopifyStatus,
+    };
+  },
+});
+
+export const markShopifyFileDeleted = internalMutation({
+  args: {
+    productId: v.id("products"),
+    shopifyFileId: v.string(),
+    deletedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const product = await ctx.db.get(args.productId);
+
+    if (!product || product.shopifyFileId !== args.shopifyFileId) {
+      return;
+    }
+
+    await ctx.db.patch(args.productId, {
+      shopifyFileDeletedAt: args.deletedAt,
+      shopifyFileId: undefined,
+      shopifyFileStatus: undefined,
+      shopifyFileUrl: undefined,
+      shopifyStagedResourceUrl: undefined,
+      updatedAt: args.deletedAt,
+    });
+
+    if (product.captureId) {
+      await ctx.db.patch(product.captureId, {
+        shopifyFileDeletedAt: args.deletedAt,
+        shopifyFileId: undefined,
+        shopifyFileStatus: undefined,
+        shopifyFileUrl: undefined,
+        shopifyStagedResourceUrl: undefined,
+        updatedAt: args.deletedAt,
+      });
+    }
   },
 });
 

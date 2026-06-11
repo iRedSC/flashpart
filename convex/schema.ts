@@ -7,6 +7,7 @@ export const productStatus = v.union(
   v.literal("captured"),
   v.literal("processing"),
   v.literal("draftCreated"),
+  v.literal("published"),
   v.literal("failed"),
   v.literal("blockedExistingSku"),
   v.literal("needsReview"),
@@ -15,6 +16,23 @@ export const productStatus = v.union(
 export const duplicatePolicy = v.union(
   v.literal("blockExisting"),
   v.literal("updateExisting"),
+);
+
+export const shopifyPublishTarget = v.union(
+  v.literal("draft"),
+  v.literal("published"),
+);
+
+export const shopifyFileStatus = v.union(
+  v.literal("uploaded"),
+  v.literal("processing"),
+  v.literal("ready"),
+  v.literal("failed"),
+);
+
+export const shopifyStatus = v.union(
+  v.literal("draft"),
+  v.literal("published"),
 );
 
 export default defineSchema({
@@ -75,6 +93,7 @@ export default defineSchema({
   appSettings: defineTable({
     key: v.literal("singleton"),
     duplicatePolicy,
+    shopifyPublishTarget: v.optional(shopifyPublishTarget),
     shopifyConnectionStatus: v.optional(
       v.union(
         v.literal("disconnected"),
@@ -121,10 +140,15 @@ export default defineSchema({
     duplicatePolicy,
     groupId: v.optional(v.id("groups")),
     captureId: v.optional(v.id("captures")),
-    rawImageStorageId: v.optional(v.id("_storage")),
-    processedImageUrl: v.optional(v.string()),
+    shopifyFileId: v.optional(v.string()),
+    shopifyFileStatus: v.optional(shopifyFileStatus),
+    shopifyFileUrl: v.optional(v.string()),
+    shopifyStagedResourceUrl: v.optional(v.string()),
+    shopifyFileDeletedAt: v.optional(v.number()),
     shopifyProductId: v.optional(v.string()),
-    shopifyStatus: v.optional(v.string()),
+    shopifyProductHandle: v.optional(v.string()),
+    shopifyVariantId: v.optional(v.string()),
+    shopifyStatus: v.optional(shopifyStatus),
     error: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -147,8 +171,11 @@ export default defineSchema({
   captures: defineTable({
     productId: v.id("products"),
     groupId: v.id("groups"),
-    rawImageStorageId: v.optional(v.id("_storage")),
-    processedImageUrl: v.optional(v.string()),
+    shopifyFileId: v.optional(v.string()),
+    shopifyFileStatus: v.optional(shopifyFileStatus),
+    shopifyFileUrl: v.optional(v.string()),
+    shopifyStagedResourceUrl: v.optional(v.string()),
+    shopifyFileDeletedAt: v.optional(v.number()),
     status: v.union(
       v.literal("uploaded"),
       v.literal("processing"),
@@ -164,6 +191,8 @@ export default defineSchema({
 
   listingJobs: defineTable({
     productId: v.id("products"),
+    userId: v.optional(v.id("users")),
+    shopifyConnectionId: v.optional(v.id("shopifyConnections")),
     groupId: v.optional(v.id("groups")),
     captureId: v.optional(v.id("captures")),
     type: v.union(
@@ -180,9 +209,13 @@ export default defineSchema({
     attempts: v.number(),
     triggerRunId: v.optional(v.string()),
     error: v.optional(v.string()),
+    result: v.optional(v.any()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_product", ["productId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_type_status", ["type", "status"]),
 });

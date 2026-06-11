@@ -88,3 +88,18 @@ export const currentActiveConnection = internalQuery({
       .at(0) ?? null;
   },
 });
+
+export const currentActiveConnectionForUser = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const connections = await ctx.db
+      .query("shopifyConnections")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .collect();
+
+    return connections
+      .filter((connection) => connection.isActive)
+      .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
+      .at(0) ?? null;
+  },
+});

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { AuthSession } from "../lib/auth-session";
@@ -9,11 +9,19 @@ type Product = FunctionReturnType<typeof convexApi.products.list>[number];
 type Group = FunctionReturnType<typeof convexApi.groups.list>[number];
 type ListingJob = FunctionReturnType<typeof convexApi.listingJobs.list>[number];
 type DuplicatePolicy = "blockExisting" | "updateExisting";
+type ShopifyPublishTarget = "draft" | "published";
 type ConvexSettings = FunctionReturnType<typeof convexApi.settings.get>;
 type Settings = Omit<ConvexSettings, "duplicatePolicy"> & {
   duplicatePolicy: DuplicatePolicy;
+  shopifyPublishTarget: ShopifyPublishTarget;
 };
 type ShopifyConnection = FunctionReturnType<typeof convexApi.shopify.currentConnection>;
+type ShopifyFileUpload = {
+  shopifyFileId: string;
+  shopifyFileStatus: "uploaded" | "processing" | "ready" | "failed";
+  shopifyFileUrl?: string;
+  shopifyStagedResourceUrl: string;
+};
 
 type ProductStatus = Product["status"];
 type ImportedProduct = {
@@ -83,16 +91,26 @@ type AppDataContextValue = {
   setDuplicatePolicy: (
     duplicatePolicy: DuplicatePolicy,
   ) => Promise<{ updatedProducts: number } | null>;
+  setShopifyPublishTarget: (
+    shopifyPublishTarget: ShopifyPublishTarget,
+  ) => Promise<{ shopifyPublishTarget: ShopifyPublishTarget } | null>;
   disconnectShopify: () => Promise<null>;
+  deleteShopifyFile: (
+    productId: Id<"products">,
+    confirmPublishedDelete?: boolean,
+  ) => Promise<{ deletedFileIds: string[] } | null>;
   createGroup: (name: string) => Promise<Id<"groups">>;
   assignFirstUngrouped: (
     groupId: Id<"groups">,
   ) => Promise<{ assigned: number } | null>;
-  uploadCaptureImage: (file: File) => Promise<Id<"_storage">>;
+  uploadCaptureImage: (file: File) => Promise<ShopifyFileUpload>;
   recordCapture: (args: {
     productId: Id<"products">;
     groupId: Id<"groups">;
-    rawImageStorageId?: Id<"_storage">;
+    shopifyFileId?: string;
+    shopifyFileStatus?: ShopifyFileUpload["shopifyFileStatus"];
+    shopifyFileUrl?: string;
+    shopifyStagedResourceUrl?: string;
   }) => Promise<Id<"captures">>;
 };
 
@@ -124,7 +142,11 @@ function updateProductFields(
 }
 
 function completedForGroups(product: Product) {
-  return product.status === "draftCreated" || product.status === "needsReview";
+  return (
+    product.status === "draftCreated" ||
+    product.status === "published" ||
+    product.status === "needsReview"
+  );
 }
 
 function recomputeGroupCounts(groups: Group[], products: Product[]) {
@@ -165,15 +187,18 @@ export function AppDataProvider({
   const setDuplicatePolicyMutation = useMutation(
     convexApi.settings.setDuplicatePolicy,
   );
+  const setShopifyPublishTargetMutation = useMutation(
+    convexApi.settings.setShopifyPublishTarget,
+  );
   const disconnectShopifyMutation = useMutation(convexApi.shopify.disconnect);
+  const prepareFileUploadAction = useAction(convexApi.shopify.prepareFileUpload);
+  const finalizeFileUploadAction = useAction(convexApi.shopify.finalizeFileUpload);
+  const deleteProductFileAction = useAction(convexApi.shopify.deleteProductFile);
   const createGroupMutation = useMutation(convexApi.groups.create);
   const assignFirstUngroupedMutation = useMutation(
     convexApi.groups.assignFirstUngrouped,
   );
   const recordCaptureMutation = useMutation(convexApi.captures.record);
-  const generateUploadUrlMutation = useMutation(
-    convexApi.captures.generateUploadUrl,
-  );
   const operationIdRef = React.useRef(0);
   const [optimisticOperations, setOptimisticOperations] = React.useState<
     OptimisticOperation[]
@@ -185,7 +210,12 @@ export function AppDataProvider({
       products: products ?? [],
       groups: groups ?? [],
       listingJobs: listingJobs ?? [],
-      settings: (settings as Settings | undefined) ?? null,
+      settings: settings
+        ? ({
+            ...settings,
+            shopifyPublishTarget: settings.shopifyPublishTarget ?? "draft",
+          } satisfies Settings)
+        : null,
       shopifyConnection: shopifyConnection ?? null,
     }),
     [groups, listingJobs, products, settings, shopifyConnection],
@@ -384,6 +414,25 @@ export function AppDataProvider({
             }),
           label: "Saving existing SKU behavior",
         }),
+      setShopifyPublishTarget: (shopifyPublishTarget) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  shopifyPublishTarget,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setShopifyPublishTargetMutation({
+              sessionToken: session.sessionToken,
+              shopifyPublishTarget,
+            }),
+          label: "Saving Shopify publish target",
+        }),
       disconnectShopify: () =>
         runOptimistic({
           apply: (state) => ({
@@ -392,6 +441,27 @@ export function AppDataProvider({
           }),
           commit: () => disconnectShopifyMutation(queryArgs),
           label: "Disconnecting Shopify",
+        }),
+      deleteShopifyFile: (productId, confirmPublishedDelete) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: updateProductFields(state.products, productId, {
+              shopifyFileDeletedAt: Date.now(),
+              shopifyFileId: undefined,
+              shopifyFileStatus: undefined,
+              shopifyFileUrl: undefined,
+              shopifyStagedResourceUrl: undefined,
+            }),
+          }),
+          commit: () =>
+            deleteProductFileAction({
+              confirmPublishedDelete,
+              productId,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Deleting Shopify photo",
+          productIds: [productId],
         }),
       createGroup: (name) =>
         runOptimistic({
@@ -444,24 +514,42 @@ export function AppDataProvider({
         });
       },
       uploadCaptureImage: async (file) => {
-        const uploadUrl = await generateUploadUrlMutation({
+        const target = await prepareFileUploadAction({
+          fileSize: file.size,
+          filename: file.name || "capture.jpg",
+          mimeType: file.type || "image/jpeg",
           sessionToken: session.sessionToken,
         });
-        const response = await fetch(uploadUrl, {
+
+        const body = new FormData();
+
+        for (const parameter of target.parameters) {
+          body.append(parameter.name, parameter.value);
+        }
+
+        body.append("file", file);
+
+        const response = await fetch(target.url, {
           method: "POST",
-          headers: { "Content-Type": file.type || "application/octet-stream" },
-          body: file,
+          body,
         });
 
         if (!response.ok) {
-          throw new Error("Photo upload failed. Check your connection and retry.");
+          throw new Error("Shopify photo upload failed. Check your connection and retry.");
         }
 
-        const { storageId } = (await response.json()) as {
-          storageId: Id<"_storage">;
-        };
+        const fileRecord = await finalizeFileUploadAction({
+          alt: file.name || "Product photo",
+          originalSource: target.resourceUrl,
+          sessionToken: session.sessionToken,
+        });
 
-        return storageId;
+        return {
+          shopifyFileId: fileRecord.id,
+          shopifyFileStatus: fileRecord.status,
+          shopifyFileUrl: fileRecord.url,
+          shopifyStagedResourceUrl: target.resourceUrl,
+        };
       },
       recordCapture: (args) =>
         runOptimistic({
@@ -482,6 +570,8 @@ export function AppDataProvider({
       assignProductsMutation,
       createGroupMutation,
       deleteProductsMutation,
+      deleteProductFileAction,
+      finalizeFileUploadAction,
       importProductsMutation,
       groups,
       listingJobs,
@@ -492,8 +582,8 @@ export function AppDataProvider({
       optimisticData.settings,
       optimisticData.shopifyConnection,
       optimisticOperations,
-      generateUploadUrlMutation,
       pendingProductIds,
+      prepareFileUploadAction,
       products,
       publishProductsMutation,
       queryArgs,
@@ -502,6 +592,7 @@ export function AppDataProvider({
       session.sessionToken,
       session,
       setDuplicatePolicyMutation,
+      setShopifyPublishTargetMutation,
       disconnectShopifyMutation,
       settings,
       shopifyConnection,

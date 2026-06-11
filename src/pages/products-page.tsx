@@ -41,6 +41,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
+import { ProductPhotoDialog } from "../components/product-photo-dialog";
 import { useAppData } from "../data/app-data-provider";
 import { cn } from "../lib/utils";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -65,6 +66,7 @@ const statusTone: Record<Product["status"], "default" | "secondary" | "destructi
   captured: "outline",
   processing: "outline",
   draftCreated: "default",
+  published: "default",
   failed: "destructive",
   blockedExistingSku: "destructive",
   needsReview: "outline",
@@ -149,9 +151,11 @@ export function ProductsPage() {
   const {
     assignProductsToGroup,
     deleteProducts,
+    deleteShopifyFile,
     groups,
     isProductPending,
     isLoading,
+    listingJobs,
     products,
     importProducts,
     publishProducts,
@@ -172,10 +176,32 @@ export function ProductsPage() {
   const [importResult, setImportResult] = React.useState<ImportResult | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
   const [selectedGroupId, setSelectedGroupId] = React.useState<Id<"groups"> | "">("");
+  const [photoProductId, setPhotoProductId] =
+    React.useState<Id<"products"> | null>(null);
+  const photoProduct = React.useMemo(
+    () =>
+      photoProductId
+        ? products.find((product) => product._id === photoProductId) ?? null
+        : null,
+    [photoProductId, products],
+  );
   const groupById = React.useMemo(
     () => new Map(groups.map((group) => [group._id, group.name])),
     [groups],
   );
+  const latestJobByProductId = React.useMemo(() => {
+    const map = new Map<Id<"products">, (typeof listingJobs)[number]>();
+
+    for (const job of listingJobs) {
+      const existing = map.get(job.productId);
+
+      if (!existing || existing.createdAt < job.createdAt) {
+        map.set(job.productId, job);
+      }
+    }
+
+    return map;
+  }, [listingJobs]);
   const columns = React.useMemo(
     () => [
       columnHelper.display({
@@ -260,18 +286,31 @@ export function ProductsPage() {
       }),
       columnHelper.accessor("status", {
         header: "Status",
-        cell: ({ row }) => (
-          <div className="flex flex-wrap gap-1">
-            <Badge variant={statusTone[row.original.status]}>
-              {row.original.status}
-            </Badge>
-            {isProductPending(row.original._id) ? (
-              <Badge className="border-amber-300 text-amber-800" variant="outline">
-                saving
+        cell: ({ row }) => {
+          const latestJob = latestJobByProductId.get(row.original._id);
+
+          return (
+            <div className="flex flex-wrap gap-1">
+              <Badge variant={statusTone[row.original.status]}>
+                {row.original.status}
               </Badge>
-            ) : null}
-          </div>
-        ),
+              {isProductPending(row.original._id) ? (
+                <Badge className="border-amber-300 text-amber-800" variant="outline">
+                  saving
+                </Badge>
+              ) : null}
+              {latestJob?.status === "failed" ? (
+                <Badge
+                  className="max-w-[130px] truncate border-red-200 text-red-700"
+                  title={latestJob.error ?? row.original.error}
+                  variant="outline"
+                >
+                  job failed
+                </Badge>
+              ) : null}
+            </div>
+          );
+        },
       }),
       columnHelper.display({
         id: "group",
@@ -286,15 +325,42 @@ export function ProductsPage() {
       columnHelper.display({
         id: "shopify",
         header: "Shopify",
-        cell: ({ row }) =>
-          row.original.shopifyProductId ? (
-            <span className="font-mono text-xs">{row.original.shopifyProductId}</span>
-          ) : (
-            <span className="text-slate-400">Draft pending</span>
-          ),
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            {row.original.shopifyFileUrl ? (
+              <button
+                aria-label={`View photo for ${row.original.sku}`}
+                className="shrink-0 rounded transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950"
+                onClick={() => setPhotoProductId(row.original._id)}
+                type="button"
+              >
+                <img
+                  alt={`Shopify file for ${row.original.sku}`}
+                  className="h-8 w-8 rounded object-cover"
+                  src={row.original.shopifyFileUrl}
+                />
+              </button>
+            ) : null}
+            <div className="min-w-0">
+              {row.original.shopifyProductId ? (
+                <span className="block truncate font-mono text-xs">
+                  {row.original.shopifyProductHandle ??
+                    row.original.shopifyProductId}
+                </span>
+              ) : (
+                <span className="text-slate-400">Listing pending</span>
+              )}
+              {row.original.shopifyFileStatus ? (
+                <span className="block text-xs text-slate-400">
+                  file {row.original.shopifyFileStatus}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ),
       }),
     ],
-    [groupById, isProductPending, updateProduct],
+    [groupById, isProductPending, latestJobByProductId, updateProduct],
   );
   const table = useReactTable({
     columns,
@@ -639,6 +705,11 @@ export function ProductsPage() {
         </DialogContent>
       </Dialog>
 
+      <ProductPhotoDialog
+        onClose={() => setPhotoProductId(null)}
+        product={photoProduct}
+      />
+
       <div
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain md:hidden"
         ref={cardListRef}
@@ -650,6 +721,7 @@ export function ProductsPage() {
           {cardVirtualizer.getVirtualItems().map((virtualRow) => {
             const row = rows[virtualRow.index];
             const product = row.original;
+            const latestJob = latestJobByProductId.get(product._id);
 
             return (
               <div
@@ -681,6 +753,20 @@ export function ProductsPage() {
                         {product.sku}
                       </p>
                     </div>
+                    {product.shopifyFileUrl ? (
+                      <button
+                        aria-label={`View photo for ${product.sku}`}
+                        className="shrink-0 rounded-lg transition-transform active:scale-95"
+                        onClick={() => setPhotoProductId(product._id)}
+                        type="button"
+                      >
+                        <img
+                          alt={`Shopify file for ${product.sku}`}
+                          className="h-12 w-12 rounded-lg object-cover"
+                          src={product.shopifyFileUrl}
+                        />
+                      </button>
+                    ) : null}
                     <span className="text-sm font-medium">
                       ${product.price.toFixed(2)}
                     </span>
@@ -714,6 +800,30 @@ export function ProductsPage() {
                           <Send />
                           Publish
                         </DropdownMenuItem>
+                        {product.shopifyFileId ? (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              const confirmed =
+                                product.shopifyStatus === "published"
+                                  ? window.confirm(
+                                      "This product is published. Delete its Shopify photo anyway?",
+                                    )
+                                  : true;
+
+                              if (!confirmed) {
+                                return;
+                              }
+
+                              void deleteShopifyFile(
+                                product._id,
+                                product.shopifyStatus === "published",
+                              ).catch(() => undefined);
+                            }}
+                          >
+                            <Trash2 />
+                            Delete Shopify photo
+                          </DropdownMenuItem>
+                        ) : null}
                         <DropdownMenuItem
                           className="text-red-600 focus:bg-red-50 focus:text-red-600"
                           onSelect={() =>
@@ -738,6 +848,15 @@ export function ProductsPage() {
                         variant="outline"
                       >
                         saving
+                      </Badge>
+                    ) : null}
+                    {latestJob?.status === "failed" ? (
+                      <Badge
+                        className="border-red-200 text-red-700"
+                        title={latestJob.error ?? product.error}
+                        variant="outline"
+                      >
+                        job failed
                       </Badge>
                     ) : null}
                     <span>

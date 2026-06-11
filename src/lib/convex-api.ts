@@ -37,9 +37,6 @@ export const convexApi = {
   },
   captures: {
     record: deployedFunction<typeof api.captures.record>("captures.js:record"),
-    generateUploadUrl: deployedFunction<typeof api.captures.generateUploadUrl>(
-      "captures.js:generateUploadUrl",
-    ),
   },
   groups: {
     list: deployedFunction<typeof api.groups.list>("groups.js:list"),
@@ -75,6 +72,9 @@ export const convexApi = {
     setDuplicatePolicy: deployedFunction<
       typeof api.settings.setDuplicatePolicy
     >("settings.js:setDuplicatePolicy"),
+    setShopifyPublishTarget: deployedFunction<
+      typeof api.settings.setShopifyPublishTarget
+    >("settings.js:setShopifyPublishTarget"),
   },
   shopify: {
     currentConnection: deployedFunction<typeof api.shopify.currentConnection>(
@@ -86,5 +86,14 @@ export const convexApi = {
     startShopifyInstall: deployedFunction<
       typeof api.shopify.startShopifyInstall
     >("shopify.js:startShopifyInstall"),
+    prepareFileUpload: deployedFunction<typeof api.shopify.prepareFileUpload>(
+      "shopify.js:prepareFileUpload",
+    ),
+    finalizeFileUpload: deployedFunction<typeof api.shopify.finalizeFileUpload>(
+      "shopify.js:finalizeFileUpload",
+    ),
+    deleteProductFile: deployedFunction<typeof api.shopify.deleteProductFile>(
+      "shopify.js:deleteProductFile",
+    ),
   },
 };

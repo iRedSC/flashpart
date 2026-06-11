@@ -18,6 +18,7 @@ import type * as listingJobs from "../listingJobs.js";
 import type * as products from "../products.js";
 import type * as settings from "../settings.js";
 import type * as shopify from "../shopify.js";
+import type * as shopifyClient from "../shopifyClient.js";
 import type * as shopifyModel from "../shopifyModel.js";
 
 import type {
@@ -37,6 +38,7 @@ declare const fullApi: ApiFromModules<{
   products: typeof products;
   settings: typeof settings;
   shopify: typeof shopify;
+  shopifyClient: typeof shopifyClient;
   shopifyModel: typeof shopifyModel;
 }>;
 

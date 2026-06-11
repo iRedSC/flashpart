@@ -19,6 +19,7 @@ export function SettingsPage() {
   const {
     disconnectShopify,
     setDuplicatePolicy,
+    setShopifyPublishTarget,
     session,
     settings,
     shopifyConnection,
@@ -30,6 +31,7 @@ export function SettingsPage() {
   const [message, setMessage] = React.useState("");
   const [isConnecting, setIsConnecting] = React.useState(false);
   const updateExisting = settings?.duplicatePolicy === "updateExisting";
+  const publishDirectly = settings?.shopifyPublishTarget === "published";
 
   React.useEffect(() => {
     setShopDomain(shopifyConnection?.shopDomain ?? "");
@@ -101,6 +103,40 @@ export function SettingsPage() {
               onCheckedChange={(checked) =>
                 void setDuplicatePolicy(
                   checked ? "updateExisting" : "blockExisting",
+                ).catch(() => undefined)
+              }
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Shopify publish target</CardTitle>
+          <CardDescription>
+            Choose whether publish actions create reviewable drafts or live products.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
+            <div>
+              <p className="font-medium">
+                {publishDirectly
+                  ? "Create published Shopify products"
+                  : "Create Shopify drafts"}
+              </p>
+              <p className="text-sm text-slate-500">
+                {publishDirectly
+                  ? "Products will go live as soon as the listing job succeeds."
+                  : "Products stay in Shopify drafts for review before they go live."}
+              </p>
+            </div>
+            <Switch
+              aria-label="Toggle Shopify publish target"
+              checked={publishDirectly}
+              onCheckedChange={(checked) =>
+                void setShopifyPublishTarget(
+                  checked ? "published" : "draft",
                 ).catch(() => undefined)
               }
             />
