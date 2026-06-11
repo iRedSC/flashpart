@@ -469,13 +469,13 @@ export function CapturePage() {
                   </span>
                 ) : null}
                 <Button
-                  className="absolute bottom-4 left-1/2 h-14 -translate-x-1/2 rounded-full px-6 text-base shadow-lg"
+                  aria-label="Capture photo"
+                  className="absolute bottom-4 left-1/2 h-16 w-16 -translate-x-1/2 rounded-full p-0 shadow-lg"
                   disabled={!isCameraReady || isSubmitting}
                   onClick={() => void handleCaptureFromCamera()}
                   type="button"
                 >
-                  <Camera className="h-5 w-5" />
-                  Capture square photo
+                  <Camera className="h-7 w-7" />
                 </Button>
               </>
             )}
