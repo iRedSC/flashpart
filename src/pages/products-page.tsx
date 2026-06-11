@@ -16,6 +16,7 @@ import {
   Upload,
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
+import { ProductStatusBadge } from "../components/product-status-badge";
 import { Button } from "../components/ui/button";
 import {
   DropdownMenu,
@@ -60,18 +61,6 @@ type ImportResult = {
 };
 
 const columnHelper = createColumnHelper<Product>();
-const statusTone: Record<Product["status"], "default" | "secondary" | "destructive" | "outline"> = {
-  imported: "secondary",
-  grouped: "default",
-  captured: "outline",
-  processing: "outline",
-  draftCreated: "default",
-  published: "default",
-  failed: "destructive",
-  blockedExistingSku: "destructive",
-  needsReview: "outline",
-};
-
 function parseCsvLine(line: string) {
   const values: string[] = [];
   let current = "";
@@ -291,21 +280,15 @@ export function ProductsPage() {
 
           return (
             <div className="flex flex-wrap gap-1">
-              <Badge variant={statusTone[row.original.status]}>
-                {row.original.status}
-              </Badge>
+              <ProductStatusBadge
+                error={row.original.error}
+                hasCapture={Boolean(row.original.shopifyFileId)}
+                latestJob={latestJob}
+                status={row.original.status}
+              />
               {isProductPending(row.original._id) ? (
                 <Badge className="border-amber-300 text-amber-800" variant="outline">
                   saving
-                </Badge>
-              ) : null}
-              {latestJob?.status === "failed" ? (
-                <Badge
-                  className="max-w-[130px] truncate border-red-200 text-red-700"
-                  title={latestJob.error ?? row.original.error}
-                  variant="outline"
-                >
-                  job failed
                 </Badge>
               ) : null}
             </div>
@@ -839,24 +822,18 @@ export function ProductsPage() {
                     </DropdownMenu>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                    <Badge variant={statusTone[product.status]}>
-                      {product.status}
-                    </Badge>
+                    <ProductStatusBadge
+                      error={product.error}
+                      hasCapture={Boolean(product.shopifyFileId)}
+                      latestJob={latestJob}
+                      status={product.status}
+                    />
                     {isProductPending(product._id) ? (
                       <Badge
                         className="border-amber-300 text-amber-800"
                         variant="outline"
                       >
                         saving
-                      </Badge>
-                    ) : null}
-                    {latestJob?.status === "failed" ? (
-                      <Badge
-                        className="border-red-200 text-red-700"
-                        title={latestJob.error ?? product.error}
-                        variant="outline"
-                      >
-                        job failed
                       </Badge>
                     ) : null}
                     <span>

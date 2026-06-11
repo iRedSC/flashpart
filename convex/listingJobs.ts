@@ -213,6 +213,7 @@ export const markJobBlockedExistingSku = internalMutation({
       throw new Error("Listing job not found");
     }
 
+    const product = await ctx.db.get(job.productId);
     const now = Date.now();
     const message = "A Shopify product with this SKU already exists.";
 
@@ -227,7 +228,7 @@ export const markJobBlockedExistingSku = internalMutation({
     });
     await ctx.db.patch(job.productId, {
       error: message,
-      status: "blockedExistingSku",
+      status: product?.shopifyFileId ? "captured" : "blockedExistingSku",
       updatedAt: now,
     });
   },
@@ -245,6 +246,7 @@ export const markJobFailed = internalMutation({
       throw new Error("Listing job not found");
     }
 
+    const product = await ctx.db.get(job.productId);
     const now = Date.now();
 
     await ctx.db.patch(args.jobId, {
@@ -255,7 +257,7 @@ export const markJobFailed = internalMutation({
     });
     await ctx.db.patch(job.productId, {
       error: args.error,
-      status: "failed",
+      status: product?.shopifyFileId ? "captured" : "failed",
       updatedAt: now,
     });
   },

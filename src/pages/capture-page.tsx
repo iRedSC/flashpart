@@ -70,8 +70,8 @@ export function CapturePage() {
     groupProducts.find(
       (product) =>
         product.status === "grouped" ||
-        product.status === "failed" ||
-        product.status === "blockedExistingSku",
+        (product.status === "failed" && !product.shopifyFileId) ||
+        (product.status === "blockedExistingSku" && !product.shopifyFileId),
     ) ?? null;
   const completedCount = groupProducts.filter(
     (product) =>

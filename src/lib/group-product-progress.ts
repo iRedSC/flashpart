@@ -16,7 +16,7 @@ export type GroupProductProgress = {
   total: number;
 };
 
-export function groupProductProgress<T extends { status: ProductStatus }>(
+export function groupProductProgress<T extends { status: ProductStatus; shopifyFileId?: string }>(
   products: T[],
 ): GroupProductProgress {
   let pending = 0;
@@ -30,7 +30,9 @@ export function groupProductProgress<T extends { status: ProductStatus }>(
       product.status === "captured" ||
       product.status === "processing" ||
       product.status === "needsReview" ||
-      product.status === "draftCreated"
+      product.status === "draftCreated" ||
+      ((product.status === "failed" || product.status === "blockedExistingSku") &&
+        Boolean(product.shopifyFileId))
     ) {
       captured += 1;
     } else {
