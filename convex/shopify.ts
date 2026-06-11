@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
+import { makeFunctionReference } from "convex/server";
 import { action, httpAction, mutation, query } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { requireSessionUser } from "./authUtils";
 
 const SHOPIFY_SCOPES = ["read_products", "write_products", "read_files", "write_files"];
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
@@ -8,6 +9,16 @@ const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 type ShopifyAccessTokenResponse = {
   access_token?: string;
   scope?: string;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const shopifyModel = {
+  createOAuthState: makeFunctionReference(
+    "shopifyModel.js:createOAuthState",
+  ) as any,
+  storeConnectionFromOAuth: makeFunctionReference(
+    "shopifyModel.js:storeConnectionFromOAuth",
+  ) as any,
 };
 
 const normalizeShopDomain = (value: string) => {
@@ -97,6 +108,7 @@ const htmlResponse = (title: string, message: string, status = 200) =>
 
 export const startShopifyInstall = action({
   args: {
+    sessionToken: v.string(),
     shopDomain: v.string(),
     redirectUri: v.string(),
   },
@@ -106,7 +118,8 @@ export const startShopifyInstall = action({
     const shopDomain = normalizeShopDomain(args.shopDomain);
     const state = crypto.randomUUID();
 
-    await ctx.runMutation(internal.shopifyModel.createOAuthState, {
+    await ctx.runMutation(shopifyModel.createOAuthState, {
+      sessionToken: args.sessionToken,
       shopDomain,
       state,
       expiresAt: now + OAUTH_STATE_TTL_MS,
@@ -127,13 +140,15 @@ export const startShopifyInstall = action({
 });
 
 export const currentConnection = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    const userId = await requireSessionUser(ctx, args.sessionToken);
     const connections = await ctx.db
       .query("shopifyConnections")
-      .withIndex("by_active", (q) => q.eq("isActive", true))
+      .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
     const currentConnection = connections
+      .filter((connection) => connection.isActive)
       .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
       .at(0);
 
@@ -152,15 +167,16 @@ export const currentConnection = query({
 });
 
 export const disconnect = mutation({
-  args: {},
-  handler: async (ctx) => {
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    const userId = await requireSessionUser(ctx, args.sessionToken);
     const connections = await ctx.db
       .query("shopifyConnections")
-      .withIndex("by_active", (q) => q.eq("isActive", true))
+      .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
     const now = Date.now();
 
-    for (const connection of connections) {
+    for (const connection of connections.filter((connection) => connection.isActive)) {
       await ctx.db.patch(connection._id, {
         isActive: false,
         updatedAt: now,
@@ -230,7 +246,7 @@ export const handleShopifyCallback = httpAction(async (ctx, request) => {
     );
   }
 
-  await ctx.runMutation(internal.shopifyModel.storeConnectionFromOAuth, {
+  await ctx.runMutation(shopifyModel.storeConnectionFromOAuth, {
     state,
     shopDomain,
     accessToken: tokenResult.access_token,

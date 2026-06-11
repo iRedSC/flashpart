@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { requireSessionUser } from "./authUtils";
 import { duplicatePolicy, productStatus } from "./schema";
 
 const sampleProducts = [
@@ -16,15 +17,17 @@ const sampleProducts = [
 ] as const;
 
 export const list = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     return await ctx.db.query("products").order("desc").collect();
   },
 });
 
 export const seedSampleProducts = mutation({
-  args: {},
-  handler: async (ctx) => {
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const existing = await ctx.db.query("products").first();
 
     if (existing) {
@@ -55,6 +58,7 @@ export const seedSampleProducts = mutation({
 
 export const update = mutation({
   args: {
+    sessionToken: v.string(),
     id: v.id("products"),
     sku: v.optional(v.string()),
     name: v.optional(v.string()),
@@ -63,10 +67,14 @@ export const update = mutation({
     duplicatePolicy: v.optional(duplicatePolicy),
   },
   handler: async (ctx, args) => {
-    const { id, ...patch } = args;
+    await requireSessionUser(ctx, args.sessionToken);
 
-    await ctx.db.patch(id, {
-      ...patch,
+    await ctx.db.patch(args.id, {
+      sku: args.sku,
+      name: args.name,
+      price: args.price,
+      status: args.status,
+      duplicatePolicy: args.duplicatePolicy,
       updatedAt: Date.now(),
     });
   },
@@ -74,9 +82,11 @@ export const update = mutation({
 
 export const setDuplicatePolicyForAll = mutation({
   args: {
+    sessionToken: v.string(),
     duplicatePolicy,
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const products = await ctx.db.query("products").collect();
     const now = Date.now();
 

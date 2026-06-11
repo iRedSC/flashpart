@@ -1,19 +1,23 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { requireSessionUser } from "./authUtils";
 
 export const list = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     return await ctx.db.query("listingJobs").order("desc").collect();
   },
 });
 
 export const markRunning = mutation({
   args: {
+    sessionToken: v.string(),
     jobId: v.id("listingJobs"),
     triggerRunId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const job = await ctx.db.get(args.jobId);
 
     if (!job) {
@@ -31,10 +35,12 @@ export const markRunning = mutation({
 
 export const markSucceeded = mutation({
   args: {
+    sessionToken: v.string(),
     jobId: v.id("listingJobs"),
     shopifyProductId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const job = await ctx.db.get(args.jobId);
 
     if (!job) {
@@ -61,10 +67,12 @@ export const markSucceeded = mutation({
 
 export const markFailed = mutation({
   args: {
+    sessionToken: v.string(),
     jobId: v.id("listingJobs"),
     error: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const job = await ctx.db.get(args.jobId);
 
     if (!job) {

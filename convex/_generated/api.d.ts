@@ -8,6 +8,9 @@
  * @module
  */
 
+import type * as auth from "../auth.js";
+import type * as authModel from "../authModel.js";
+import type * as authUtils from "../authUtils.js";
 import type * as captures from "../captures.js";
 import type * as groups from "../groups.js";
 import type * as http from "../http.js";
@@ -24,6 +27,9 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  auth: typeof auth;
+  authModel: typeof authModel;
+  authUtils: typeof authUtils;
   captures: typeof captures;
   groups: typeof groups;
   http: typeof http;

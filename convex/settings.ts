@@ -1,4 +1,6 @@
 import { mutation, query } from "./_generated/server";
+import { v } from "convex/values";
+import { requireSessionUser } from "./authUtils";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { duplicatePolicy } from "./schema";
 
@@ -16,17 +18,20 @@ async function getSettingsDocument(ctx: QueryCtx | MutationCtx) {
 }
 
 export const get = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     return (await getSettingsDocument(ctx)) ?? defaultSettings;
   },
 });
 
 export const setDuplicatePolicy = mutation({
   args: {
+    sessionToken: v.string(),
     duplicatePolicy,
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const settings = await getSettingsDocument(ctx);
     const now = Date.now();
 

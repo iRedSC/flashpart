@@ -1,13 +1,16 @@
 import { v } from "convex/values";
 import { mutation } from "./_generated/server";
+import { requireSessionUser } from "./authUtils";
 
 export const record = mutation({
   args: {
+    sessionToken: v.string(),
     productId: v.id("products"),
     groupId: v.id("groups"),
     rawImageStorageId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const now = Date.now();
     const captureId = await ctx.db.insert("captures", {
       productId: args.productId,
@@ -42,9 +45,11 @@ export const record = mutation({
 
 export const markProcessing = mutation({
   args: {
+    sessionToken: v.string(),
     captureId: v.id("captures"),
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const capture = await ctx.db.get(args.captureId);
 
     if (!capture) {
@@ -66,10 +71,12 @@ export const markProcessing = mutation({
 
 export const markProcessed = mutation({
   args: {
+    sessionToken: v.string(),
     captureId: v.id("captures"),
     processedImageUrl: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const capture = await ctx.db.get(args.captureId);
 
     if (!capture) {

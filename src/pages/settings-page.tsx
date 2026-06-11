@@ -1,7 +1,6 @@
 import * as React from "react";
 import { useAction } from "convex/react";
 import { Link2Off, Store } from "lucide-react";
-import { api } from "../../convex/_generated/api";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
@@ -14,15 +13,17 @@ import {
 import { Input } from "../components/ui/input";
 import { Switch } from "../components/ui/switch";
 import { useAppData } from "../data/app-data-provider";
+import { convexApi } from "../lib/convex-api";
 
 export function SettingsPage() {
   const {
     disconnectShopify,
     setDuplicatePolicy,
+    session,
     settings,
     shopifyConnection,
   } = useAppData();
-  const startShopifyInstall = useAction(api.shopify.startShopifyInstall);
+  const startShopifyInstall = useAction(convexApi.shopify.startShopifyInstall);
   const [shopDomain, setShopDomain] = React.useState(
     shopifyConnection?.shopDomain ?? "",
   );
@@ -54,6 +55,7 @@ export function SettingsPage() {
       const redirectUri = `${convexSiteUrl.replace(/\/$/, "")}/shopify/callback`;
       const { authUrl } = await startShopifyInstall({
         redirectUri,
+        sessionToken: session.sessionToken,
         shopDomain: shopDomain.trim(),
       });
 

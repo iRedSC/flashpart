@@ -18,13 +18,77 @@ export const duplicatePolicy = v.union(
 );
 
 export default defineSchema({
+  users: defineTable({
+    email: v.string(),
+    createdAt: v.number(),
+    lastLoginAt: v.optional(v.number()),
+  }).index("by_email", ["email"]),
+
+  emailOtps: defineTable({
+    email: v.string(),
+    codeHash: v.string(),
+    purpose: v.union(v.literal("passkey_setup"), v.literal("login")),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_email", ["email"])
+    .index("by_email_purpose", ["email", "purpose"]),
+
+  authChallenges: defineTable({
+    userId: v.optional(v.id("users")),
+    email: v.optional(v.string()),
+    challenge: v.string(),
+    purpose: v.union(v.literal("passkey_setup"), v.literal("login")),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_email", ["email"])
+    .index("by_challenge", ["challenge"]),
+
+  passkeys: defineTable({
+    userId: v.id("users"),
+    credentialId: v.string(),
+    publicKey: v.string(),
+    signCount: v.number(),
+    transports: v.optional(v.array(v.string())),
+    deviceName: v.optional(v.string()),
+    createdAt: v.number(),
+    lastUsedAt: v.optional(v.number()),
+  })
+    .index("by_user", ["userId"])
+    .index("by_credential_id", ["credentialId"]),
+
+  authSessions: defineTable({
+    userId: v.id("users"),
+    tokenHash: v.string(),
+    expiresAt: v.number(),
+    revokedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    lastSeenAt: v.optional(v.number()),
+  })
+    .index("by_user", ["userId"])
+    .index("by_token_hash", ["tokenHash"]),
+
   appSettings: defineTable({
     key: v.literal("singleton"),
     duplicatePolicy,
+    shopifyConnectionStatus: v.optional(
+      v.union(
+        v.literal("disconnected"),
+        v.literal("needsToken"),
+        v.literal("connected"),
+      ),
+    ),
+    shopifyShopDomain: v.optional(v.string()),
+    shopifyTokenLastFour: v.optional(v.string()),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
 
   shopifyConnections: defineTable({
+    userId: v.id("users"),
     shopDomain: v.string(),
     accessToken: v.string(),
     scopes: v.array(v.string()),
@@ -32,10 +96,13 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
   })
+    .index("by_user", ["userId"])
     .index("by_shop_domain", ["shopDomain"])
+    .index("by_user_shop_domain", ["userId", "shopDomain"])
     .index("by_active", ["isActive"]),
 
   shopifyOAuthStates: defineTable({
+    userId: v.id("users"),
     shopDomain: v.string(),
     state: v.string(),
     expiresAt: v.number(),
@@ -43,6 +110,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_state", ["state"])
+    .index("by_user", ["userId"])
     .index("by_shop_domain", ["shopDomain"]),
 
   products: defineTable({

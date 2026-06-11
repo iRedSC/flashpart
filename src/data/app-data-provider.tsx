@@ -1,16 +1,18 @@
 import * as React from "react";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
-import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import type { AuthSession } from "../lib/auth-session";
+import { convexApi } from "../lib/convex-api";
 
-type Product = FunctionReturnType<typeof api.products.list>[number];
-type Group = FunctionReturnType<typeof api.groups.list>[number];
-type ListingJob = FunctionReturnType<typeof api.listingJobs.list>[number];
-type Settings = FunctionReturnType<typeof api.settings.get>;
-type ShopifyConnection = FunctionReturnType<typeof api.shopify.currentConnection>;
+type Product = FunctionReturnType<typeof convexApi.products.list>[number];
+type Group = FunctionReturnType<typeof convexApi.groups.list>[number];
+type ListingJob = FunctionReturnType<typeof convexApi.listingJobs.list>[number];
+type Settings = FunctionReturnType<typeof convexApi.settings.get>;
+type ShopifyConnection = FunctionReturnType<typeof convexApi.shopify.currentConnection>;
 
 type AppDataContextValue = {
+  session: AuthSession;
   products: Product[];
   groups: Group[];
   listingJobs: ListingJob[];
@@ -42,23 +44,40 @@ type AppDataContextValue = {
 
 const AppDataContext = React.createContext<AppDataContextValue | null>(null);
 
-export function AppDataProvider({ children }: { children: React.ReactNode }) {
-  const products = useQuery(api.products.list);
-  const groups = useQuery(api.groups.list);
-  const listingJobs = useQuery(api.listingJobs.list);
-  const settings = useQuery(api.settings.get);
-  const shopifyConnection = useQuery(api.shopify.currentConnection);
-  const seedSampleProductsMutation = useMutation(api.products.seedSampleProducts);
-  const updateProductMutation = useMutation(api.products.update);
-  const setDuplicatePolicyMutation = useMutation(api.settings.setDuplicatePolicy);
-  const disconnectShopifyMutation = useMutation(api.shopify.disconnect);
-  const createGroupMutation = useMutation(api.groups.create);
-  const assignFirstUngroupedMutation = useMutation(api.groups.assignFirstUngrouped);
-  const recordCaptureMutation = useMutation(api.captures.record);
+export function AppDataProvider({
+  children,
+  session,
+}: {
+  children: React.ReactNode;
+  session: AuthSession;
+}) {
+  const queryArgs = React.useMemo(
+    () => ({ sessionToken: session.sessionToken }),
+    [session.sessionToken],
+  );
+  const products = useQuery(convexApi.products.list, queryArgs);
+  const groups = useQuery(convexApi.groups.list, queryArgs);
+  const listingJobs = useQuery(convexApi.listingJobs.list, queryArgs);
+  const settings = useQuery(convexApi.settings.get, queryArgs);
+  const shopifyConnection = useQuery(convexApi.shopify.currentConnection, queryArgs);
+  const seedSampleProductsMutation = useMutation(
+    convexApi.products.seedSampleProducts,
+  );
+  const updateProductMutation = useMutation(convexApi.products.update);
+  const setDuplicatePolicyMutation = useMutation(
+    convexApi.settings.setDuplicatePolicy,
+  );
+  const disconnectShopifyMutation = useMutation(convexApi.shopify.disconnect);
+  const createGroupMutation = useMutation(convexApi.groups.create);
+  const assignFirstUngroupedMutation = useMutation(
+    convexApi.groups.assignFirstUngrouped,
+  );
+  const recordCaptureMutation = useMutation(convexApi.captures.record);
 
   const value = React.useMemo<AppDataContextValue>(
     () => ({
       products: products ?? [],
+      session,
       groups: groups ?? [],
       listingJobs: listingJobs ?? [],
       settings: settings ?? null,
@@ -69,15 +88,25 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         listingJobs === undefined ||
         settings === undefined ||
         shopifyConnection === undefined,
-      seedSampleProducts: () => seedSampleProductsMutation({}),
-      updateProduct: (args) => updateProductMutation(args),
+      seedSampleProducts: () => seedSampleProductsMutation(queryArgs),
+      updateProduct: (args) =>
+        updateProductMutation({ ...args, sessionToken: session.sessionToken }),
       setDuplicatePolicy: (duplicatePolicy) =>
-        setDuplicatePolicyMutation({ duplicatePolicy }),
-      disconnectShopify: () => disconnectShopifyMutation({}),
-      createGroup: (name) => createGroupMutation({ name }),
+        setDuplicatePolicyMutation({
+          duplicatePolicy,
+          sessionToken: session.sessionToken,
+        }),
+      disconnectShopify: () => disconnectShopifyMutation(queryArgs),
+      createGroup: (name) =>
+        createGroupMutation({ name, sessionToken: session.sessionToken }),
       assignFirstUngrouped: (groupId, count) =>
-        assignFirstUngroupedMutation({ groupId, count }),
-      recordCapture: (args) => recordCaptureMutation(args),
+        assignFirstUngroupedMutation({
+          groupId,
+          count,
+          sessionToken: session.sessionToken,
+        }),
+      recordCapture: (args) =>
+        recordCaptureMutation({ ...args, sessionToken: session.sessionToken }),
     }),
     [
       assignFirstUngroupedMutation,
@@ -85,8 +114,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       groups,
       listingJobs,
       products,
+      queryArgs,
       recordCaptureMutation,
       seedSampleProductsMutation,
+      session.sessionToken,
+      session,
       setDuplicatePolicyMutation,
       disconnectShopifyMutation,
       settings,

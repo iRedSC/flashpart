@@ -1,15 +1,20 @@
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
+import { requireSessionUser } from "./authUtils";
 
 export const createOAuthState = internalMutation({
   args: {
+    sessionToken: v.string(),
     shopDomain: v.string(),
     state: v.string(),
     expiresAt: v.number(),
     now: v.number(),
   },
   handler: async (ctx, args) => {
+    const userId = await requireSessionUser(ctx, args.sessionToken);
+
     await ctx.db.insert("shopifyOAuthStates", {
+      userId,
       shopDomain: args.shopDomain,
       state: args.state,
       expiresAt: args.expiresAt,
@@ -42,7 +47,9 @@ export const storeConnectionFromOAuth = internalMutation({
 
     const existingConnection = await ctx.db
       .query("shopifyConnections")
-      .withIndex("by_shop_domain", (q) => q.eq("shopDomain", args.shopDomain))
+      .withIndex("by_user_shop_domain", (q) =>
+        q.eq("userId", oauthState.userId).eq("shopDomain", args.shopDomain),
+      )
       .unique();
     const connection = {
       accessToken: args.accessToken,
@@ -55,6 +62,7 @@ export const storeConnectionFromOAuth = internalMutation({
       await ctx.db.patch(existingConnection._id, connection);
     } else {
       await ctx.db.insert("shopifyConnections", {
+        userId: oauthState.userId,
         shopDomain: args.shopDomain,
         ...connection,
         createdAt: args.now,
@@ -66,14 +74,16 @@ export const storeConnectionFromOAuth = internalMutation({
 });
 
 export const currentActiveConnection = internalQuery({
-  args: {},
-  handler: async (ctx) => {
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    const userId = await requireSessionUser(ctx, args.sessionToken);
     const connections = await ctx.db
       .query("shopifyConnections")
-      .withIndex("by_active", (q) => q.eq("isActive", true))
+      .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
 
     return connections
+      .filter((connection) => connection.isActive)
       .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
       .at(0) ?? null;
   },

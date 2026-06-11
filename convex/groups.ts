@@ -1,9 +1,11 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { requireSessionUser } from "./authUtils";
 
 export const list = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const groups = await ctx.db.query("groups").order("desc").collect();
     const products = await ctx.db.query("products").collect();
 
@@ -27,9 +29,11 @@ export const list = query({
 
 export const create = mutation({
   args: {
+    sessionToken: v.string(),
     name: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const now = Date.now();
 
     return await ctx.db.insert("groups", {
@@ -43,10 +47,12 @@ export const create = mutation({
 
 export const assignFirstUngrouped = mutation({
   args: {
+    sessionToken: v.string(),
     groupId: v.id("groups"),
     count: v.number(),
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const products = await ctx.db.query("products").collect();
     const candidates = products
       .filter((product) => product.groupId === undefined)
@@ -67,9 +73,11 @@ export const assignFirstUngrouped = mutation({
 
 export const nextProduct = query({
   args: {
+    sessionToken: v.string(),
     groupId: v.id("groups"),
   },
   handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
     const products = await ctx.db
       .query("products")
       .withIndex("by_group", (q) => q.eq("groupId", args.groupId))
