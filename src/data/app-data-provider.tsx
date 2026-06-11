@@ -209,6 +209,8 @@ export function AppDataProvider({
   );
   const recordCaptureMutation = useMutation(convexApi.captures.record);
   const operationIdRef = React.useRef(0);
+  const hasInitializedFailedJobTrackingRef = React.useRef(false);
+  const seenFailedListingJobIdsRef = React.useRef<Set<string>>(new Set());
   const [optimisticOperations, setOptimisticOperations] = React.useState<
     OptimisticOperation[]
   >([]);
@@ -251,6 +253,36 @@ export function AppDataProvider({
 
     return ids;
   }, [optimisticOperations]);
+  React.useEffect(() => {
+    if (listingJobs === undefined) {
+      return;
+    }
+
+    const failedJobs = listingJobs.filter((job) => job.status === "failed");
+    const seenFailedJobIds = seenFailedListingJobIdsRef.current;
+
+    if (!hasInitializedFailedJobTrackingRef.current) {
+      for (const job of failedJobs) {
+        seenFailedJobIds.add(job._id);
+      }
+      hasInitializedFailedJobTrackingRef.current = true;
+      return;
+    }
+
+    const newlyFailedJob = failedJobs.find((job) => !seenFailedJobIds.has(job._id));
+
+    for (const job of failedJobs) {
+      seenFailedJobIds.add(job._id);
+    }
+
+    if (newlyFailedJob) {
+      setLastMutationError({
+        id: newlyFailedJob._id,
+        label: "Publishing product",
+        message: newlyFailedJob.error ?? "Shopify listing job failed.",
+      });
+    }
+  }, [listingJobs]);
   const uploadCaptureFile = React.useCallback(
     async (file: File): Promise<ShopifyFileUpload> => {
       const target = await prepareFileUploadAction({

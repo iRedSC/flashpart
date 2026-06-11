@@ -207,6 +207,7 @@ export default defineSchema({
       v.literal("succeeded"),
       v.literal("failed"),
     ),
+    previousProductStatus: v.optional(productStatus),
     attempts: v.number(),
     triggerRunId: v.optional(v.string()),
     error: v.optional(v.string()),

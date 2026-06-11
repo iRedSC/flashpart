@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
+import type { Doc } from "./_generated/dataModel";
 import {
   internalAction,
   internalMutation,
@@ -18,6 +19,8 @@ import {
   updateShopifyVariant,
 } from "./shopifyClient";
 
+type ProductStatus = Doc<"products">["status"];
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const listingJobModel = {
   jobPayload: makeFunctionReference("listingJobs.js:jobPayload") as any,
@@ -33,6 +36,21 @@ const listingJobModel = {
     "listingJobs.js:processQueuedJob",
   ) as any,
 };
+
+function restoredStatusForFailedJob(
+  product: Pick<Doc<"products">, "shopifyFileId" | "status"> | null,
+  previousStatus?: ProductStatus,
+) {
+  if (previousStatus) {
+    return previousStatus;
+  }
+
+  if (!product || product.status !== "processing") {
+    return product?.status;
+  }
+
+  return product.shopifyFileId ? "captured" : "grouped";
+}
 
 export const list = query({
   args: { sessionToken: v.string() },
@@ -63,6 +81,8 @@ export const enqueueCreateDrafts = mutation({
     }
 
     const now = Date.now();
+    const products = [];
+    const missingCaptureProducts = [];
     let queued = 0;
 
     for (const productId of args.productIds) {
@@ -73,27 +93,36 @@ export const enqueueCreateDrafts = mutation({
       }
 
       if (!product.shopifyFileId) {
-        await ctx.db.patch(productId, {
-          error: "Capture a Shopify-hosted photo before publishing.",
-          status: "failed",
-          updatedAt: now,
-        });
+        missingCaptureProducts.push(product);
         continue;
       }
 
+      products.push(product);
+    }
+
+    if (missingCaptureProducts.length > 0) {
+      throw new Error(
+        missingCaptureProducts.length === 1
+          ? `Capture a Shopify-hosted photo before publishing ${missingCaptureProducts[0].sku}.`
+          : `Capture Shopify-hosted photos for ${missingCaptureProducts.length.toLocaleString()} products before publishing.`,
+      );
+    }
+
+    for (const product of products) {
       const jobId = await ctx.db.insert("listingJobs", {
-        productId,
+        productId: product._id,
         userId,
         shopifyConnectionId: connection._id,
         groupId: product.groupId,
         captureId: product.captureId,
         type: "createShopifyDraft",
         status: "queued",
+        previousProductStatus: product.status,
         attempts: 0,
         createdAt: now,
         updatedAt: now,
       });
-      await ctx.db.patch(productId, {
+      await ctx.db.patch(product._id, {
         error: undefined,
         status: "processing",
         updatedAt: now,
@@ -216,6 +245,10 @@ export const markJobBlockedExistingSku = internalMutation({
     const product = await ctx.db.get(job.productId);
     const now = Date.now();
     const message = "A Shopify product with this SKU already exists.";
+    const restoredStatus = restoredStatusForFailedJob(
+      product,
+      job.previousProductStatus,
+    );
 
     await ctx.db.patch(args.jobId, {
       completedAt: now,
@@ -228,7 +261,7 @@ export const markJobBlockedExistingSku = internalMutation({
     });
     await ctx.db.patch(job.productId, {
       error: message,
-      status: product?.shopifyFileId ? "captured" : "blockedExistingSku",
+      ...(restoredStatus ? { status: restoredStatus } : {}),
       updatedAt: now,
     });
   },
@@ -248,6 +281,10 @@ export const markJobFailed = internalMutation({
 
     const product = await ctx.db.get(job.productId);
     const now = Date.now();
+    const restoredStatus = restoredStatusForFailedJob(
+      product,
+      job.previousProductStatus,
+    );
 
     await ctx.db.patch(args.jobId, {
       completedAt: now,
@@ -257,7 +294,7 @@ export const markJobFailed = internalMutation({
     });
     await ctx.db.patch(job.productId, {
       error: args.error,
-      status: product?.shopifyFileId ? "captured" : "failed",
+      ...(restoredStatus ? { status: restoredStatus } : {}),
       updatedAt: now,
     });
   },
@@ -448,7 +485,12 @@ export const markFailed = mutation({
       throw new Error("Listing job not found");
     }
 
+    const product = await ctx.db.get(job.productId);
     const now = Date.now();
+    const restoredStatus = restoredStatusForFailedJob(
+      product,
+      job.previousProductStatus,
+    );
 
     await ctx.db.patch(args.jobId, {
       status: "failed",
@@ -456,8 +498,8 @@ export const markFailed = mutation({
       updatedAt: now,
     });
     await ctx.db.patch(job.productId, {
-      status: "failed",
       error: args.error,
+      ...(restoredStatus ? { status: restoredStatus } : {}),
       updatedAt: now,
     });
   },
