@@ -32,7 +32,7 @@ export function MobileShell({ onSignOut }: MobileShellProps) {
 
   return (
     <div className="flex min-h-dvh flex-col bg-slate-50 text-slate-950">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white pt-[env(safe-area-inset-top)]">
+      <header className="fixed inset-x-0 top-0 z-20 border-b border-slate-200 bg-white pt-[env(safe-area-inset-top)]">
         <div className="flex h-14 items-center justify-between px-4">
           <div className="flex items-center gap-2">
             <LogoMark className="h-7 w-7" />
@@ -49,10 +49,12 @@ export function MobileShell({ onSignOut }: MobileShellProps) {
           </Button>
         </div>
       </header>
-      <MutationErrorBanner />
-      <main className="flex-1 px-4 py-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))]">
-        <Outlet />
-      </main>
+      <div className="flex flex-1 flex-col pt-[calc(3.5rem+env(safe-area-inset-top))]">
+        <MutationErrorBanner />
+        <main className="flex-1 px-4 py-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))]">
+          <Outlet />
+        </main>
+      </div>
       <nav
         aria-label="Primary"
         className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
