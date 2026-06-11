@@ -22,12 +22,87 @@ import { useIsMobile } from "../lib/use-is-mobile";
 import { cn } from "../lib/utils";
 import type { Id } from "../../convex/_generated/dataModel";
 
+const INLINE_CAMERA_UNAVAILABLE =
+  "Inline camera is not available here. Use the camera picker instead.";
+
+function canvasToFile(
+  canvas: HTMLCanvasElement,
+  fileName: string,
+): Promise<File> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("Photo could not be processed. Please try again."));
+          return;
+        }
+
+        resolve(
+          new File([blob], fileName, {
+            lastModified: Date.now(),
+            type: "image/jpeg",
+          }),
+        );
+      },
+      "image/jpeg",
+      0.92,
+    );
+  });
+}
+
+async function cropImageFileToSquare(file: File): Promise<File> {
+  const imageUrl = URL.createObjectURL(file);
+  const image = new Image();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () =>
+        reject(new Error("Photo could not be loaded. Please try again."));
+      image.src = imageUrl;
+    });
+
+    const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+    const sourceX = (image.naturalWidth - sourceSize) / 2;
+    const sourceY = (image.naturalHeight - sourceSize) / 2;
+    const canvas = document.createElement("canvas");
+
+    canvas.width = sourceSize;
+    canvas.height = sourceSize;
+    canvas
+      .getContext("2d")
+      ?.drawImage(
+        image,
+        sourceX,
+        sourceY,
+        sourceSize,
+        sourceSize,
+        0,
+        0,
+        sourceSize,
+        sourceSize,
+      );
+
+    return await canvasToFile(
+      canvas,
+      `${file.name.replace(/\.[^.]+$/, "")}.jpg`,
+    );
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
 export function CapturePage() {
   const { groupId } = useParams();
   const { groups, products, recordCapture, uploadCaptureImage } = useAppData();
   const isMobile = useIsMobile();
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = React.useRef<MediaStream | null>(null);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
+  const [isCameraReady, setIsCameraReady] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [cameraError, setCameraError] = React.useState<string | null>(null);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
   const previewUrl = React.useMemo(
     () => (selectedFile ? URL.createObjectURL(selectedFile) : null),
@@ -41,6 +116,16 @@ export function CapturePage() {
       }
     };
   }, [previewUrl]);
+
+  const stopCamera = React.useCallback(() => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    setIsCameraReady(false);
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
 
   const typedGroupId = groupId as Id<"groups"> | undefined;
   const group = groups.find((item) => item._id === typedGroupId);
@@ -65,6 +150,64 @@ export function CapturePage() {
     groupProducts.length === 0
       ? 0
       : Math.round((completedCount / groupProducts.length) * 100);
+  const nextProductId = nextProduct?._id;
+
+  React.useEffect(() => {
+    let isCancelled = false;
+
+    async function startCamera() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError(INLINE_CAMERA_UNAVAILABLE);
+        return;
+      }
+
+      setCameraError(null);
+      setIsCameraReady(false);
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            aspectRatio: { ideal: 1 },
+            facingMode: { ideal: "environment" },
+            height: { ideal: 1600 },
+            width: { ideal: 1600 },
+          },
+        });
+
+        if (isCancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        cameraStreamRef.current = stream;
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setCameraError(
+            error instanceof DOMException && error.name === "NotAllowedError"
+              ? "Camera permission was denied. Use the camera picker instead."
+              : INLINE_CAMERA_UNAVAILABLE,
+          );
+        }
+      }
+    }
+
+    if (nextProductId && !selectedFile) {
+      void startCamera();
+    } else {
+      stopCamera();
+    }
+
+    return () => {
+      isCancelled = true;
+      stopCamera();
+    };
+  }, [nextProductId, selectedFile, stopCamera]);
 
   const containerClass = cn(
     "mx-auto flex w-full max-w-2xl flex-col",
@@ -110,14 +253,71 @@ export function CapturePage() {
     }
   }
 
-  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleCaptureFromCamera() {
+    const video = videoRef.current;
+
+    if (
+      !nextProduct ||
+      !video ||
+      video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+    ) {
+      return;
+    }
+
+    setUploadError(null);
+
+    const sourceSize = Math.min(video.videoWidth, video.videoHeight);
+    const sourceX = (video.videoWidth - sourceSize) / 2;
+    const sourceY = (video.videoHeight - sourceSize) / 2;
+    const canvas = document.createElement("canvas");
+
+    canvas.width = sourceSize;
+    canvas.height = sourceSize;
+    canvas
+      .getContext("2d")
+      ?.drawImage(
+        video,
+        sourceX,
+        sourceY,
+        sourceSize,
+        sourceSize,
+        0,
+        0,
+        sourceSize,
+        sourceSize,
+      );
+
+    try {
+      const file = await canvasToFile(canvas, `${nextProduct.sku}-capture.jpg`);
+      setSelectedFile(file);
+      triggerHaptic();
+    } catch (error) {
+      setUploadError(
+        error instanceof Error
+          ? error.message
+          : "Photo could not be processed. Please try again.",
+      );
+    }
+  }
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0] ?? null;
 
     setUploadError(null);
-    setSelectedFile(file);
+    setSelectedFile(null);
+    event.currentTarget.value = "";
 
     if (file) {
-      triggerHaptic();
+      try {
+        setSelectedFile(await cropImageFileToSquare(file));
+        triggerHaptic();
+      } catch (error) {
+        setUploadError(
+          error instanceof Error
+            ? error.message
+            : "Photo could not be processed. Please try again.",
+        );
+      }
     }
   }
 
@@ -202,13 +402,14 @@ export function CapturePage() {
             ) : null}
           </div>
 
-          <label
+          <div
             className={cn(
-              "relative block w-full cursor-pointer overflow-hidden rounded-2xl transition-transform active:scale-[0.99]",
-              isMobile ? "min-h-[38dvh] flex-1" : "h-80",
+              "relative aspect-square w-full overflow-hidden rounded-2xl",
               previewUrl
                 ? "bg-slate-950"
-                : "border-2 border-dashed border-slate-300 bg-white",
+                : cameraError
+                  ? "border-2 border-dashed border-slate-300 bg-white"
+                  : "bg-slate-950",
             )}
           >
             <input
@@ -217,29 +418,68 @@ export function CapturePage() {
               className="sr-only"
               key={nextProduct._id}
               onChange={handleFileChange}
+              ref={fileInputRef}
               type="file"
             />
             {previewUrl ? (
               <>
                 <img
                   alt={`Captured photo for ${nextProduct.sku}`}
-                  className="absolute inset-0 h-full w-full object-contain"
+                  className="absolute inset-0 h-full w-full object-cover"
                   src={previewUrl}
                 />
-                <span className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur">
+                <button
+                  className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur transition-colors active:bg-black/80"
+                  onClick={() => {
+                    setUploadError(null);
+                    setSelectedFile(null);
+                  }}
+                  type="button"
+                >
                   <RefreshCcw className="h-3.5 w-3.5" />
                   Retake
-                </span>
+                </button>
               </>
-            ) : (
-              <span className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
+            ) : cameraError ? (
+              <button
+                className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500 transition-transform active:scale-[0.99]"
+                onClick={() => fileInputRef.current?.click()}
+                type="button"
+              >
                 <span className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-950 text-white">
                   <Camera className="h-7 w-7" />
                 </span>
                 <span className="text-sm font-medium">Tap to take photo</span>
-              </span>
+              </button>
+            ) : (
+              <>
+                <video
+                  aria-label="Camera preview"
+                  autoPlay
+                  className="absolute inset-0 h-full w-full object-cover"
+                  muted
+                  onCanPlay={() => setIsCameraReady(true)}
+                  playsInline
+                  ref={videoRef}
+                />
+                <div className="pointer-events-none absolute inset-0 border-[3px] border-white/70" />
+                {!isCameraReady ? (
+                  <span className="absolute inset-0 flex items-center justify-center text-sm font-medium text-white">
+                    Starting camera...
+                  </span>
+                ) : null}
+                <Button
+                  className="absolute bottom-4 left-1/2 h-14 -translate-x-1/2 rounded-full px-6 text-base shadow-lg"
+                  disabled={!isCameraReady || isSubmitting}
+                  onClick={() => void handleCaptureFromCamera()}
+                  type="button"
+                >
+                  <Camera className="h-5 w-5" />
+                  Capture square photo
+                </Button>
+              </>
             )}
-          </label>
+          </div>
 
           {uploadError ? (
             <p className="text-sm font-medium text-red-600">{uploadError}</p>
