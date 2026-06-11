@@ -22,6 +22,12 @@ const sampleProducts = [
   ["FP-1010", "Cord Clamp", 3.1],
 ] as const;
 
+function statusAfterPhotoRemoval(
+  product: { groupId?: unknown },
+): "grouped" | "imported" {
+  return product.groupId ? "grouped" : "imported";
+}
+
 export const list = query({
   args: { sessionToken: v.string() },
   handler: async (ctx, args) => {
@@ -246,6 +252,7 @@ export const markShopifyFileDeleted = internalMutation({
       shopifyFileStatus: undefined,
       shopifyFileUrl: undefined,
       shopifyStagedResourceUrl: undefined,
+      status: statusAfterPhotoRemoval(product),
       updatedAt: args.deletedAt,
     });
 

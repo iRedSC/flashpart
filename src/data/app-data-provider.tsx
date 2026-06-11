@@ -157,6 +157,10 @@ function completedForGroups(product: Product) {
   );
 }
 
+function statusAfterPhotoRemoval(product: Product): ProductStatus {
+  return product.groupId ? "grouped" : "imported";
+}
+
 function recomputeGroupCounts(groups: Group[], products: Product[]) {
   return groups.map((group) => {
     const groupProducts = products.filter((product) => product.groupId === group._id);
@@ -550,16 +554,27 @@ export function AppDataProvider({
         }),
       deleteShopifyFile: (productId, confirmPublishedDelete) =>
         runOptimistic({
-          apply: (state) => ({
-            ...state,
-            products: updateProductFields(state.products, productId, {
-              shopifyFileDeletedAt: Date.now(),
-              shopifyFileId: undefined,
-              shopifyFileStatus: undefined,
-              shopifyFileUrl: undefined,
-              shopifyStagedResourceUrl: undefined,
-            }),
-          }),
+          apply: (state) => {
+            const now = Date.now();
+
+            return {
+              ...state,
+              products: state.products.map((product) =>
+                product._id === productId
+                  ? {
+                      ...product,
+                      shopifyFileDeletedAt: now,
+                      shopifyFileId: undefined,
+                      shopifyFileStatus: undefined,
+                      shopifyFileUrl: undefined,
+                      shopifyStagedResourceUrl: undefined,
+                      status: statusAfterPhotoRemoval(product),
+                      updatedAt: now,
+                    }
+                  : product,
+              ),
+            };
+          },
           commit: () =>
             deleteProductFileAction({
               confirmPublishedDelete,
