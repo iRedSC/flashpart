@@ -1,6 +1,5 @@
 import * as React from "react";
 import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
-import { Camera, Sparkles } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   Card,
@@ -9,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../ui/card";
+import { LogoMark } from "../logo-mark";
 import { EmailPasskeySetup } from "./email-passkey-setup";
 import { PasskeySignIn } from "./passkey-sign-in";
 import { usePasskeySignIn } from "../../hooks/use-passkey-sign-in";
@@ -26,7 +26,9 @@ type AuthPageProps = {
 export function AuthPage({ onSignedIn }: AuthPageProps) {
   const [hintEmail, setHintEmail] = React.useState(() => readPasskeyHintEmail());
   const [useOtherAccount, setUseOtherAccount] = React.useState(false);
-  const [boot, setBoot] = React.useState<"checking" | "ready">("checking");
+  const [boot, setBoot] = React.useState<"checking" | "ready">(() =>
+    hintEmail && browserSupportsWebAuthn() ? "checking" : "ready",
+  );
   const showReturn = Boolean(hintEmail) && !useOtherAccount;
   const tryPasskeySignIn = usePasskeySignIn((session) => {
     setHintEmail(session.email);
@@ -38,7 +40,11 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
     let cancelled = false;
 
     async function run() {
-      if (!browserSupportsWebAuthn()) {
+      // WebAuthn can't be queried silently for existing credentials, so only
+      // auto-prompt when this device saved a passkey before (hint email is
+      // written exclusively after passkey creation/sign-in). Otherwise go
+      // straight to the OTP setup without popping a passkey dialog.
+      if (!readPasskeyHintEmail() || !browserSupportsWebAuthn()) {
         if (!cancelled) {
           setBoot("ready");
         }
@@ -68,79 +74,54 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-slate-950 text-white">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,#334155,transparent_32rem),radial-gradient(circle_at_bottom_right,#0f766e,transparent_28rem)] opacity-80" />
-      <div className="relative mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-6 py-10 lg:grid-cols-[1fr_430px]">
-        <section className="max-w-2xl">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-sm text-slate-200 backdrop-blur">
-            <Camera className="h-4 w-4" />
-            Flashpart internal
-          </div>
-          <h1 className="text-5xl font-semibold tracking-tight text-balance">
-            Photograph parts without losing the thread.
-          </h1>
-          <p className="mt-5 max-w-xl text-lg leading-8 text-slate-300">
-            Sign in once, keep your session across the desktop and installed PWA,
-            then move through imports, groups, captures, and Shopify drafts.
-          </p>
-          <div className="mt-8 grid gap-3 text-sm text-slate-300 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-              Email code setup
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-              Passkey return
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-              PWA session mirror
-            </div>
-          </div>
-        </section>
+    <main className="flex min-h-dvh flex-col items-center justify-center bg-slate-50 px-4 py-10 text-slate-950">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex items-center justify-center gap-2.5">
+          <LogoMark className="h-8 w-8" />
+          <span className="text-xl font-semibold tracking-tight">Flashpart</span>
+        </div>
 
-        <Card className="border-white/15 bg-white text-slate-950 shadow-2xl">
+        <Card>
           <CardHeader>
-            <CardDescription className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4" />
+            <CardTitle className="text-lg">
               {boot === "checking"
-                ? "Checking this device"
+                ? "Checking for a passkey"
                 : showReturn
-                  ? "Returning device"
-                  : "Secure setup"}
-            </CardDescription>
-            <CardTitle className="text-2xl">
-              {boot === "checking"
-                ? "Looking for your passkey..."
-                : showReturn
-                  ? "Sign in with your saved passkey"
-                  : "Email code, then passkey"}
+                  ? "Welcome back"
+                  : "Sign in"}
             </CardTitle>
             <CardDescription>
-              {showReturn && hintEmail
-                ? `Continue as ${maskEmail(hintEmail)}.`
-                : "New devices verify email once, then save a passkey for fast return."}
+              {boot === "checking"
+                ? "Your browser may ask for Face ID, fingerprint, PIN, or a security key."
+                : showReturn && hintEmail
+                  ? `Continue as ${maskEmail(hintEmail)}.`
+                  : "Verify your email once, then this device signs in with a passkey."}
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4">
-            {boot === "checking" ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                Your browser may ask for Face ID, fingerprint, PIN, or a security key.
-              </div>
-            ) : showReturn ? (
-              <>
-                <PasskeySignIn label="Sign in" onSignedIn={onSignedIn} />
-                <Button
-                  className="justify-self-center"
-                  onClick={handleDifferentAccount}
-                  type="button"
-                  variant="ghost"
-                >
-                  Use a different account
-                </Button>
-              </>
-            ) : (
-              <EmailPasskeySetup onSignedIn={onSignedIn} />
-            )}
-          </CardContent>
+          {boot === "checking" ? null : (
+            <CardContent className="grid gap-3">
+              {showReturn ? (
+                <>
+                  <PasskeySignIn label="Sign in with passkey" onSignedIn={onSignedIn} />
+                  <Button
+                    onClick={handleDifferentAccount}
+                    type="button"
+                    variant="ghost"
+                  >
+                    Use a different account
+                  </Button>
+                </>
+              ) : (
+                <EmailPasskeySetup onSignedIn={onSignedIn} />
+              )}
+            </CardContent>
+          )}
         </Card>
+
+        <p className="mt-6 text-center text-xs text-slate-400">
+          Internal tool. Sessions are shared between the desktop site and the
+          installed app.
+        </p>
       </div>
     </main>
   );
