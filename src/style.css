@@ -54,11 +54,3 @@ textarea,
 select {
   touch-action: manipulation;
 }
-
-/* Installed PWA: kill rubber-band overscroll so the shell feels fixed. */
-@media (display-mode: standalone) {
-  html,
-  body {
-    overscroll-behavior-y: none;
-  }
-}
