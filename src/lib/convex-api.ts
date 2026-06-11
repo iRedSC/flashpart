@@ -66,6 +66,9 @@ export const convexApi = {
     removeMany: deployedFunction<typeof api.products.removeMany>(
       "products.js:removeMany",
     ),
+    reorder: deployedFunction<typeof api.products.reorder>(
+      "products.js:reorder",
+    ),
   },
   settings: {
     get: deployedFunction<typeof api.settings.get>("settings.js:get"),

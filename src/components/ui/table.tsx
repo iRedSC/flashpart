@@ -26,7 +26,7 @@ export function TableBody({
 export function TableRow({
   className,
   ...props
-}: React.HTMLAttributes<HTMLTableRowElement>) {
+}: React.ComponentProps<"tr">) {
   return (
     <tr
       className={cn(

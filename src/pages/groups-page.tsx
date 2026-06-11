@@ -52,11 +52,23 @@ export function GroupsPage() {
           );
 
           return (
-            <Card key={group._id}>
+            <Card
+              className="relative transition-colors hover:border-slate-300"
+              key={group._id}
+            >
               <CardHeader>
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <CardTitle className="truncate">{group.name}</CardTitle>
+                    <CardTitle className="truncate">
+                      {/* Stretched link: the whole card opens the filtered
+                          products page; buttons below sit above it. */}
+                      <Link
+                        className="after:absolute after:inset-0 after:rounded-xl"
+                        to={`/products?group=${group._id}`}
+                      >
+                        {group.name}
+                      </Link>
+                    </CardTitle>
                     <CardDescription>
                       {progress.total.toLocaleString()} products
                     </CardDescription>
@@ -67,7 +79,7 @@ export function GroupsPage() {
               <CardContent className="space-y-4">
                 <GroupProgressBar progress={progress} />
 
-                <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                <div className="relative flex flex-col gap-2 md:flex-row md:items-center">
                   <Button
                     asChild
                     className="h-12 flex-1 rounded-xl text-base md:h-10 md:flex-none md:rounded-md md:text-sm"

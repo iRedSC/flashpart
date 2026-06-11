@@ -150,6 +150,7 @@ export default defineSchema({
     shopifyVariantId: v.optional(v.string()),
     shopifyStatus: v.optional(shopifyStatus),
     error: v.optional(v.string()),
+    sortOrder: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

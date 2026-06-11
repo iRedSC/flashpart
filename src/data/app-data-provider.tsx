@@ -73,6 +73,9 @@ type AppDataContextValue = {
     duplicatePolicy?: DuplicatePolicy;
   }) => Promise<null>;
   deleteProducts: (ids: Id<"products">[]) => Promise<{ deleted: number } | null>;
+  reorderProducts: (
+    orderedIds: Id<"products">[],
+  ) => Promise<{ updated: number } | null>;
   importProducts: (args: {
     products: ImportedProduct[];
     existingEntryBehavior: ExistingEntryBehavior;
@@ -185,6 +188,7 @@ export function AppDataProvider({
   const updateProductMutation = useMutation(convexApi.products.update);
   const importProductsMutation = useMutation(convexApi.products.importProducts);
   const deleteProductsMutation = useMutation(convexApi.products.removeMany);
+  const reorderProductsMutation = useMutation(convexApi.products.reorder);
   const assignProductsMutation = useMutation(convexApi.groups.assignProducts);
   const publishProductsMutation = useMutation(
     convexApi.listingJobs.enqueueCreateDrafts,
@@ -379,6 +383,30 @@ export function AppDataProvider({
               : `Deleting ${ids.length.toLocaleString()} products`,
           productIds: ids,
         }),
+      reorderProducts: (orderedIds) => {
+        const indexById = new Map(orderedIds.map((id, index) => [id, index]));
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: state.products
+              .map((product, index) => ({
+                product,
+                // Unknown ids (e.g. concurrent optimistic inserts) keep their
+                // relative position after the reordered set.
+                key: indexById.get(product._id) ?? orderedIds.length + index,
+              }))
+              .sort((left, right) => left.key - right.key)
+              .map((entry) => entry.product),
+          }),
+          commit: () =>
+            reorderProductsMutation({
+              orderedIds,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving product order",
+        });
+      },
       importProducts: (args) =>
         runOptimistic({
           apply: (state) => state,
@@ -620,6 +648,7 @@ export function AppDataProvider({
       publishProductsMutation,
       queryArgs,
       recordCaptureMutation,
+      reorderProductsMutation,
       runOptimistic,
       session.sessionToken,
       session,

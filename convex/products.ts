@@ -26,7 +26,43 @@ export const list = query({
   args: { sessionToken: v.string() },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    return await ctx.db.query("products").order("desc").collect();
+    const products = await ctx.db.query("products").collect();
+
+    // Manually ordered products sort by sortOrder; products without one
+    // (new imports) surface first, newest first, until the next reorder.
+    return products.sort((left, right) => {
+      if (left.sortOrder !== undefined && right.sortOrder !== undefined) {
+        return left.sortOrder - right.sortOrder;
+      }
+
+      if (left.sortOrder === undefined && right.sortOrder === undefined) {
+        return right.createdAt - left.createdAt;
+      }
+
+      return left.sortOrder === undefined ? -1 : 1;
+    });
+  },
+});
+
+export const reorder = mutation({
+  args: {
+    sessionToken: v.string(),
+    orderedIds: v.array(v.id("products")),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    let updated = 0;
+
+    for (let index = 0; index < args.orderedIds.length; index += 1) {
+      const product = await ctx.db.get(args.orderedIds[index]);
+
+      if (product && product.sortOrder !== index) {
+        await ctx.db.patch(product._id, { sortOrder: index });
+        updated += 1;
+      }
+    }
+
+    return { updated };
   },
 });
 

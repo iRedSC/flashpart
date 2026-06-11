@@ -1,14 +1,37 @@
 import * as React from "react";
+import { useSearchParams } from "react-router-dom";
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
+  type Row,
   type RowSelectionState,
   useReactTable,
 } from "@tanstack/react-table";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import {
+  Check,
   FolderPlus,
+  GripVertical,
+  ListFilter,
   MoreVertical,
   RefreshCw,
   Send,
@@ -48,6 +71,7 @@ import { cn } from "../lib/utils";
 import type { Id } from "../../convex/_generated/dataModel";
 
 type Product = ReturnType<typeof useAppData>["products"][number];
+type ListingJob = ReturnType<typeof useAppData>["listingJobs"][number];
 type CsvProduct = {
   sku: string;
   name: string;
@@ -60,7 +84,240 @@ type ImportResult = {
   overwritten: number;
 };
 
+type DropEdge = "top" | "bottom";
+type DropTarget = {
+  id: Id<"products">;
+  edge: DropEdge;
+};
+const UNGROUPED_FILTER = "ungrouped";
+const desktopGridColumns =
+  "grid-cols-[36px_48px_170px_1.5fr_140px_150px_160px_170px]";
+
 const columnHelper = createColumnHelper<Product>();
+
+function dropIndicatorClass(edge: DropEdge | null) {
+  if (edge === "top") {
+    return "shadow-[inset_0_2px_0_0_#020617]";
+  }
+
+  if (edge === "bottom") {
+    return "shadow-[inset_0_-2px_0_0_#020617]";
+  }
+
+  return undefined;
+}
+
+function DragHandle({
+  attributes,
+  className,
+  label,
+  listeners,
+}: {
+  attributes: ReturnType<typeof useSortable>["attributes"];
+  className?: string;
+  label: string;
+  listeners: ReturnType<typeof useSortable>["listeners"];
+}) {
+  return (
+    <button
+      aria-label={label}
+      className={cn(
+        "cursor-grab touch-none rounded p-1 text-slate-400 transition-colors hover:text-slate-950 active:cursor-grabbing",
+        className,
+      )}
+      type="button"
+      {...attributes}
+      {...listeners}
+    >
+      <GripVertical className="h-4 w-4" />
+    </button>
+  );
+}
+
+function DesktopProductRow({
+  dropEdge,
+  isDragSource,
+  isPending,
+  row,
+  virtualRow,
+}: {
+  dropEdge: DropEdge | null;
+  isDragSource: boolean;
+  isPending: boolean;
+  row: Row<Product>;
+  virtualRow: VirtualItem;
+}) {
+  const { attributes, listeners, setNodeRef } = useSortable({ id: row.id });
+
+  return (
+    <TableRow
+      className={cn(
+        "absolute left-0 grid w-full",
+        desktopGridColumns,
+        virtualRow.index % 2 === 0 && "bg-slate-50/50",
+        isPending && "bg-amber-50/70",
+        isDragSource && "opacity-40",
+        dropIndicatorClass(dropEdge),
+      )}
+      data-index={virtualRow.index}
+      ref={setNodeRef}
+      style={{ transform: `translateY(${virtualRow.start}px)` }}
+    >
+      <TableCell className="flex items-center px-2">
+        <DragHandle
+          attributes={attributes}
+          label={`Reorder ${row.original.sku}`}
+          listeners={listeners}
+        />
+      </TableCell>
+      {row.getVisibleCells().map((cell) => (
+        <TableCell key={cell.id}>
+          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+        </TableCell>
+      ))}
+    </TableRow>
+  );
+}
+
+function MobileProductCard({
+  dropEdge,
+  groupLabel,
+  isDragSource,
+  isPending,
+  latestJob,
+  measureElement,
+  onAddToGroup,
+  onDelete,
+  onDeleteShopifyFile,
+  onOpenPhoto,
+  onPublish,
+  row,
+  virtualRow,
+}: {
+  dropEdge: DropEdge | null;
+  groupLabel: string;
+  isDragSource: boolean;
+  isPending: boolean;
+  latestJob: ListingJob | undefined;
+  measureElement: (node: Element | null) => void;
+  onAddToGroup: (product: Product) => void;
+  onDelete: (product: Product) => void;
+  onDeleteShopifyFile: (product: Product) => void;
+  onOpenPhoto: (product: Product) => void;
+  onPublish: (product: Product) => void;
+  row: Row<Product>;
+  virtualRow: VirtualItem;
+}) {
+  const product = row.original;
+  const { attributes, listeners, setNodeRef } = useSortable({ id: row.id });
+
+  return (
+    <div
+      className="absolute left-0 top-0 w-full pb-2"
+      data-index={virtualRow.index}
+      ref={measureElement}
+      style={{ transform: `translateY(${virtualRow.start}px)` }}
+    >
+      <div
+        className={cn(
+          "rounded-xl border border-slate-200 bg-white p-3 shadow-sm",
+          row.getIsSelected() && "border-slate-950",
+          isPending && "bg-amber-50/70",
+          isDragSource && "opacity-40",
+          dropIndicatorClass(dropEdge),
+        )}
+        ref={setNodeRef}
+      >
+        <div className="flex items-start gap-2">
+          <DragHandle
+            attributes={attributes}
+            className="-ml-1 mt-0.5"
+            label={`Reorder ${product.sku}`}
+            listeners={listeners}
+          />
+          <Checkbox
+            aria-label={`Select ${product.sku}`}
+            checked={row.getIsSelected()}
+            className="mt-1"
+            onCheckedChange={(value) => row.toggleSelected(!!value)}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{product.name}</p>
+            <p className="font-mono text-xs text-slate-500">{product.sku}</p>
+          </div>
+          {product.shopifyFileUrl ? (
+            <button
+              aria-label={`View photo for ${product.sku}`}
+              className="shrink-0 rounded-lg transition-transform active:scale-95"
+              onClick={() => onOpenPhoto(product)}
+              type="button"
+            >
+              <img
+                alt={`Shopify file for ${product.sku}`}
+                className="h-12 w-12 rounded-lg object-cover"
+                src={product.shopifyFileUrl}
+              />
+            </button>
+          ) : null}
+          <span className="text-sm font-medium">
+            ${product.price.toFixed(2)}
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                aria-label={`Actions for ${product.sku}`}
+                className="-mr-1 -mt-1 h-8 w-8 shrink-0 p-0"
+                variant="ghost"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => onAddToGroup(product)}>
+                <FolderPlus />
+                Add to group
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onPublish(product)}>
+                <Send />
+                Publish
+              </DropdownMenuItem>
+              {product.shopifyFileId ? (
+                <DropdownMenuItem onSelect={() => onDeleteShopifyFile(product)}>
+                  <Trash2 />
+                  Delete Shopify photo
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem
+                className="text-red-600 focus:bg-red-50 focus:text-red-600"
+                onSelect={() => onDelete(product)}
+              >
+                <Trash2 />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+          <ProductStatusBadge
+            error={product.error}
+            hasCapture={Boolean(product.shopifyFileId)}
+            latestJob={latestJob}
+            status={product.status}
+          />
+          {isPending ? (
+            <Badge className="border-amber-300 text-amber-800" variant="outline">
+              saving
+            </Badge>
+          ) : null}
+          <span>{groupLabel}</span>
+          <span className="font-mono">
+            {product.shopifyProductId ?? "Draft pending"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
 function parseCsvLine(line: string) {
   const values: string[] = [];
   let current = "";
@@ -148,11 +405,39 @@ export function ProductsPage() {
     products,
     importProducts,
     publishProducts,
+    reorderProducts,
     updateProduct,
   } = useAppData();
   const parentRef = React.useRef<HTMLDivElement>(null);
   const cardListRef = React.useRef<HTMLDivElement>(null);
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
+  const [searchParams, setSearchParams] = useSearchParams();
+  const groupFilter = searchParams.get("group");
+  const filteredProducts = React.useMemo(() => {
+    if (!groupFilter) {
+      return products;
+    }
+
+    if (groupFilter === UNGROUPED_FILTER) {
+      return products.filter((product) => !product.groupId);
+    }
+
+    return products.filter((product) => product.groupId === groupFilter);
+  }, [groupFilter, products]);
+  const [activeDragIds, setActiveDragIds] = React.useState<
+    Id<"products">[] | null
+  >(null);
+  const [dropTarget, setDropTarget] = React.useState<DropTarget | null>(null);
+  const dragSourceIds = React.useMemo(
+    () => new Set(activeDragIds ?? []),
+    [activeDragIds],
+  );
+  const dndSensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 8 },
+    }),
+  );
   const [addToGroupOpen, setAddToGroupOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [importMode, setImportMode] =
@@ -347,7 +632,7 @@ export function ProductsPage() {
   );
   const table = useReactTable({
     columns,
-    data: products,
+    data: filteredProducts,
     enableRowSelection: true,
     getCoreRowModel: getCoreRowModel(),
     getRowId: (row) => row._id,
@@ -373,9 +658,110 @@ export function ProductsPage() {
   const selectedCount = selectedRows.length;
   const selectedProductIds = selectedRows.map((row) => row.original._id);
   const hasSelection = selectedCount > 0;
+  const visibleIds = React.useMemo(
+    () => filteredProducts.map((product) => product._id),
+    [filteredProducts],
+  );
+  const activeFilterLabel = !groupFilter
+    ? "All products"
+    : groupFilter === UNGROUPED_FILTER
+      ? "Ungrouped"
+      : groupById.get(groupFilter as Id<"groups">) ?? "Group";
+  const dragCount = activeDragIds?.length ?? 0;
+  const dragLabel =
+    dragCount === 1
+      ? products.find((product) => product._id === activeDragIds?.[0])?.name ??
+        "1 product"
+      : `${dragCount.toLocaleString()} products`;
 
   function clearSelection() {
     setRowSelection({});
+  }
+
+  function setGroupFilter(value: string | null) {
+    setSearchParams(
+      (params) => {
+        const next = new URLSearchParams(params);
+
+        if (value) {
+          next.set("group", value);
+        } else {
+          next.delete("group");
+        }
+
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    const activeId = event.active.id as Id<"products">;
+    const selectedVisibleIds = visibleIds.filter((id) => rowSelection[id]);
+
+    setActiveDragIds(
+      selectedVisibleIds.includes(activeId) ? selectedVisibleIds : [activeId],
+    );
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const overId = event.over?.id as Id<"products"> | undefined;
+
+    if (!overId || !activeDragIds || activeDragIds.includes(overId)) {
+      setDropTarget(null);
+      return;
+    }
+
+    const activeIndex = visibleIds.indexOf(event.active.id as Id<"products">);
+    const overIndex = visibleIds.indexOf(overId);
+
+    setDropTarget({
+      edge: activeIndex < overIndex ? "bottom" : "top",
+      id: overId,
+    });
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const draggedIds = activeDragIds;
+
+    setActiveDragIds(null);
+    setDropTarget(null);
+
+    const overId = event.over?.id as Id<"products"> | undefined;
+
+    if (!draggedIds || !overId || draggedIds.includes(overId)) {
+      return;
+    }
+
+    const remainingIds = visibleIds.filter((id) => !draggedIds.includes(id));
+    const activeIndex = visibleIds.indexOf(event.active.id as Id<"products">);
+    const overIndex = visibleIds.indexOf(overId);
+    const insertIndex =
+      remainingIds.indexOf(overId) + (activeIndex < overIndex ? 1 : 0);
+    const nextVisibleIds = [
+      ...remainingIds.slice(0, insertIndex),
+      ...draggedIds,
+      ...remainingIds.slice(insertIndex),
+    ];
+
+    if (nextVisibleIds.every((id, index) => id === visibleIds[index])) {
+      return;
+    }
+
+    // Re-thread the visible ordering through the global list so hidden
+    // (filtered-out) products keep their positions.
+    const visibleIdSet = new Set(visibleIds);
+    let cursor = 0;
+    const orderedIds = products.map((product) =>
+      visibleIdSet.has(product._id) ? nextVisibleIds[cursor++] : product._id,
+    );
+
+    void reorderProducts(orderedIds).catch(() => undefined);
+  }
+
+  function handleDragCancel() {
+    setActiveDragIds(null);
+    setDropTarget(null);
   }
 
   async function handleDeleteSelected() {
@@ -482,6 +868,36 @@ export function ProductsPage() {
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden md:overflow-visible">
       <div className="flex flex-wrap items-center justify-between gap-2 md:gap-4">
         <div className="flex items-center gap-2 text-sm text-slate-500">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                className="max-w-56 px-3 text-slate-950 md:px-4"
+                variant="outline"
+              >
+                <ListFilter className="h-4 w-4" />
+                <span className="truncate">{activeFilterLabel}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-w-72">
+              <DropdownMenuItem onSelect={() => setGroupFilter(null)}>
+                <span className="flex-1">All products</span>
+                {!groupFilter ? <Check /> : null}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setGroupFilter(UNGROUPED_FILTER)}>
+                <span className="flex-1">Ungrouped</span>
+                {groupFilter === UNGROUPED_FILTER ? <Check /> : null}
+              </DropdownMenuItem>
+              {groups.map((group) => (
+                <DropdownMenuItem
+                  key={group._id}
+                  onSelect={() => setGroupFilter(group._id)}
+                >
+                  <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                  {groupFilter === group._id ? <Check /> : null}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             className="hidden text-slate-950 md:inline-flex"
             onClick={() => setImportOpen(true)}
@@ -693,221 +1109,173 @@ export function ProductsPage() {
         product={photoProduct}
       />
 
-      <div
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain md:hidden"
-        ref={cardListRef}
+      <DndContext
+        collisionDetection={closestCenter}
+        modifiers={[restrictToVerticalAxis]}
+        onDragCancel={handleDragCancel}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+        onDragStart={handleDragStart}
+        sensors={dndSensors}
       >
-        <div
-          className="relative"
-          style={{ height: `${cardVirtualizer.getTotalSize()}px` }}
-        >
-          {cardVirtualizer.getVirtualItems().map((virtualRow) => {
-            const row = rows[virtualRow.index];
-            const product = row.original;
-            const latestJob = latestJobByProductId.get(product._id);
-
-            return (
-              <div
-                className="absolute left-0 top-0 w-full pb-2"
-                data-index={virtualRow.index}
-                key={row.id}
-                ref={cardVirtualizer.measureElement}
-                style={{ transform: `translateY(${virtualRow.start}px)` }}
-              >
-                <div
-                  className={cn(
-                    "rounded-xl border border-slate-200 bg-white p-3 shadow-sm",
-                    row.getIsSelected() && "border-slate-950",
-                    isProductPending(product._id) && "bg-amber-50/70",
-                  )}
-                >
-                  <div className="flex items-start gap-3">
-                    <Checkbox
-                      aria-label={`Select ${product.sku}`}
-                      checked={row.getIsSelected()}
-                      className="mt-1"
-                      onCheckedChange={(value) => row.toggleSelected(!!value)}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
-                        {product.name}
-                      </p>
-                      <p className="font-mono text-xs text-slate-500">
-                        {product.sku}
-                      </p>
-                    </div>
-                    {product.shopifyFileUrl ? (
-                      <button
-                        aria-label={`View photo for ${product.sku}`}
-                        className="shrink-0 rounded-lg transition-transform active:scale-95"
-                        onClick={() => setPhotoProductId(product._id)}
-                        type="button"
-                      >
-                        <img
-                          alt={`Shopify file for ${product.sku}`}
-                          className="h-12 w-12 rounded-lg object-cover"
-                          src={product.shopifyFileUrl}
-                        />
-                      </button>
-                    ) : null}
-                    <span className="text-sm font-medium">
-                      ${product.price.toFixed(2)}
-                    </span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          aria-label={`Actions for ${product.sku}`}
-                          className="-mr-1 -mt-1 h-8 w-8 shrink-0 p-0"
-                          variant="ghost"
-                        >
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onSelect={() => {
-                            setRowSelection({ [product._id]: true });
-                            setAddToGroupOpen(true);
-                          }}
-                        >
-                          <FolderPlus />
-                          Add to group
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            void publishProducts([product._id]).catch(
-                              () => undefined,
-                            )
-                          }
-                        >
-                          <Send />
-                          Publish
-                        </DropdownMenuItem>
-                        {product.shopifyFileId ? (
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              const confirmed =
-                                product.shopifyStatus === "published"
-                                  ? window.confirm(
-                                      "This product is published. Delete its Shopify photo anyway?",
-                                    )
-                                  : true;
-
-                              if (!confirmed) {
-                                return;
-                              }
-
-                              void deleteShopifyFile(
-                                product._id,
-                                product.shopifyStatus === "published",
-                              ).catch(() => undefined);
-                            }}
-                          >
-                            <Trash2 />
-                            Delete Shopify photo
-                          </DropdownMenuItem>
-                        ) : null}
-                        <DropdownMenuItem
-                          className="text-red-600 focus:bg-red-50 focus:text-red-600"
-                          onSelect={() =>
-                            void deleteProducts([product._id]).catch(
-                              () => undefined,
-                            )
-                          }
-                        >
-                          <Trash2 />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                    <ProductStatusBadge
-                      error={product.error}
-                      hasCapture={Boolean(product.shopifyFileId)}
-                      latestJob={latestJob}
-                      status={product.status}
-                    />
-                    {isProductPending(product._id) ? (
-                      <Badge
-                        className="border-amber-300 text-amber-800"
-                        variant="outline"
-                      >
-                        saving
-                      </Badge>
-                    ) : null}
-                    <span>
-                      {product.groupId
-                        ? groupById.get(product.groupId) ?? "Assigned"
-                        : "Ungrouped"}
-                    </span>
-                    <span className="font-mono">
-                      {product.shopifyProductId ?? "Draft pending"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div
-        className="hidden h-[560px] overflow-auto rounded-md border border-slate-200 md:block"
-        ref={parentRef}
-      >
-        <table className="grid w-full min-w-[1040px] text-sm">
-          <TableHeader className="sticky top-0 z-10 grid bg-white">
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow
-                className="grid grid-cols-[48px_170px_1.5fr_140px_150px_160px_170px]"
-                key={headerGroup.id}
-              >
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext(),
-                        )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody
-            className="relative grid"
-            style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+        <SortableContext items={visibleIds} strategy={verticalListSortingStrategy}>
+          <div
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain md:hidden"
+            ref={cardListRef}
           >
-            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const row = rows[virtualRow.index];
+            {!isLoading && rows.length === 0 ? (
+              <p className="py-8 text-center text-sm text-slate-500">
+                {groupFilter
+                  ? "No products match this filter."
+                  : "No products yet."}
+              </p>
+            ) : null}
+            <div
+              className="relative"
+              style={{ height: `${cardVirtualizer.getTotalSize()}px` }}
+            >
+              {cardVirtualizer.getVirtualItems().map((virtualRow) => {
+                const row = rows[virtualRow.index];
+                const product = row.original;
 
-              return (
-                <TableRow
-                  className={cn(
-                    "absolute left-0 grid w-full grid-cols-[48px_170px_1.5fr_140px_150px_160px_170px]",
-                    virtualRow.index % 2 === 0 && "bg-slate-50/50",
-                    isProductPending(row.original._id) && "bg-amber-50/70",
-                  )}
-                  data-index={virtualRow.index}
-                  key={row.id}
-                  style={{ transform: `translateY(${virtualRow.start}px)` }}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </table>
-      </div>
+                return (
+                  <MobileProductCard
+                    dropEdge={
+                      dropTarget?.id === product._id ? dropTarget.edge : null
+                    }
+                    groupLabel={
+                      product.groupId
+                        ? groupById.get(product.groupId) ?? "Assigned"
+                        : "Ungrouped"
+                    }
+                    isDragSource={dragSourceIds.has(product._id)}
+                    isPending={isProductPending(product._id)}
+                    key={row.id}
+                    latestJob={latestJobByProductId.get(product._id)}
+                    measureElement={cardVirtualizer.measureElement}
+                    onAddToGroup={(target) => {
+                      setRowSelection({ [target._id]: true });
+                      setAddToGroupOpen(true);
+                    }}
+                    onDelete={(target) =>
+                      void deleteProducts([target._id]).catch(() => undefined)
+                    }
+                    onDeleteShopifyFile={(target) => {
+                      const confirmed =
+                        target.shopifyStatus === "published"
+                          ? window.confirm(
+                              "This product is published. Delete its Shopify photo anyway?",
+                            )
+                          : true;
+
+                      if (!confirmed) {
+                        return;
+                      }
+
+                      void deleteShopifyFile(
+                        target._id,
+                        target.shopifyStatus === "published",
+                      ).catch(() => undefined);
+                    }}
+                    onOpenPhoto={(target) => setPhotoProductId(target._id)}
+                    onPublish={(target) =>
+                      void publishProducts([target._id]).catch(() => undefined)
+                    }
+                    row={row}
+                    virtualRow={virtualRow}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        </SortableContext>
+        <DragOverlay dropAnimation={null}>
+          {activeDragIds ? (
+            <div className="flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium shadow-lg">
+              <GripVertical className="h-4 w-4 text-slate-400" />
+              <span className="max-w-56 truncate">{dragLabel}</span>
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+
+      <DndContext
+        collisionDetection={closestCenter}
+        modifiers={[restrictToVerticalAxis]}
+        onDragCancel={handleDragCancel}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+        onDragStart={handleDragStart}
+        sensors={dndSensors}
+      >
+        <SortableContext items={visibleIds} strategy={verticalListSortingStrategy}>
+          <div
+            className="hidden h-[560px] overflow-auto rounded-md border border-slate-200 md:block"
+            ref={parentRef}
+          >
+            <table className="grid w-full min-w-[1080px] text-sm">
+              <TableHeader className="sticky top-0 z-10 grid bg-white">
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <TableRow
+                    className={cn("grid", desktopGridColumns)}
+                    key={headerGroup.id}
+                  >
+                    <TableHead aria-hidden className="px-2" />
+                    {headerGroup.headers.map((header) => (
+                      <TableHead key={header.id}>
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(
+                              header.column.columnDef.header,
+                              header.getContext(),
+                            )}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody
+                className="relative grid"
+                style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+              >
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const row = rows[virtualRow.index];
+
+                  return (
+                    <DesktopProductRow
+                      dropEdge={
+                        dropTarget?.id === row.original._id
+                          ? dropTarget.edge
+                          : null
+                      }
+                      isDragSource={dragSourceIds.has(row.original._id)}
+                      isPending={isProductPending(row.original._id)}
+                      key={row.id}
+                      row={row}
+                      virtualRow={virtualRow}
+                    />
+                  );
+                })}
+              </TableBody>
+            </table>
+            {!isLoading && rows.length === 0 ? (
+              <p className="py-8 text-center text-sm text-slate-500">
+                {groupFilter
+                  ? "No products match this filter."
+                  : "No products yet."}
+              </p>
+            ) : null}
+          </div>
+        </SortableContext>
+        <DragOverlay dropAnimation={null}>
+          {activeDragIds ? (
+            <div className="flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium shadow-lg">
+              <GripVertical className="h-4 w-4 text-slate-400" />
+              <span className="max-w-56 truncate">{dragLabel}</span>
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
     </div>
   );
 }
