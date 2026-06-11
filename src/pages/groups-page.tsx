@@ -11,8 +11,10 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import { Input } from "../components/ui/input";
+import { GroupProgressBar } from "../components/group-progress-bar";
 import { useAppData } from "../data/app-data-provider";
 import { triggerHaptic } from "../lib/haptics";
+import { groupProductProgress } from "../lib/group-product-progress";
 
 export function GroupsPage() {
   const { assignFirstUngrouped, createGroup, groups, products } = useAppData();
@@ -45,10 +47,9 @@ export function GroupsPage() {
       {/* On mobile, capture comes first; creating groups is secondary. */}
       <div className="order-2 grid gap-4 md:order-3 lg:grid-cols-2">
         {groups.map((group) => {
-          const complete =
-            group.productCount === 0
-              ? 0
-              : Math.round((group.completedCount / group.productCount) * 100);
+          const progress = groupProductProgress(
+            products.filter((product) => product.groupId === group._id),
+          );
 
           return (
             <Card key={group._id}>
@@ -57,26 +58,14 @@ export function GroupsPage() {
                   <div className="min-w-0">
                     <CardTitle className="truncate">{group.name}</CardTitle>
                     <CardDescription>
-                      {group.completedCount.toLocaleString()} of{" "}
-                      {group.productCount.toLocaleString()} products done
+                      {progress.total.toLocaleString()} products
                     </CardDescription>
                   </div>
                   <Badge variant="secondary">{group.status}</Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div>
-                  <div className="mb-2 flex justify-between text-sm">
-                    <span className="text-slate-500">Progress</span>
-                    <span className="tabular-nums">{complete}%</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="h-full rounded-full bg-slate-950 transition-[width] duration-300"
-                      style={{ width: `${complete}%` }}
-                    />
-                  </div>
-                </div>
+                <GroupProgressBar progress={progress} />
 
                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
                   <Button
