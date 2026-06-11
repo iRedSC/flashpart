@@ -112,13 +112,30 @@ export const nextProduct = query({
       .withIndex("by_group", (q) => q.eq("groupId", args.groupId))
       .collect();
 
+    const isPendingCapture = (product: (typeof products)[number]) => {
+      if (product.status === "published") {
+        return false;
+      }
+
+      if (
+        product.status === "captured" ||
+        product.status === "processing" ||
+        product.status === "needsReview" ||
+        product.status === "draftCreated" ||
+        ((product.status === "failed" ||
+          product.status === "blockedExistingSku") &&
+          Boolean(product.shopifyFileId))
+      ) {
+        return false;
+      }
+
+      return true;
+    };
+
     return (
-      products.find(
-        (product) =>
-          product.status === "grouped" ||
-          (product.status === "failed" && !product.shopifyFileId) ||
-          (product.status === "blockedExistingSku" && !product.shopifyFileId),
-      ) ?? null
+      products
+        .sort((left, right) => left.createdAt - right.createdAt)
+        .find(isPendingCapture) ?? null
     );
   },
 });

@@ -16,6 +16,7 @@ import {
 } from "../components/ui/card";
 import { useAppData } from "../data/app-data-provider";
 import { canvasToFile, cropImageFileToSquare } from "../lib/capture-image";
+import { nextUncapturedGroupProduct } from "../lib/group-product-progress";
 import { triggerHaptic } from "../lib/haptics";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { cn } from "../lib/utils";
@@ -64,12 +65,9 @@ export function CapturePage() {
     (product) => product.groupId === typedGroupId,
   );
   const nextProduct =
-    groupProducts.find(
-      (product) =>
-        product.status === "grouped" ||
-        (product.status === "failed" && !product.shopifyFileId) ||
-        (product.status === "blockedExistingSku" && !product.shopifyFileId),
-    ) ?? null;
+    typedGroupId === undefined
+      ? null
+      : nextUncapturedGroupProduct(products, typedGroupId);
   const completedCount = groupProducts.filter(
     (product) =>
       product.status === "captured" ||

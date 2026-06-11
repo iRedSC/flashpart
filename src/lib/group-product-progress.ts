@@ -16,6 +16,43 @@ export type GroupProductProgress = {
   total: number;
 };
 
+export function isPendingCapture<T extends { status: ProductStatus; shopifyFileId?: string }>(
+  product: T,
+): boolean {
+  if (product.status === "published") {
+    return false;
+  }
+
+  if (
+    product.status === "captured" ||
+    product.status === "processing" ||
+    product.status === "needsReview" ||
+    product.status === "draftCreated" ||
+    ((product.status === "failed" || product.status === "blockedExistingSku") &&
+      Boolean(product.shopifyFileId))
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function nextUncapturedGroupProduct<
+  T extends {
+    status: ProductStatus;
+    shopifyFileId?: string;
+    groupId?: string;
+    createdAt: number;
+  },
+>(products: T[], groupId: string): T | null {
+  return (
+    products
+      .filter((product) => product.groupId === groupId)
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .find(isPendingCapture) ?? null
+  );
+}
+
 export function groupProductProgress<T extends { status: ProductStatus; shopifyFileId?: string }>(
   products: T[],
 ): GroupProductProgress {
