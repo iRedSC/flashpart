@@ -50,6 +50,10 @@ export function App() {
                 <Route path="/products" element={<ProductsPage />} />
                 <Route path="/groups" element={<GroupsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route
+                  path="/capture/selection/:selectionId"
+                  element={<CapturePage />}
+                />
                 <Route path="/capture/:groupId" element={<CapturePage />} />
               </Route>
             </Routes>

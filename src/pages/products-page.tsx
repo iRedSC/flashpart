@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   DndContext,
   DragOverlay,
@@ -29,6 +29,7 @@ import {
   type Virtualizer,
 } from "@tanstack/react-virtual";
 import {
+  Camera,
   Check,
   FilePenLine,
   FolderPlus,
@@ -44,6 +45,7 @@ import {
   Upload,
 } from "lucide-react";
 import { DescriptionField } from "../components/description-field";
+import { ProductRowActionItems } from "../components/product-row-actions";
 import {
   ProductStatusIcons,
 } from "../components/product-status-badge";
@@ -74,6 +76,7 @@ import {
 } from "../components/ui/table";
 import { ProductPhotoDialog } from "../components/product-photo-dialog";
 import { useAppData } from "../data/app-data-provider";
+import { createCaptureSelection } from "../lib/capture-selection";
 import { cn } from "../lib/utils";
 import type { Id } from "../../convex/_generated/dataModel";
 
@@ -186,6 +189,7 @@ function DesktopProductRow({
   dragActive,
   isDragSource,
   isPending,
+  onOpenContextMenu,
   row,
   shiftY,
   virtualRow,
@@ -193,6 +197,7 @@ function DesktopProductRow({
   dragActive: boolean;
   isDragSource: boolean;
   isPending: boolean;
+  onOpenContextMenu: (product: Product, x: number, y: number) => void;
   row: Row<Product>;
   shiftY: number;
   virtualRow: VirtualItem;
@@ -210,6 +215,10 @@ function DesktopProductRow({
         isDragSource && "opacity-0",
       )}
       data-index={virtualRow.index}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onOpenContextMenu(row.original, event.clientX, event.clientY);
+      }}
       ref={setNodeRef}
       style={{
         height: `${desktopRowHeight}px`,
@@ -408,29 +417,13 @@ function MobileProductCard({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => onAddToGroup(product)}>
-                  <FolderPlus />
-                  Add to group
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onPublish(product)}>
-                  <Send />
-                  Publish
-                </DropdownMenuItem>
-                {product.shopifyFileId ? (
-                  <DropdownMenuItem
-                    onSelect={() => onDeleteShopifyFile(product)}
-                  >
-                    <Trash2 />
-                    Delete Shopify photo
-                  </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuItem
-                  className="text-red-600 focus:bg-red-50 focus:text-red-600"
-                  onSelect={() => onDelete(product)}
-                >
-                  <Trash2 />
-                  Delete
-                </DropdownMenuItem>
+                <ProductRowActionItems
+                  onAddToGroup={() => onAddToGroup(product)}
+                  onDelete={() => onDelete(product)}
+                  onDeleteShopifyFile={() => onDeleteShopifyFile(product)}
+                  onPublish={() => onPublish(product)}
+                  product={product}
+                />
               </DropdownMenuContent>
             </DropdownMenu>
             <Checkbox
@@ -546,6 +539,7 @@ export function ProductsPage() {
     reorderProducts,
     updateProduct,
   } = useAppData();
+  const navigate = useNavigate();
   const parentRef = React.useRef<HTMLDivElement>(null);
   const desktopBodyRef = React.useRef<HTMLTableSectionElement>(null);
   const cardListRef = React.useRef<HTMLDivElement>(null);
@@ -600,6 +594,11 @@ export function ProductsPage() {
     React.useState<Id<"products"> | null>(null);
   const [activeDescriptionId, setActiveDescriptionId] =
     React.useState<Id<"products"> | null>(null);
+  const [desktopRowMenu, setDesktopRowMenu] = React.useState<{
+    product: Product;
+    x: number;
+    y: number;
+  } | null>(null);
   const focusNextDescriptionRef = React.useRef<
     (currentId: Id<"products">) => void
   >(() => {});
@@ -1042,6 +1041,55 @@ export function ProductsPage() {
     clearSelection();
   }
 
+  async function handleCaptureSelected() {
+    if (selectedProductIds.length === 0) {
+      return;
+    }
+
+    const needsCaptureGroup = selectedRows.some((row) => !row.original.groupId);
+    let captureGroupId: Id<"groups"> | undefined;
+
+    if (needsCaptureGroup) {
+      captureGroupId = await createGroup("Selected capture");
+    }
+
+    const selectionId = createCaptureSelection({
+      captureGroupId,
+      label: `${selectedCount.toLocaleString()} selected`,
+      productIds: selectedProductIds,
+    });
+
+    clearSelection();
+    navigate(`/capture/selection/${selectionId}`);
+  }
+
+  function openDesktopRowMenu(product: Product, x: number, y: number) {
+    setDesktopRowMenu({ product, x, y });
+  }
+
+  function openAddToGroupForProduct(product: Product) {
+    setRowSelection({ [product._id]: true });
+    setAddToGroupOpen(true);
+  }
+
+  function handleDeleteShopifyFileForProduct(product: Product) {
+    const confirmed =
+      product.shopifyStatus === "published"
+        ? window.confirm(
+            "This product is published. Delete its Shopify photo anyway?",
+          )
+        : true;
+
+    if (!confirmed) {
+      return;
+    }
+
+    void deleteShopifyFile(
+      product._id,
+      product.shopifyStatus === "published",
+    ).catch(() => undefined);
+  }
+
   function resetImportDialog() {
     setImportMode("ignore");
     setImportSkuPrefix("");
@@ -1238,6 +1286,15 @@ export function ProductsPage() {
             >
               <FolderPlus />
               Add to group
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!hasSelection}
+              onSelect={() =>
+                void handleCaptureSelected().catch(() => undefined)
+              }
+            >
+              <Camera />
+              Capture photos
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!hasSelection}
@@ -1587,23 +1644,7 @@ export function ProductsPage() {
                   onDelete={(target) =>
                     void deleteProducts([target._id]).catch(() => undefined)
                   }
-                  onDeleteShopifyFile={(target) => {
-                    const confirmed =
-                      target.shopifyStatus === "published"
-                        ? window.confirm(
-                            "This product is published. Delete its Shopify photo anyway?",
-                          )
-                        : true;
-
-                    if (!confirmed) {
-                      return;
-                    }
-
-                    void deleteShopifyFile(
-                      target._id,
-                      target.shopifyStatus === "published",
-                    ).catch(() => undefined);
-                  }}
+                  onDeleteShopifyFile={handleDeleteShopifyFileForProduct}
                   onOpenPhoto={(target) => setPhotoProductId(target._id)}
                   onPublish={(target) =>
                     void publishProducts([target._id]).catch(() => undefined)
@@ -1764,6 +1805,7 @@ export function ProductsPage() {
                     isDragSource={row.original._id === activeDragProductId}
                     isPending={isProductPending(row.original._id)}
                     key={row.id}
+                    onOpenContextMenu={openDesktopRowMenu}
                     row={row}
                     shiftY={getDropShift({
                       activeIndex: activeDragIndex,
@@ -1820,6 +1862,51 @@ export function ProductsPage() {
           </div>
         </div>
       </div>
+
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (!open) {
+            setDesktopRowMenu(null);
+          }
+        }}
+        open={desktopRowMenu !== null}
+      >
+        {desktopRowMenu ? (
+          <DropdownMenuTrigger asChild>
+            <span
+              className="pointer-events-none fixed h-0 w-0"
+              style={{
+                left: desktopRowMenu.x,
+                top: desktopRowMenu.y,
+              }}
+            />
+          </DropdownMenuTrigger>
+        ) : null}
+        <DropdownMenuContent
+          align="start"
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          {desktopRowMenu ? (
+            <ProductRowActionItems
+              onAddToGroup={() => openAddToGroupForProduct(desktopRowMenu.product)}
+              onDelete={() =>
+                void deleteProducts([desktopRowMenu.product._id]).catch(
+                  () => undefined,
+                )
+              }
+              onDeleteShopifyFile={() =>
+                handleDeleteShopifyFileForProduct(desktopRowMenu.product)
+              }
+              onPublish={() =>
+                void publishProducts([desktopRowMenu.product._id]).catch(
+                  () => undefined,
+                )
+              }
+              product={desktopRowMenu.product}
+            />
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

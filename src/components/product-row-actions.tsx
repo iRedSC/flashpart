@@ -1,0 +1,49 @@
+import { FolderPlus, Send, Trash2 } from "lucide-react";
+import { DropdownMenuItem } from "./ui/dropdown-menu";
+
+type Product = {
+  _id: string;
+  shopifyFileId?: string | null;
+  shopifyStatus?: string | null;
+  sku: string;
+};
+
+export function ProductRowActionItems({
+  onAddToGroup,
+  onDelete,
+  onDeleteShopifyFile,
+  onPublish,
+  product,
+}: {
+  onAddToGroup: () => void;
+  onDelete: () => void;
+  onDeleteShopifyFile: () => void;
+  onPublish: () => void;
+  product: Product;
+}) {
+  return (
+    <>
+      <DropdownMenuItem onSelect={onAddToGroup}>
+        <FolderPlus />
+        Add to group
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={onPublish}>
+        <Send />
+        Publish
+      </DropdownMenuItem>
+      {product.shopifyFileId ? (
+        <DropdownMenuItem onSelect={onDeleteShopifyFile}>
+          <Trash2 />
+          Delete Shopify photo
+        </DropdownMenuItem>
+      ) : null}
+      <DropdownMenuItem
+        className="text-red-600 focus:bg-red-50 focus:text-red-600"
+        onSelect={onDelete}
+      >
+        <Trash2 />
+        Delete
+      </DropdownMenuItem>
+    </>
+  );
+}

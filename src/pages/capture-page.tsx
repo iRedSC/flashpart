@@ -6,7 +6,7 @@ import {
   ChevronLeft,
   RefreshCcw,
 } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -17,8 +17,14 @@ import {
 import { useAppData } from "../data/app-data-provider";
 import { canvasToFile, cropImageFileToSquare } from "../lib/capture-image";
 import {
+  getCaptureSelection,
+  removeCaptureSelection,
+} from "../lib/capture-selection";
+import {
   isGroupCaptureComplete,
   nextUncapturedGroupProduct,
+  nextUncapturedSelectionProduct,
+  selectionCaptureProgress,
 } from "../lib/product-state";
 import { triggerHaptic } from "../lib/haptics";
 import { useIsMobile } from "../lib/use-is-mobile";
@@ -29,7 +35,8 @@ const INLINE_CAMERA_UNAVAILABLE =
   "Inline camera is not available here. Use the camera picker instead.";
 
 export function CapturePage() {
-  const { groupId } = useParams();
+  const { groupId, selectionId } = useParams();
+  const navigate = useNavigate();
   const { groups, products, settings, submitCapture } = useAppData();
   const isMobile = useIsMobile();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -62,20 +69,33 @@ export function CapturePage() {
     }
   }, []);
 
+  const captureSelection = selectionId
+    ? getCaptureSelection(selectionId)
+    : null;
   const typedGroupId = groupId as Id<"groups"> | undefined;
-  const group = groups.find((item) => item._id === typedGroupId);
-  const groupProducts = products.filter(
-    (product) => product.groupId === typedGroupId,
-  );
-  const nextProduct =
-    typedGroupId === undefined
+  const group = captureSelection
+    ? { name: captureSelection.label }
+    : groups.find((item) => item._id === typedGroupId);
+  const groupProducts = captureSelection
+    ? products.filter((product) =>
+        captureSelection.productIds.includes(product._id),
+      )
+    : products.filter((product) => product.groupId === typedGroupId);
+  const nextProduct = captureSelection
+    ? nextUncapturedSelectionProduct(products, captureSelection.productIds)
+    : typedGroupId === undefined
       ? null
       : nextUncapturedGroupProduct(products, typedGroupId);
-  const completedCount = groupProducts.filter(isGroupCaptureComplete).length;
+  const { completedCount, total: selectionTotal } = captureSelection
+    ? selectionCaptureProgress(products, captureSelection.productIds)
+    : {
+        completedCount: groupProducts.filter(isGroupCaptureComplete).length,
+        total: groupProducts.length,
+      };
   const progress =
-    groupProducts.length === 0
+    selectionTotal === 0
       ? 0
-      : Math.round((completedCount / groupProducts.length) * 100);
+      : Math.round((completedCount / selectionTotal) * 100);
   const nextProductId = nextProduct?._id;
 
   React.useEffect(() => {
@@ -140,8 +160,22 @@ export function CapturePage() {
     isMobile && "min-h-dvh px-4 pb-[env(safe-area-inset-bottom)]",
   );
 
+  function resolveCaptureGroupId(product: (typeof products)[number]) {
+    if (captureSelection) {
+      return product.groupId ?? captureSelection.captureGroupId;
+    }
+
+    return typedGroupId;
+  }
+
   function handleSave(withPhoto: boolean) {
-    if (!typedGroupId || !nextProduct) {
+    if (!nextProduct) {
+      return;
+    }
+
+    const captureGroupId = resolveCaptureGroupId(nextProduct);
+
+    if (!captureGroupId) {
       return;
     }
 
@@ -157,7 +191,7 @@ export function CapturePage() {
     setSelectedFile(null);
 
     void submitCapture({
-      groupId: typedGroupId,
+      groupId: captureGroupId,
       productId: capturedProductId,
       file: fileToUpload ?? undefined,
     });
@@ -233,16 +267,27 @@ export function CapturePage() {
     }
   }
 
+  React.useEffect(() => {
+    if (!selectionId || captureSelection) {
+      return;
+    }
+
+    navigate("/products", { replace: true });
+  }, [captureSelection, navigate, selectionId]);
+
   if (!group) {
+    const backTo = captureSelection || selectionId ? "/products" : "/groups";
+    const title = selectionId ? "Selection not found" : "Group not found";
+
     return (
       <div className={cn(containerClass, isMobile && "pt-[calc(env(safe-area-inset-top)+1rem)]")}>
         <Card>
           <CardHeader>
-            <CardTitle>Group not found</CardTitle>
+            <CardTitle>{title}</CardTitle>
           </CardHeader>
           <CardContent>
             <Button asChild variant="outline">
-              <Link to="/groups">Back to groups</Link>
+              <Link to={backTo}>Back</Link>
             </Button>
           </CardContent>
         </Card>
@@ -259,10 +304,10 @@ export function CapturePage() {
         )}
       >
         <Link
-          aria-label="Back to groups"
+          aria-label={captureSelection ? "Back to products" : "Back to groups"}
           className="-ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors active:bg-slate-200"
           onClick={() => triggerHaptic()}
-          to="/groups"
+          to={captureSelection ? "/products" : "/groups"}
         >
           <ChevronLeft className="h-6 w-6" />
         </Link>
@@ -270,7 +315,7 @@ export function CapturePage() {
           {group.name}
         </h2>
         <span className="shrink-0 rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold tabular-nums text-slate-700">
-          {completedCount}/{groupProducts.length}
+          {completedCount}/{selectionTotal}
         </span>
       </header>
 
@@ -426,8 +471,17 @@ export function CapturePage() {
             <h3 className="text-xl font-semibold">Group complete</h3>
           </div>
           <Button asChild className="h-12 rounded-xl px-6" variant="outline">
-            <Link onClick={() => triggerHaptic()} to="/groups">
-              Back to groups
+            <Link
+              onClick={() => {
+                if (selectionId) {
+                  removeCaptureSelection(selectionId);
+                }
+
+                triggerHaptic();
+              }}
+              to={captureSelection ? "/products" : "/groups"}
+            >
+              {captureSelection ? "Back to products" : "Back to groups"}
             </Link>
           </Button>
         </div>

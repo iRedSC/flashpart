@@ -65,6 +65,39 @@ export function nextUncapturedGroupProduct<
   );
 }
 
+export function nextUncapturedSelectionProduct<
+  T extends {
+    _id: string;
+    phase: ProductPhase;
+    createdAt: number;
+  },
+>(products: T[], productIds: string[]): T | null {
+  const idSet = new Set(productIds);
+
+  return (
+    products
+      .filter((product) => idSet.has(product._id))
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .find(isPendingCapture) ?? null
+  );
+}
+
+export function selectionCaptureProgress<
+  T extends {
+    _id: string;
+    phase: ProductPhase;
+  },
+>(products: T[], productIds: string[]) {
+  const idSet = new Set(productIds);
+  const selectionProducts = products.filter((product) => idSet.has(product._id));
+  const completedCount = selectionProducts.filter(isGroupCaptureComplete).length;
+
+  return {
+    completedCount,
+    total: selectionProducts.length,
+  };
+}
+
 export function groupProductProgress<T extends { phase: ProductPhase }>(
   products: T[],
 ): GroupProductProgress {
