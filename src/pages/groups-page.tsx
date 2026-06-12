@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Camera, FolderPlus, MoreVertical, PackagePlus } from "lucide-react";
+import { Camera, FolderPlus, MoreVertical, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import {
@@ -9,48 +9,39 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
+import { CreateGroupDialog } from "../components/create-group-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { Input } from "../components/ui/input";
 import { GroupProgressBar } from "../components/group-progress-bar";
 import { useAppData } from "../data/app-data-provider";
 import { triggerHaptic } from "../lib/haptics";
 import { groupProductProgress } from "../lib/group-product-progress";
 
 export function GroupsPage() {
-  const { assignFirstUngrouped, createGroup, groups, products } = useAppData();
-  const [name, setName] = React.useState("");
+  const { assignFirstUngrouped, groups, products } = useAppData();
+  const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
   const ungroupedCount = products.filter((product) => !product.groupId).length;
-
-  async function handleCreateGroup(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!name.trim()) {
-      return;
-    }
-
-    try {
-      await createGroup(name.trim());
-      setName("");
-    } catch {
-      // The shared data provider reports the error and reverts optimistic state.
-    }
-  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain md:overflow-visible">
-      <div className="order-1">
+      <div className="flex items-center justify-between gap-4">
         <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
           Groups
         </h2>
+        <Button
+          className="h-11 shrink-0 rounded-xl md:h-10 md:rounded-md"
+          onClick={() => setCreateGroupOpen(true)}
+        >
+          <Plus className="h-4 w-4" />
+          New group
+        </Button>
       </div>
 
-      {/* On mobile, capture comes first; creating groups is secondary. */}
-      <div className="order-2 grid gap-4 md:order-3 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         {groups.map((group) => {
           const progress = groupProductProgress(
             products.filter((product) => product.groupId === group._id),
@@ -131,37 +122,19 @@ export function GroupsPage() {
           <Card>
             <CardHeader>
               <CardTitle>No groups yet</CardTitle>
+              <CardDescription>
+                Create a group to start capturing and organizing products.
+              </CardDescription>
             </CardHeader>
           </Card>
         ) : null}
       </div>
 
-      <Card className="order-3 md:order-2">
-        <CardHeader>
-          <CardTitle>Create a group</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form
-            className="flex max-w-xl flex-col gap-2 sm:flex-row"
-            onSubmit={handleCreateGroup}
-          >
-            <Input
-              aria-label="Group name"
-              className="h-11 md:h-10"
-              onChange={(event) => setName(event.currentTarget.value)}
-              placeholder="Example: Makita brushes, bin A4"
-              value={name}
-            />
-            <Button className="h-11 rounded-xl md:h-10 md:rounded-md" type="submit">
-              <PackagePlus className="h-4 w-4" />
-              Create
-            </Button>
-          </form>
-          <p className="mt-3 text-sm text-slate-500">
-            {ungroupedCount.toLocaleString()} products are not assigned to a group.
-          </p>
-        </CardContent>
-      </Card>
+      <CreateGroupDialog
+        onOpenChange={setCreateGroupOpen}
+        open={createGroupOpen}
+        ungroupedCount={ungroupedCount}
+      />
     </div>
   );
 }

@@ -532,6 +532,7 @@ function parseProductCsv(text: string) {
 export function ProductsPage() {
   const {
     assignProductsToGroup,
+    createGroup,
     createProduct,
     deleteProducts,
     deleteShopifyFile,
@@ -593,6 +594,8 @@ export function ProductsPage() {
   const [importResult, setImportResult] = React.useState<ImportResult | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
   const [selectedGroupId, setSelectedGroupId] = React.useState<Id<"groups"> | "">("");
+  const [newGroupName, setNewGroupName] = React.useState("");
+  const [isCreatingGroup, setIsCreatingGroup] = React.useState(false);
   const [photoProductId, setPhotoProductId] =
     React.useState<Id<"products"> | null>(null);
   const [activeDescriptionId, setActiveDescriptionId] =
@@ -1023,7 +1026,27 @@ export function ProductsPage() {
     await assignProductsToGroup(selectedGroupId, selectedProductIds);
     setAddToGroupOpen(false);
     setSelectedGroupId("");
+    setNewGroupName("");
     clearSelection();
+  }
+
+  async function handleCreateGroupInModal() {
+    const trimmed = newGroupName.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setIsCreatingGroup(true);
+
+    try {
+      const groupId = await createGroup(trimmed);
+      setSelectedGroupId(groupId);
+      setNewGroupName("");
+    } catch {
+      // The shared data provider reports the error and reverts optimistic state.
+    } finally {
+      setIsCreatingGroup(false);
+    }
   }
 
   async function handlePublishSelected() {
@@ -1448,6 +1471,8 @@ export function ProductsPage() {
           setAddToGroupOpen(open);
           if (!open) {
             setSelectedGroupId("");
+            setNewGroupName("");
+            setIsCreatingGroup(false);
           }
         }}
         open={addToGroupOpen}
@@ -1460,13 +1485,9 @@ export function ProductsPage() {
               {selectedCount === 1 ? "" : "s"} to a group.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2">
-            {groups.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                No groups yet. Create one on the Groups page first.
-              </p>
-            ) : (
-              groups.map((group) => (
+          {groups.length > 0 ? (
+            <div className="grid max-h-56 gap-2 overflow-y-auto">
+              {groups.map((group) => (
                 <button
                   className={cn(
                     "rounded-lg border px-4 py-3 text-left text-sm transition-colors",
@@ -1483,15 +1504,42 @@ export function ProductsPage() {
                     {group.productCount.toLocaleString()} products
                   </span>
                 </button>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          ) : null}
+          <form
+            className="grid gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateGroupInModal().catch(() => undefined);
+            }}
+          >
+            <p className="text-sm font-medium text-slate-950">
+              {groups.length === 0 ? "Create a group" : "Or create a new group"}
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                aria-label="New group name"
+                onChange={(event) => setNewGroupName(event.currentTarget.value)}
+                placeholder="Example: Makita brushes, bin A4"
+                value={newGroupName}
+              />
+              <Button
+                className="shrink-0"
+                disabled={!newGroupName.trim() || isCreatingGroup}
+                type="submit"
+                variant="outline"
+              >
+                {isCreatingGroup ? "Creating..." : "Create"}
+              </Button>
+            </div>
+          </form>
           <DialogFooter>
             <Button onClick={() => setAddToGroupOpen(false)} variant="outline">
               Cancel
             </Button>
             <Button
-              disabled={!selectedGroupId || groups.length === 0}
+              disabled={!selectedGroupId}
               onClick={() => void handleAddToGroup().catch(() => undefined)}
             >
               Add to group
