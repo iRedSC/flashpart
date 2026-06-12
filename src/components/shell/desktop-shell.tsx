@@ -19,8 +19,8 @@ type DesktopShellProps = {
 
 export function DesktopShell({ onSignOut, session }: DesktopShellProps) {
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
-      <header className="border-b border-slate-200 bg-white">
+    <div className="flex min-h-dvh flex-col bg-slate-50 text-slate-950">
+      <header className="shrink-0 border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-2">
             <LogoMark className="h-7 w-7" />
@@ -55,7 +55,7 @@ export function DesktopShell({ onSignOut, session }: DesktopShellProps) {
         </div>
       </header>
       <MutationErrorBanner />
-      <main className="mx-auto max-w-7xl px-6 py-6">
+      <main className="mx-auto flex w-full max-w-7xl min-h-0 flex-1 flex-col px-6 py-6">
         <Outlet />
       </main>
     </div>

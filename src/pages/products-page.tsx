@@ -97,6 +97,7 @@ type ImportResult = {
 const UNGROUPED_FILTER = "ungrouped";
 const desktopGridColumns =
   "grid-cols-[36px_48px_132px_minmax(200px,1.3fr)_minmax(180px,1.1fr)_96px_88px_minmax(110px,0.75fr)_minmax(190px,1fr)]";
+const desktopTableMinWidth = 1320;
 const desktopRowHeight = 58;
 const desktopTableInputClass = "h-8 px-1.5";
 const desktopCellClass =
@@ -1170,7 +1171,7 @@ export function ProductsPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden md:overflow-visible">
-      <div className="flex items-center justify-between gap-2 md:gap-4">
+      <div className="flex shrink-0 items-center justify-between gap-2 md:gap-4">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-sm text-slate-500">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1717,22 +1718,26 @@ export function ProductsPage() {
         </DragOverlay>
       </DndContext>
 
-      <DndContext
-        measuring={dndMeasuring}
-        modifiers={[restrictToVerticalAxis]}
-        onDragCancel={handleDragCancel}
-        onDragEnd={handleDragEnd}
-        onDragMove={(event) =>
-          updateProjectedIndex(event, desktopBodyRef.current, rowVirtualizer)
-        }
-        onDragStart={handleDragStart}
-        sensors={dndSensors}
-      >
-        <div
-          className="hidden h-[560px] overflow-auto rounded-md border border-slate-200 md:block"
-          ref={parentRef}
+      <div className="hidden min-h-0 flex-1 md:flex md:min-h-0 md:flex-col">
+        <DndContext
+          measuring={dndMeasuring}
+          modifiers={[restrictToVerticalAxis]}
+          onDragCancel={handleDragCancel}
+          onDragEnd={handleDragEnd}
+          onDragMove={(event) =>
+            updateProjectedIndex(event, desktopBodyRef.current, rowVirtualizer)
+          }
+          onDragStart={handleDragStart}
+          sensors={dndSensors}
         >
-          <table className="grid w-full min-w-[1320px] text-sm">
+          <div
+            className="min-h-0 w-screen max-w-[100vw] flex-1 basis-0 overflow-auto rounded-md border border-slate-200 ml-[calc(50%-50vw)]"
+            ref={parentRef}
+          >
+            <table
+              className="grid w-full text-sm"
+              style={{ minWidth: `${desktopTableMinWidth}px` }}
+            >
             <TableHeader className="sticky top-0 z-10 grid bg-slate-50">
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow
@@ -1817,7 +1822,8 @@ export function ProductsPage() {
             </div>
           ) : null}
         </DragOverlay>
-      </DndContext>
+        </DndContext>
+      </div>
     </div>
   );
 }
