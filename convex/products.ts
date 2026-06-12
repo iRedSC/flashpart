@@ -7,6 +7,7 @@ const importedProduct = v.object({
   sku: v.string(),
   name: v.string(),
   price: v.number(),
+  description: v.optional(v.string()),
 });
 
 const sampleProducts = [
@@ -110,6 +111,7 @@ export const update = mutation({
     id: v.id("products"),
     sku: v.optional(v.string()),
     name: v.optional(v.string()),
+    description: v.optional(v.string()),
     price: v.optional(v.number()),
     status: v.optional(productStatus),
     duplicatePolicy: v.optional(duplicatePolicy),
@@ -120,6 +122,10 @@ export const update = mutation({
     await ctx.db.patch(args.id, {
       sku: args.sku,
       name: args.name,
+      description:
+        args.description === undefined
+          ? undefined
+          : args.description.trim() || undefined,
       price: args.price,
       status: args.status,
       duplicatePolicy: args.duplicatePolicy,
@@ -134,12 +140,14 @@ export const create = mutation({
     sku: v.string(),
     name: v.string(),
     price: v.number(),
+    description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
 
     const sku = args.sku.trim();
     const name = args.name.trim();
+    const description = args.description?.trim() || undefined;
 
     if (!sku || !name) {
       throw new ConvexError("SKU and name are required.");
@@ -167,6 +175,7 @@ export const create = mutation({
     const id = await ctx.db.insert("products", {
       sku,
       name,
+      description,
       price: args.price,
       status: "imported",
       duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",
@@ -218,6 +227,9 @@ export const importProducts = mutation({
         await ctx.db.patch(existing._id, {
           name,
           price: product.price,
+          ...(product.description !== undefined
+            ? { description: product.description.trim() || undefined }
+            : {}),
           updatedAt: now,
         });
         overwritten += 1;
@@ -227,6 +239,7 @@ export const importProducts = mutation({
       await ctx.db.insert("products", {
         sku,
         name,
+        description: product.description?.trim() || undefined,
         price: product.price,
         status: "imported",
         duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",

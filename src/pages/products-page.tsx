@@ -44,7 +44,11 @@ import {
   Upload,
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
-import { ProductStatusBadge } from "../components/product-status-badge";
+import { DescriptionField } from "../components/description-field";
+import {
+  ProductStatusBadge,
+  ProductStatusIcons,
+} from "../components/product-status-badge";
 import { Button } from "../components/ui/button";
 import {
   DropdownMenu,
@@ -81,6 +85,7 @@ type CsvProduct = {
   sku: string;
   name: string;
   price: number;
+  description?: string;
 };
 type ExistingEntryBehavior = "overwrite" | "ignore";
 type ImportResult = {
@@ -91,10 +96,13 @@ type ImportResult = {
 
 const UNGROUPED_FILTER = "ungrouped";
 const desktopGridColumns =
-  "grid-cols-[36px_48px_180px_minmax(240px,1.6fr)_120px_160px_minmax(150px,1fr)_minmax(220px,1.2fr)]";
+  "grid-cols-[36px_48px_132px_minmax(200px,1.3fr)_minmax(180px,1.1fr)_96px_88px_minmax(110px,0.75fr)_minmax(190px,1fr)]";
 const desktopRowHeight = 58;
+const desktopTableInputClass = "h-8 px-1.5";
 const desktopCellClass =
   "flex min-w-0 items-center overflow-hidden px-4 py-0";
+const desktopHeadClass =
+  "flex items-center px-4 text-[11px] font-medium uppercase tracking-wide text-slate-500";
 
 const columnHelper = createColumnHelper<Product>();
 
@@ -144,12 +152,14 @@ function DragHandle({
   attributes,
   className,
   iconClassName,
+  isSelected,
   label,
   listeners,
 }: {
   attributes: ReturnType<typeof useDraggable>["attributes"];
   className?: string;
   iconClassName?: string;
+  isSelected?: boolean;
   label: string;
   listeners: ReturnType<typeof useDraggable>["listeners"];
 }) {
@@ -157,7 +167,8 @@ function DragHandle({
     <button
       aria-label={label}
       className={cn(
-        "cursor-grab touch-none rounded p-1 text-slate-400 transition-colors hover:text-slate-950 active:cursor-grabbing",
+        "flex h-7 w-7 cursor-grab touch-none items-center justify-center rounded-md border-none bg-transparent p-0 text-slate-400 opacity-35 transition-opacity hover:bg-slate-100 hover:text-slate-500 active:cursor-grabbing group-hover:opacity-100",
+        isSelected && "opacity-100",
         className,
       )}
       type="button"
@@ -185,14 +196,15 @@ function DesktopProductRow({
   virtualRow: VirtualItem;
 }) {
   const { attributes, listeners, setNodeRef } = useDraggable({ id: row.id });
+  const isSelected = row.getIsSelected();
 
   return (
     <TableRow
       className={cn(
-        "absolute left-0 grid w-full",
+        "group absolute left-0 grid w-full border-b border-slate-100 bg-white transition-[background,box-shadow] duration-150 hover:bg-slate-50 hover:shadow-[inset_3px_0_0_#020617]",
         desktopGridColumns,
-        virtualRow.index % 2 === 0 && "bg-slate-50/50",
-        isPending && "bg-amber-50/70",
+        isSelected && "bg-slate-50 shadow-[inset_3px_0_0_#020617]",
+        isPending && "bg-amber-50/65 shadow-[inset_3px_0_0_#fcd34d]",
         isDragSource && "opacity-0",
       )}
       data-index={virtualRow.index}
@@ -206,15 +218,23 @@ function DesktopProductRow({
         transition: dragActive ? "translate 200ms ease" : undefined,
       }}
     >
-      <TableCell className="flex items-center px-2 py-0">
+      <TableCell className="flex items-center justify-center px-2 py-0">
         <DragHandle
           attributes={attributes}
+          isSelected={isSelected}
           label={`Reorder ${row.original.sku}`}
           listeners={listeners}
         />
       </TableCell>
       {row.getVisibleCells().map((cell) => (
-        <TableCell className={desktopCellClass} key={cell.id}>
+        <TableCell
+          className={cn(
+            desktopCellClass,
+            cell.column.id === "select" && "justify-center px-2",
+            cell.column.id === "price" && "justify-end",
+          )}
+          key={cell.id}
+        >
           {flexRender(cell.column.columnDef.cell, cell.getContext())}
         </TableCell>
       ))}
@@ -470,6 +490,8 @@ function parseProductCsv(text: string) {
   const skuIndex = hasHeader ? header.indexOf("sku") : 0;
   const nameIndex = hasHeader ? header.indexOf("name") : 1;
   const priceIndex = hasHeader ? header.indexOf("price") : 2;
+  const descriptionIndex = hasHeader ? header.indexOf("description") : -1;
+  const hasDescriptionColumn = descriptionIndex >= 0;
   const dataRows = hasHeader ? rows.slice(1) : rows;
   const products: CsvProduct[] = [];
   let skippedRows = 0;
@@ -485,7 +507,16 @@ function parseProductCsv(text: string) {
       continue;
     }
 
-    products.push({ name, price, sku });
+    const product: CsvProduct = { name, price, sku };
+
+    if (hasDescriptionColumn) {
+      const description = row[descriptionIndex]?.trim() ?? "";
+      if (description) {
+        product.description = description;
+      }
+    }
+
+    products.push(product);
   }
 
   return {
@@ -618,9 +649,10 @@ export function ProductsPage() {
         cell: ({ row }) => (
           <Input
             aria-label={`SKU for ${row.original.name}`}
-            className="h-8 font-mono"
+            className={cn(desktopTableInputClass, "font-mono text-[13px]")}
             defaultValue={row.original.sku}
             title={row.original.sku}
+            variant="ghost"
             onBlur={(event) => {
               if (event.currentTarget.value !== row.original.sku) {
                 void updateProduct({
@@ -635,19 +667,63 @@ export function ProductsPage() {
       columnHelper.accessor("name", {
         header: "Name",
         cell: ({ row }) => (
-          <Input
-            aria-label={`Name for ${row.original.sku}`}
-            className="h-8"
-            defaultValue={row.original.name}
-            title={row.original.name}
-            onBlur={(event) => {
-              if (event.currentTarget.value !== row.original.name) {
+          <div className="flex min-w-0 items-center gap-2.5">
+            {row.original.shopifyFileUrl ? (
+              <button
+                aria-label={`View photo for ${row.original.sku}`}
+                className="shrink-0 rounded-lg transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950"
+                onClick={() => setPhotoProductId(row.original._id)}
+                type="button"
+              >
+                <img
+                  alt={`Photo for ${row.original.sku}`}
+                  className="h-10 w-10 rounded-lg object-cover"
+                  src={row.original.shopifyFileUrl}
+                />
+              </button>
+            ) : (
+              <div
+                aria-hidden="true"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-400"
+              >
+                <Image className="h-4 w-4" />
+              </div>
+            )}
+            <Input
+              aria-label={`Name for ${row.original.sku}`}
+              className={desktopTableInputClass}
+              defaultValue={row.original.name}
+              title={row.original.name}
+              variant="ghost"
+              onBlur={(event) => {
+                if (event.currentTarget.value !== row.original.name) {
+                  void updateProduct({
+                    id: row.original._id,
+                    name: event.currentTarget.value,
+                  }).catch(() => undefined);
+                }
+              }}
+            />
+          </div>
+        ),
+      }),
+      columnHelper.display({
+        id: "description",
+        header: "Description",
+        cell: ({ row }) => (
+          <DescriptionField
+            aria-label={`Description for ${row.original.sku}`}
+            onSave={(description) => {
+              const current = row.original.description ?? "";
+
+              if (description !== current) {
                 void updateProduct({
+                  description,
                   id: row.original._id,
-                  name: event.currentTarget.value,
                 }).catch(() => undefined);
               }
             }}
+            value={row.original.description ?? ""}
           />
         ),
       }),
@@ -656,9 +732,13 @@ export function ProductsPage() {
         cell: ({ row }) => (
           <Input
             aria-label={`Price for ${row.original.sku}`}
-            className="h-8"
+            className={cn(
+              desktopTableInputClass,
+              "text-right tabular-nums",
+            )}
             defaultValue={row.original.price.toFixed(2)}
             inputMode="decimal"
+            variant="ghost"
             onBlur={(event) => {
               const price = Number.parseFloat(event.currentTarget.value);
 
@@ -678,19 +758,13 @@ export function ProductsPage() {
           const latestJob = latestJobByProductId.get(row.original._id);
 
           return (
-            <div className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap">
-              <ProductStatusBadge
-                error={row.original.error}
-                hasCapture={Boolean(row.original.shopifyFileId)}
-                latestJob={latestJob}
-                status={row.original.status}
-              />
-              {isProductPending(row.original._id) ? (
-                <Badge className="border-amber-300 text-amber-800" variant="outline">
-                  saving
-                </Badge>
-              ) : null}
-            </div>
+            <ProductStatusIcons
+              error={row.original.error}
+              hasCapture={Boolean(row.original.shopifyFileId)}
+              latestJob={latestJob}
+              saving={isProductPending(row.original._id)}
+              status={row.original.status}
+            />
           );
         },
       }),
@@ -720,35 +794,28 @@ export function ProductsPage() {
 
           return (
             <div className="flex w-full min-w-0 items-center gap-2">
-              {row.original.shopifyFileUrl ? (
-                <button
-                  aria-label={`View photo for ${row.original.sku}`}
-                  className="shrink-0 rounded transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950"
-                  onClick={() => setPhotoProductId(row.original._id)}
-                  type="button"
-                >
-                  <img
-                    alt={`Shopify file for ${row.original.sku}`}
-                    className="h-8 w-8 rounded object-cover"
-                    src={row.original.shopifyFileUrl}
-                  />
-                </button>
-              ) : null}
-              {shopifyLabel ? (
-                <span
-                  className="min-w-0 truncate font-mono text-xs"
-                  title={shopifyLabel}
-                >
-                  {shopifyLabel}
-                </span>
-              ) : (
-                <span className="truncate text-slate-400">Listing pending</span>
-              )}
-              {row.original.shopifyFileStatus ? (
-                <span className="shrink-0 whitespace-nowrap text-xs text-slate-400">
-                  file {row.original.shopifyFileStatus}
-                </span>
-              ) : null}
+              <ShopifyListingIcon
+                shopifyProductId={row.original.shopifyProductId}
+              />
+              <div className="flex min-w-0 flex-col gap-px">
+                {shopifyLabel ? (
+                  <span
+                    className="truncate font-mono text-xs"
+                    title={shopifyLabel}
+                  >
+                    {shopifyLabel}
+                  </span>
+                ) : (
+                  <span className="truncate text-xs text-slate-400">
+                    Listing pending
+                  </span>
+                )}
+                {row.original.shopifyFileStatus ? (
+                  <span className="shrink-0 whitespace-nowrap text-xs text-slate-400">
+                    file {row.original.shopifyFileStatus}
+                  </span>
+                ) : null}
+              </div>
             </div>
           );
         },
@@ -1165,7 +1232,8 @@ export function ProductsPage() {
           <DialogHeader>
             <DialogTitle>Import products</DialogTitle>
             <DialogDescription>
-              Upload a CSV with sku, name, and price columns. Existing SKUs can be
+              Upload a CSV with sku, name, and price columns. Description is
+              optional when a description column is present. Existing SKUs can be
               overwritten or ignored.
             </DialogDescription>
           </DialogHeader>
@@ -1183,7 +1251,8 @@ export function ProductsPage() {
                 type="file"
               />
               <p className="text-xs text-slate-500">
-                Header row is optional when columns are ordered as SKU, name, price.
+                Header row is optional when columns are ordered as SKU, name,
+                price. Add an optional description column when needed.
               </p>
             </div>
 
@@ -1579,17 +1648,24 @@ export function ProductsPage() {
           className="hidden h-[560px] overflow-auto rounded-md border border-slate-200 md:block"
           ref={parentRef}
         >
-          <table className="grid w-full min-w-[1200px] text-sm">
-            <TableHeader className="sticky top-0 z-10 grid bg-white">
+          <table className="grid w-full min-w-[1320px] text-sm">
+            <TableHeader className="sticky top-0 z-10 grid bg-slate-50">
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow
-                  className={cn("grid", desktopGridColumns)}
+                  className={cn(
+                    "grid border-b border-slate-200 hover:bg-slate-50",
+                    desktopGridColumns,
+                  )}
                   key={headerGroup.id}
                 >
                   <TableHead aria-hidden className="px-2" />
                   {headerGroup.headers.map((header) => (
                     <TableHead
-                      className="flex items-center whitespace-nowrap"
+                      className={cn(
+                        desktopHeadClass,
+                        header.column.id === "select" && "justify-center px-2",
+                        header.column.id === "price" && "justify-end",
+                      )}
                       key={header.id}
                     >
                       {header.isPlaceholder

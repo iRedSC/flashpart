@@ -135,6 +135,7 @@ export default defineSchema({
   products: defineTable({
     sku: v.string(),
     name: v.string(),
+    description: v.optional(v.string()),
     price: v.number(),
     status: productStatus,
     duplicatePolicy,

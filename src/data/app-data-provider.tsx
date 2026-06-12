@@ -28,6 +28,7 @@ type ImportedProduct = {
   sku: string;
   name: string;
   price: number;
+  description?: string;
 };
 type ExistingEntryBehavior = "overwrite" | "ignore";
 
@@ -69,6 +70,7 @@ type AppDataContextValue = {
     id: Id<"products">;
     sku?: string;
     name?: string;
+    description?: string;
     price?: number;
     duplicatePolicy?: DuplicatePolicy;
   }) => Promise<null>;
