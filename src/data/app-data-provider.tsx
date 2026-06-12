@@ -84,6 +84,7 @@ type AppDataContextValue = {
     inserted: number;
     overwritten: number;
   } | null>;
+  createProduct: (args: ImportedProduct) => Promise<{ id: Id<"products"> } | null>;
   assignProductsToGroup: (
     groupId: Id<"groups">,
     productIds: Id<"products">[],
@@ -190,6 +191,7 @@ export function AppDataProvider({
   const settings = useQuery(convexApi.settings.get, queryArgs);
   const shopifyConnection = useQuery(convexApi.shopify.currentConnection, queryArgs);
   const updateProductMutation = useMutation(convexApi.products.update);
+  const createProductMutation = useMutation(convexApi.products.create);
   const importProductsMutation = useMutation(convexApi.products.importProducts);
   const deleteProductsMutation = useMutation(convexApi.products.removeMany);
   const reorderProductsMutation = useMutation(convexApi.products.reorder);
@@ -453,6 +455,42 @@ export function AppDataProvider({
             }),
           label: `Importing ${args.products.length.toLocaleString()} products`,
         }),
+      createProduct: (args) => {
+        const sku = args.sku.trim();
+        const name = args.name.trim();
+        const now = Date.now();
+        const optimisticId =
+          `optimistic-product-${operationIdRef.current}` as Id<"products">;
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: [
+              {
+                _creationTime: now,
+                _id: optimisticId,
+                createdAt: now,
+                duplicatePolicy:
+                  state.settings?.duplicatePolicy ?? "blockExisting",
+                name,
+                price: args.price,
+                sku,
+                status: "imported",
+                updatedAt: now,
+              },
+              ...state.products,
+            ],
+          }),
+          commit: () =>
+            createProductMutation({
+              name,
+              price: args.price,
+              sessionToken: session.sessionToken,
+              sku,
+            }),
+          label: "Adding product",
+        });
+      },
       assignProductsToGroup: (groupId, productIds) =>
         runOptimistic({
           apply: (state) => ({
@@ -676,6 +714,7 @@ export function AppDataProvider({
       assignFirstUngroupedMutation,
       assignProductsMutation,
       createGroupMutation,
+      createProductMutation,
       deleteProductsMutation,
       deleteProductFileAction,
       finalizeFileUploadAction,

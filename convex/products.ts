@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import { duplicatePolicy, productStatus } from "./schema";
@@ -125,6 +125,56 @@ export const update = mutation({
       duplicatePolicy: args.duplicatePolicy,
       updatedAt: Date.now(),
     });
+  },
+});
+
+export const create = mutation({
+  args: {
+    sessionToken: v.string(),
+    sku: v.string(),
+    name: v.string(),
+    price: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+
+    const sku = args.sku.trim();
+    const name = args.name.trim();
+
+    if (!sku || !name) {
+      throw new ConvexError("SKU and name are required.");
+    }
+
+    if (!Number.isFinite(args.price) || args.price < 0) {
+      throw new ConvexError("Enter a valid price.");
+    }
+
+    const existing = await ctx.db
+      .query("products")
+      .withIndex("by_sku", (q) => q.eq("sku", sku))
+      .first();
+
+    if (existing) {
+      throw new ConvexError(`A product with SKU "${sku}" already exists.`);
+    }
+
+    const settings = await ctx.db
+      .query("appSettings")
+      .withIndex("by_key", (q) => q.eq("key", "singleton"))
+      .unique();
+    const now = Date.now();
+
+    const id = await ctx.db.insert("products", {
+      sku,
+      name,
+      price: args.price,
+      status: "imported",
+      duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { id };
   },
 });
 

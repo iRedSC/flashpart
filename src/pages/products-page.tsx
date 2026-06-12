@@ -36,6 +36,7 @@ import {
   Image,
   ListFilter,
   MoreVertical,
+  Plus,
   RefreshCw,
   Send,
   Trash2,
@@ -469,6 +470,7 @@ function parseProductCsv(text: string) {
 export function ProductsPage() {
   const {
     assignProductsToGroup,
+    createProduct,
     deleteProducts,
     deleteShopifyFile,
     groups,
@@ -515,6 +517,12 @@ export function ProductsPage() {
   );
   const [addToGroupOpen, setAddToGroupOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
+  const [addPartOpen, setAddPartOpen] = React.useState(false);
+  const [addPartSku, setAddPartSku] = React.useState("");
+  const [addPartName, setAddPartName] = React.useState("");
+  const [addPartPrice, setAddPartPrice] = React.useState("");
+  const [addPartError, setAddPartError] = React.useState<string | null>(null);
+  const [isAddingPart, setIsAddingPart] = React.useState(false);
   const [importMode, setImportMode] =
     React.useState<ExistingEntryBehavior>("ignore");
   const [importSkuPrefix, setImportSkuPrefix] = React.useState("");
@@ -898,6 +906,45 @@ export function ProductsPage() {
     setIsImporting(false);
   }
 
+  function resetAddPartDialog() {
+    setAddPartSku("");
+    setAddPartName("");
+    setAddPartPrice("");
+    setAddPartError(null);
+    setIsAddingPart(false);
+  }
+
+  async function handleAddPart() {
+    const sku = addPartSku.trim();
+    const name = addPartName.trim();
+    const price = Number.parseFloat(addPartPrice);
+
+    if (!sku || !name) {
+      setAddPartError("SKU and name are required.");
+      return;
+    }
+
+    if (!Number.isFinite(price) || price < 0) {
+      setAddPartError("Enter a valid price.");
+      return;
+    }
+
+    setIsAddingPart(true);
+    setAddPartError(null);
+
+    try {
+      await createProduct({ name, price, sku });
+      setAddPartOpen(false);
+      resetAddPartDialog();
+    } catch (error) {
+      setAddPartError(
+        error instanceof Error ? error.message : "The product could not be added.",
+      );
+    } finally {
+      setIsAddingPart(false);
+    }
+  }
+
   async function handleImportFileChange(
     event: React.ChangeEvent<HTMLInputElement>,
   ) {
@@ -992,13 +1039,31 @@ export function ProductsPage() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          <div className="hidden shrink-0 items-center gap-2 md:flex">
+            <Button
+              className="text-slate-950"
+              onClick={() => setImportOpen(true)}
+              variant="outline"
+            >
+              <Upload className="h-4 w-4" />
+              Import CSV
+            </Button>
+            <Button
+              aria-label="Add part"
+              className="h-9 w-9 shrink-0 p-0 text-slate-950"
+              onClick={() => setAddPartOpen(true)}
+              variant="outline"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
           <Button
-            className="hidden shrink-0 text-slate-950 md:inline-flex"
-            onClick={() => setImportOpen(true)}
+            aria-label="Add part"
+            className="h-9 w-9 shrink-0 p-0 text-slate-950 md:hidden"
+            onClick={() => setAddPartOpen(true)}
             variant="outline"
           >
-            <Upload className="h-4 w-4" />
-            Import CSV
+            <Plus className="h-4 w-4" />
           </Button>
           {hasSelection ? (
             <span className="shrink-0">
@@ -1151,6 +1216,86 @@ export function ProductsPage() {
               onClick={() => void handleImportProducts().catch(() => undefined)}
             >
               {isImporting ? "Importing..." : "Import products"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        onOpenChange={(open) => {
+          setAddPartOpen(open);
+          if (!open) {
+            resetAddPartDialog();
+          }
+        }}
+        open={addPartOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add part</DialogTitle>
+            <DialogDescription>
+              Enter the SKU, name, and price for a new product.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <label className="text-sm font-medium" htmlFor="add-part-sku">
+                SKU
+              </label>
+              <Input
+                id="add-part-sku"
+                onChange={(event) => {
+                  setAddPartSku(event.currentTarget.value);
+                  setAddPartError(null);
+                }}
+                placeholder="FP-1001"
+                value={addPartSku}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium" htmlFor="add-part-name">
+                Name
+              </label>
+              <Input
+                id="add-part-name"
+                onChange={(event) => {
+                  setAddPartName(event.currentTarget.value);
+                  setAddPartError(null);
+                }}
+                placeholder="Drive Belt, 3/8 in."
+                value={addPartName}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium" htmlFor="add-part-price">
+                Price
+              </label>
+              <Input
+                id="add-part-price"
+                inputMode="decimal"
+                onChange={(event) => {
+                  setAddPartPrice(event.currentTarget.value);
+                  setAddPartError(null);
+                }}
+                placeholder="12.99"
+                value={addPartPrice}
+              />
+            </div>
+            {addPartError ? (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {addPartError}
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setAddPartOpen(false)} variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={isAddingPart}
+              onClick={() => void handleAddPart().catch(() => undefined)}
+            >
+              {isAddingPart ? "Adding..." : "Add part"}
             </Button>
           </DialogFooter>
         </DialogContent>
