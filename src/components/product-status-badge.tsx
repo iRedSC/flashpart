@@ -19,8 +19,8 @@ import {
 import { cn } from "../lib/utils";
 
 const phaseIconClass: Record<ProductPhase, string> = {
-  imported: "bg-slate-100 text-slate-500",
-  captured: "bg-slate-100 text-slate-500",
+  imported: "bg-blue-100 text-blue-600",
+  captured: "bg-sky-100 text-sky-700",
   published: "bg-green-100 text-green-600",
 };
 

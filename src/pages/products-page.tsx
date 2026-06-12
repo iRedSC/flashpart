@@ -43,10 +43,8 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { Badge } from "../components/ui/badge";
 import { DescriptionField } from "../components/description-field";
 import {
-  ProductStatusBadge,
   ProductStatusIcons,
 } from "../components/product-status-badge";
 import { Button } from "../components/ui/button";
@@ -386,17 +384,13 @@ function MobileProductCard({
         <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
             <ShopifyListingIcon shopifyProductId={product.shopifyProductId} />
-            <ProductStatusBadge
+            <ProductStatusIcons
               lastError={product.lastError}
               needsPhotoReview={product.needsPhotoReview}
               pendingOperation={product.pendingOperation}
               phase={product.phase}
+              saving={isPending}
             />
-            {isPending ? (
-              <Badge className="border-amber-300 text-amber-800" variant="outline">
-                saving
-              </Badge>
-            ) : null}
             <span>{groupLabel}</span>
           </div>
           <div className="flex shrink-0 items-center gap-2.5">
@@ -1671,20 +1665,13 @@ export function ProductsPage() {
                   <ShopifyListingIcon
                     shopifyProductId={activeDragProduct.shopifyProductId}
                   />
-                  <ProductStatusBadge
+                  <ProductStatusIcons
                     lastError={activeDragProduct.lastError}
                     needsPhotoReview={activeDragProduct.needsPhotoReview}
                     pendingOperation={activeDragProduct.pendingOperation}
                     phase={activeDragProduct.phase}
+                    saving={isProductPending(activeDragProduct._id)}
                   />
-                  {isProductPending(activeDragProduct._id) ? (
-                    <Badge
-                      className="border-amber-300 text-amber-800"
-                      variant="outline"
-                    >
-                      saving
-                    </Badge>
-                  ) : null}
                   <span>{activeDragGroupLabel}</span>
                 </div>
                 <div className="flex shrink-0 items-center gap-2.5">
