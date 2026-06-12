@@ -82,10 +82,12 @@ export function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Existing SKU behavior</CardTitle>
-          <CardDescription>Applies to all imported products.</CardDescription>
+          <CardTitle>Listing defaults</CardTitle>
+          <CardDescription>
+            Default behavior for imports and Shopify publish actions.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="grid gap-4">
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
             <div>
               <p className="font-medium">
@@ -107,17 +109,6 @@ export function SettingsPage() {
               }
             />
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Shopify publish target</CardTitle>
-          <CardDescription>
-            Choose whether publish actions create reviewable drafts or live products.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
             <div>
               <p className="font-medium">
