@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import {
+  compareProductDisplayOrder,
   isGroupCaptureComplete,
   isPendingCapture,
   resolveProductPhase,
@@ -114,7 +115,7 @@ export const nextProduct = query({
 
     return (
       products
-        .sort((left, right) => left.createdAt - right.createdAt)
+        .sort(compareProductDisplayOrder)
         .find((product) =>
           isPendingCapture({ phase: resolveProductPhase(product) }),
         ) ?? null

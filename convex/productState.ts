@@ -162,6 +162,20 @@ export function migrateLegacyProduct(product: LegacyProduct) {
   };
 }
 
+export function compareProductDisplayOrder<
+  T extends { sortOrder?: number; createdAt: number },
+>(left: T, right: T): number {
+  if (left.sortOrder !== undefined && right.sortOrder !== undefined) {
+    return left.sortOrder - right.sortOrder;
+  }
+
+  if (left.sortOrder === undefined && right.sortOrder === undefined) {
+    return right.createdAt - left.createdAt;
+  }
+
+  return left.sortOrder === undefined ? -1 : 1;
+}
+
 export function isPendingCapture(product: { phase: ProductPhase }): boolean {
   return product.phase === "imported";
 }

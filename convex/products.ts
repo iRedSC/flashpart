@@ -3,6 +3,7 @@ import type { Doc } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import {
+  compareProductDisplayOrder,
   migrateLegacyProduct,
   resolveProductPhase,
   type LastError,
@@ -40,19 +41,7 @@ export const list = query({
     await requireSessionUser(ctx, args.sessionToken);
     const products = await ctx.db.query("products").collect();
 
-    return products
-      .map(normalizeProduct)
-      .sort((left, right) => {
-        if (left.sortOrder !== undefined && right.sortOrder !== undefined) {
-          return left.sortOrder - right.sortOrder;
-        }
-
-        if (left.sortOrder === undefined && right.sortOrder === undefined) {
-          return right.createdAt - left.createdAt;
-        }
-
-        return left.sortOrder === undefined ? -1 : 1;
-      });
+    return products.map(normalizeProduct).sort(compareProductDisplayOrder);
   },
 });
 

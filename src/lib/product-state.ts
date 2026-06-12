@@ -50,17 +50,32 @@ export function hasActiveError(product: { lastError?: LastError }): boolean {
   return product.lastError !== undefined;
 }
 
+export function compareProductDisplayOrder<
+  T extends { sortOrder?: number; createdAt: number },
+>(left: T, right: T): number {
+  if (left.sortOrder !== undefined && right.sortOrder !== undefined) {
+    return left.sortOrder - right.sortOrder;
+  }
+
+  if (left.sortOrder === undefined && right.sortOrder === undefined) {
+    return right.createdAt - left.createdAt;
+  }
+
+  return left.sortOrder === undefined ? -1 : 1;
+}
+
 export function nextUncapturedGroupProduct<
   T extends {
     phase: ProductPhase;
     groupId?: string;
+    sortOrder?: number;
     createdAt: number;
   },
 >(products: T[], groupId: string): T | null {
   return (
     products
       .filter((product) => product.groupId === groupId)
-      .sort((left, right) => left.createdAt - right.createdAt)
+      .sort(compareProductDisplayOrder)
       .find(isPendingCapture) ?? null
   );
 }
@@ -69,6 +84,7 @@ export function nextUncapturedSelectionProduct<
   T extends {
     _id: string;
     phase: ProductPhase;
+    sortOrder?: number;
     createdAt: number;
   },
 >(products: T[], productIds: string[]): T | null {
@@ -77,7 +93,7 @@ export function nextUncapturedSelectionProduct<
   return (
     products
       .filter((product) => idSet.has(product._id))
-      .sort((left, right) => left.createdAt - right.createdAt)
+      .sort(compareProductDisplayOrder)
       .find(isPendingCapture) ?? null
   );
 }
