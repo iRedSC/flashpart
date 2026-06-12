@@ -13,3 +13,7 @@ The UI has one router and one set of pages, but two shells. The split happens in
 
 ## Project UI Copy
 All copy should be focused on a non-technical end-user. Avoid tacky subtext, and use professional, minimal copy to convey only necessary information.
+
+## Removing code is good, adding code is bad
+Every line of code is something to maintain. You are encourged to rip out sections of code and replace them with cleaner, simpler versions. 
+Focus on maintainability, and readability.

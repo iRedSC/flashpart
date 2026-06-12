@@ -80,7 +80,6 @@ import { cn } from "../lib/utils";
 import type { Id } from "../../convex/_generated/dataModel";
 
 type Product = ReturnType<typeof useAppData>["products"][number];
-type ListingJob = ReturnType<typeof useAppData>["listingJobs"][number];
 type CsvProduct = {
   sku: string;
   name: string;
@@ -283,7 +282,6 @@ function MobileProductCard({
   groupLabel,
   isDragSource,
   isPending,
-  latestJob,
   measureElement,
   onAddToGroup,
   onDelete,
@@ -298,7 +296,6 @@ function MobileProductCard({
   groupLabel: string;
   isDragSource: boolean;
   isPending: boolean;
-  latestJob: ListingJob | undefined;
   measureElement: (node: Element | null) => void;
   onAddToGroup: (product: Product) => void;
   onDelete: (product: Product) => void;
@@ -390,10 +387,10 @@ function MobileProductCard({
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
             <ShopifyListingIcon shopifyProductId={product.shopifyProductId} />
             <ProductStatusBadge
-              error={product.error}
-              hasCapture={Boolean(product.shopifyFileId)}
-              latestJob={latestJob}
-              status={product.status}
+              lastError={product.lastError}
+              needsPhotoReview={product.needsPhotoReview}
+              pendingOperation={product.pendingOperation}
+              phase={product.phase}
             />
             {isPending ? (
               <Badge className="border-amber-300 text-amber-800" variant="outline">
@@ -549,7 +546,6 @@ export function ProductsPage() {
     groups,
     isProductPending,
     isLoading,
-    listingJobs,
     products,
     importProducts,
     publishProducts,
@@ -624,19 +620,6 @@ export function ProductsPage() {
     () => new Map(groups.map((group) => [group._id, group.name])),
     [groups],
   );
-  const latestJobByProductId = React.useMemo(() => {
-    const map = new Map<Id<"products">, (typeof listingJobs)[number]>();
-
-    for (const job of listingJobs) {
-      const existing = map.get(job.productId);
-
-      if (!existing || existing.createdAt < job.createdAt) {
-        map.set(job.productId, job);
-      }
-    }
-
-    return map;
-  }, [listingJobs]);
   const columns = React.useMemo(
     () => [
       columnHelper.display({
@@ -785,21 +768,17 @@ export function ProductsPage() {
           />
         ),
       }),
-      columnHelper.accessor("status", {
+      columnHelper.accessor("phase", {
         header: "Status",
-        cell: ({ row }) => {
-          const latestJob = latestJobByProductId.get(row.original._id);
-
-          return (
-            <ProductStatusIcons
-              error={row.original.error}
-              hasCapture={Boolean(row.original.shopifyFileId)}
-              latestJob={latestJob}
-              saving={isProductPending(row.original._id)}
-              status={row.original.status}
-            />
-          );
-        },
+        cell: ({ row }) => (
+          <ProductStatusIcons
+            lastError={row.original.lastError}
+            needsPhotoReview={row.original.needsPhotoReview}
+            pendingOperation={row.original.pendingOperation}
+            phase={row.original.phase}
+            saving={isProductPending(row.original._id)}
+          />
+        ),
       }),
       columnHelper.display({
         id: "group",
@@ -854,7 +833,7 @@ export function ProductsPage() {
         },
       }),
     ],
-    [activeDescriptionId, groupById, isProductPending, latestJobByProductId, updateProduct],
+    [activeDescriptionId, groupById, isProductPending, updateProduct],
   );
   const table = useReactTable({
     columns,
@@ -1606,7 +1585,6 @@ export function ProductsPage() {
                   isDragSource={product._id === activeDragProductId}
                   isPending={isProductPending(product._id)}
                   key={row.id}
-                  latestJob={latestJobByProductId.get(product._id)}
                   measureElement={cardVirtualizer.measureElement}
                   onAddToGroup={(target) => {
                     setRowSelection({ [target._id]: true });
@@ -1694,10 +1672,10 @@ export function ProductsPage() {
                     shopifyProductId={activeDragProduct.shopifyProductId}
                   />
                   <ProductStatusBadge
-                    error={activeDragProduct.error}
-                    hasCapture={Boolean(activeDragProduct.shopifyFileId)}
-                    latestJob={latestJobByProductId.get(activeDragProduct._id)}
-                    status={activeDragProduct.status}
+                    lastError={activeDragProduct.lastError}
+                    needsPhotoReview={activeDragProduct.needsPhotoReview}
+                    pendingOperation={activeDragProduct.pendingOperation}
+                    phase={activeDragProduct.phase}
                   />
                   {isProductPending(activeDragProduct._id) ? (
                     <Badge

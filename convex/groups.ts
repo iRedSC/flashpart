@@ -1,6 +1,11 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
+import {
+  isGroupCaptureComplete,
+  isPendingCapture,
+  resolveProductPhase,
+} from "./productState";
 
 export const list = query({
   args: { sessionToken: v.string() },
@@ -13,11 +18,8 @@ export const list = query({
       const groupProducts = products.filter(
         (product) => product.groupId === group._id,
       );
-      const completed = groupProducts.filter(
-        (product) =>
-          product.status === "draftCreated" ||
-          product.status === "published" ||
-          product.status === "needsReview",
+      const completed = groupProducts.filter((product) =>
+        isGroupCaptureComplete({ phase: resolveProductPhase(product) }),
       ).length;
 
       return {
@@ -61,7 +63,6 @@ export const assignFirstUngrouped = mutation({
     for (const product of candidates) {
       await ctx.db.patch(product._id, {
         groupId: args.groupId,
-        status: "grouped",
         updatedAt: now,
       });
     }
@@ -90,7 +91,6 @@ export const assignProducts = mutation({
 
       await ctx.db.patch(productId, {
         groupId: args.groupId,
-        status: product.status === "imported" ? "grouped" : product.status,
         updatedAt: now,
       });
       assigned += 1;
@@ -112,30 +112,12 @@ export const nextProduct = query({
       .withIndex("by_group", (q) => q.eq("groupId", args.groupId))
       .collect();
 
-    const isPendingCapture = (product: (typeof products)[number]) => {
-      if (product.status === "published") {
-        return false;
-      }
-
-      if (
-        product.status === "captured" ||
-        product.status === "processing" ||
-        product.status === "needsReview" ||
-        product.status === "draftCreated" ||
-        ((product.status === "failed" ||
-          product.status === "blockedExistingSku") &&
-          Boolean(product.shopifyFileId))
-      ) {
-        return false;
-      }
-
-      return true;
-    };
-
     return (
       products
         .sort((left, right) => left.createdAt - right.createdAt)
-        .find(isPendingCapture) ?? null
+        .find((product) =>
+          isPendingCapture({ phase: resolveProductPhase(product) }),
+        ) ?? null
     );
   },
 });

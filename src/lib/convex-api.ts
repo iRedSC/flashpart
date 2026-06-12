@@ -56,9 +56,6 @@ export const convexApi = {
   },
   products: {
     list: deployedFunction<typeof api.products.list>("products.js:list"),
-    seedSampleProducts: deployedFunction<
-      typeof api.products.seedSampleProducts
-    >("products.js:seedSampleProducts"),
     update: deployedFunction<typeof api.products.update>("products.js:update"),
     create: deployedFunction<typeof api.products.create>("products.js:create"),
     importProducts: deployedFunction<typeof api.products.importProducts>(

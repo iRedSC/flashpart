@@ -16,6 +16,8 @@ export const record = mutation({
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
     const now = Date.now();
+    const captureStatus =
+      args.shopifyFileStatus === "ready" ? "ready" : "recorded";
     const captureId = await ctx.db.insert("captures", {
       productId: args.productId,
       groupId: args.groupId,
@@ -23,19 +25,22 @@ export const record = mutation({
       shopifyFileStatus: args.shopifyFileStatus,
       shopifyFileUrl: args.shopifyFileUrl,
       shopifyStagedResourceUrl: args.shopifyStagedResourceUrl,
-      status: "uploaded",
+      status: captureStatus,
       createdAt: now,
       updatedAt: now,
     });
 
     await ctx.db.patch(args.productId, {
       captureId,
+      lastError: undefined,
+      needsPhotoReview: undefined,
+      pendingOperation:
+        captureStatus === "ready" ? undefined : "captureProcessing",
+      phase: "captured",
       shopifyFileId: args.shopifyFileId,
       shopifyFileStatus: args.shopifyFileStatus,
       shopifyFileUrl: args.shopifyFileUrl,
       shopifyStagedResourceUrl: args.shopifyStagedResourceUrl,
-      error: undefined,
-      status: "captured",
       updatedAt: now,
     });
 
@@ -59,11 +64,11 @@ export const markProcessing = mutation({
     const now = Date.now();
 
     await ctx.db.patch(args.captureId, {
-      status: "processing",
+      status: "fileProcessing",
       updatedAt: now,
     });
     await ctx.db.patch(capture.productId, {
-      status: "processing",
+      pendingOperation: "captureProcessing",
       updatedAt: now,
     });
   },
@@ -88,13 +93,15 @@ export const markProcessed = mutation({
     await ctx.db.patch(args.captureId, {
       shopifyFileStatus: "ready",
       shopifyFileUrl: args.shopifyFileUrl,
-      status: "processed",
+      status: "ready",
       updatedAt: now,
     });
     await ctx.db.patch(capture.productId, {
+      needsPhotoReview: true,
+      pendingOperation: undefined,
+      phase: "captured",
       shopifyFileStatus: "ready",
       shopifyFileUrl: args.shopifyFileUrl,
-      status: "needsReview",
       updatedAt: now,
     });
   },

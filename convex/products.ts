@@ -1,7 +1,14 @@
 import { ConvexError, v } from "convex/values";
+import type { Doc } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
-import { productStatus } from "./schema";
+import {
+  migrateLegacyProduct,
+  resolveProductPhase,
+  type LastError,
+  type PendingOperation,
+  type ProductPhase,
+} from "./productState";
 
 const importedProduct = v.object({
   sku: v.string(),
@@ -10,10 +17,21 @@ const importedProduct = v.object({
   description: v.optional(v.string()),
 });
 
-function statusAfterPhotoRemoval(
-  product: { groupId?: unknown },
-): "grouped" | "imported" {
-  return product.groupId ? "grouped" : "imported";
+function normalizeProduct(product: Doc<"products">) {
+  const legacyInput =
+    product as Parameters<typeof migrateLegacyProduct>[0];
+  const phase = resolveProductPhase(legacyInput);
+  const legacy = migrateLegacyProduct(legacyInput);
+
+  return {
+    ...product,
+    phase,
+    pendingOperation:
+      (product.pendingOperation ??
+        legacy?.pendingOperation) as PendingOperation | undefined,
+    needsPhotoReview: product.needsPhotoReview ?? legacy?.needsPhotoReview,
+    lastError: (product.lastError ?? legacy?.lastError) as LastError | undefined,
+  } satisfies Doc<"products"> & { phase: ProductPhase };
 }
 
 export const list = query({
@@ -22,19 +40,19 @@ export const list = query({
     await requireSessionUser(ctx, args.sessionToken);
     const products = await ctx.db.query("products").collect();
 
-    // Manually ordered products sort by sortOrder; products without one
-    // (new imports) surface first, newest first, until the next reorder.
-    return products.sort((left, right) => {
-      if (left.sortOrder !== undefined && right.sortOrder !== undefined) {
-        return left.sortOrder - right.sortOrder;
-      }
+    return products
+      .map(normalizeProduct)
+      .sort((left, right) => {
+        if (left.sortOrder !== undefined && right.sortOrder !== undefined) {
+          return left.sortOrder - right.sortOrder;
+        }
 
-      if (left.sortOrder === undefined && right.sortOrder === undefined) {
-        return right.createdAt - left.createdAt;
-      }
+        if (left.sortOrder === undefined && right.sortOrder === undefined) {
+          return right.createdAt - left.createdAt;
+        }
 
-      return left.sortOrder === undefined ? -1 : 1;
-    });
+        return left.sortOrder === undefined ? -1 : 1;
+      });
   },
 });
 
@@ -68,7 +86,6 @@ export const update = mutation({
     name: v.optional(v.string()),
     description: v.optional(v.string()),
     price: v.optional(v.number()),
-    status: v.optional(productStatus),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
@@ -78,7 +95,6 @@ export const update = mutation({
       name?: string;
       price?: number;
       sku?: string;
-      status?: typeof args.status;
       updatedAt: number;
     } = { updatedAt: Date.now() };
 
@@ -96,10 +112,6 @@ export const update = mutation({
 
     if (args.price !== undefined) {
       patch.price = args.price;
-    }
-
-    if (args.status !== undefined) {
-      patch.status = args.status;
     }
 
     await ctx.db.patch(args.id, patch);
@@ -145,7 +157,7 @@ export const create = mutation({
       name,
       description,
       price: args.price,
-      status: "imported",
+      phase: "imported",
       createdAt: now,
       updatedAt: now,
     });
@@ -204,7 +216,7 @@ export const importProducts = mutation({
         name,
         description: product.description?.trim() || undefined,
         price: product.price,
-        status: "imported",
+        phase: "imported",
         createdAt: now,
         updatedAt: now,
       });
@@ -272,12 +284,15 @@ export const markShopifyFileDeleted = internalMutation({
     }
 
     await ctx.db.patch(args.productId, {
+      captureId: undefined,
+      needsPhotoReview: undefined,
+      pendingOperation: undefined,
+      phase: "imported",
       shopifyFileDeletedAt: args.deletedAt,
       shopifyFileId: undefined,
       shopifyFileStatus: undefined,
       shopifyFileUrl: undefined,
       shopifyStagedResourceUrl: undefined,
-      status: statusAfterPhotoRemoval(product),
       updatedAt: args.deletedAt,
     });
 

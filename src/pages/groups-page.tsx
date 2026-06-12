@@ -19,7 +19,7 @@ import {
 import { GroupProgressBar } from "../components/group-progress-bar";
 import { useAppData } from "../data/app-data-provider";
 import { triggerHaptic } from "../lib/haptics";
-import { groupProductProgress } from "../lib/group-product-progress";
+import { groupProductProgress } from "../lib/product-state";
 
 export function GroupsPage() {
   const { assignFirstUngrouped, groups, products } = useAppData();

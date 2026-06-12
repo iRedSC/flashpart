@@ -1,17 +1,11 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-
-export const productStatus = v.union(
-  v.literal("imported"),
-  v.literal("grouped"),
-  v.literal("captured"),
-  v.literal("processing"),
-  v.literal("draftCreated"),
-  v.literal("published"),
-  v.literal("failed"),
-  v.literal("blockedExistingSku"),
-  v.literal("needsReview"),
-);
+import {
+  captureStatus,
+  lastError,
+  pendingOperation,
+  productPhase,
+} from "./productState";
 
 export const duplicatePolicy = v.union(
   v.literal("blockExisting"),
@@ -137,7 +131,10 @@ export default defineSchema({
     name: v.string(),
     description: v.optional(v.string()),
     price: v.number(),
-    status: productStatus,
+    phase: v.optional(productPhase),
+    pendingOperation: v.optional(pendingOperation),
+    needsPhotoReview: v.optional(v.boolean()),
+    lastError: v.optional(lastError),
     groupId: v.optional(v.id("groups")),
     captureId: v.optional(v.id("captures")),
     shopifyFileId: v.optional(v.string()),
@@ -149,14 +146,13 @@ export default defineSchema({
     shopifyProductHandle: v.optional(v.string()),
     shopifyVariantId: v.optional(v.string()),
     shopifyStatus: v.optional(shopifyStatus),
-    error: v.optional(v.string()),
     sortOrder: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_sku", ["sku"])
     .index("by_group", ["groupId"])
-    .index("by_status", ["status"]),
+    .index("by_phase", ["phase"]),
 
   groups: defineTable({
     name: v.string(),
@@ -178,10 +174,10 @@ export default defineSchema({
     shopifyStagedResourceUrl: v.optional(v.string()),
     shopifyFileDeletedAt: v.optional(v.number()),
     status: v.union(
+      captureStatus,
       v.literal("uploaded"),
       v.literal("processing"),
       v.literal("processed"),
-      v.literal("failed"),
     ),
     error: v.optional(v.string()),
     createdAt: v.number(),
@@ -207,7 +203,6 @@ export default defineSchema({
       v.literal("succeeded"),
       v.literal("failed"),
     ),
-    previousProductStatus: v.optional(productStatus),
     attempts: v.number(),
     triggerRunId: v.optional(v.string()),
     error: v.optional(v.string()),

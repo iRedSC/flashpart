@@ -16,7 +16,10 @@ import {
 } from "../components/ui/card";
 import { useAppData } from "../data/app-data-provider";
 import { canvasToFile, cropImageFileToSquare } from "../lib/capture-image";
-import { nextUncapturedGroupProduct } from "../lib/group-product-progress";
+import {
+  isGroupCaptureComplete,
+  nextUncapturedGroupProduct,
+} from "../lib/product-state";
 import { triggerHaptic } from "../lib/haptics";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { cn } from "../lib/utils";
@@ -68,14 +71,7 @@ export function CapturePage() {
     typedGroupId === undefined
       ? null
       : nextUncapturedGroupProduct(products, typedGroupId);
-  const completedCount = groupProducts.filter(
-    (product) =>
-      product.status === "captured" ||
-      product.status === "processing" ||
-      product.status === "needsReview" ||
-      product.status === "draftCreated" ||
-      product.status === "published",
-  ).length;
+  const completedCount = groupProducts.filter(isGroupCaptureComplete).length;
   const progress =
     groupProducts.length === 0
       ? 0

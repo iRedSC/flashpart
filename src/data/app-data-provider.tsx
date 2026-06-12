@@ -4,6 +4,7 @@ import type { FunctionReturnType } from "convex/server";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { AuthSession } from "../lib/auth-session";
 import { convexApi } from "../lib/convex-api";
+import { isGroupCaptureComplete } from "../lib/product-state";
 
 type Product = FunctionReturnType<typeof convexApi.products.list>[number];
 type Group = FunctionReturnType<typeof convexApi.groups.list>[number];
@@ -23,7 +24,6 @@ type ShopifyFileUpload = {
   shopifyStagedResourceUrl: string;
 };
 
-type ProductStatus = Product["status"];
 type ImportedProduct = {
   sku: string;
   name: string;
@@ -152,15 +152,7 @@ function updateProductFields(
 }
 
 function completedForGroups(product: Product) {
-  return (
-    product.status === "draftCreated" ||
-    product.status === "published" ||
-    product.status === "needsReview"
-  );
-}
-
-function statusAfterPhotoRemoval(product: Product): ProductStatus {
-  return product.groupId ? "grouped" : "imported";
+  return isGroupCaptureComplete(product);
 }
 
 function recomputeGroupCounts(groups: Group[], products: Product[]) {
@@ -471,10 +463,13 @@ export function AppDataProvider({
                 _creationTime: now,
                 _id: optimisticId,
                 createdAt: now,
+                lastError: undefined,
+                needsPhotoReview: undefined,
                 name,
+                pendingOperation: undefined,
+                phase: "imported",
                 price: args.price,
                 sku,
-                status: "imported",
                 updatedAt: now,
               },
               ...state.products,
@@ -496,15 +491,7 @@ export function AppDataProvider({
             ...state,
             products: state.products.map((product) =>
               productIds.includes(product._id)
-                ? {
-                    ...product,
-                    groupId,
-                    status:
-                      product.status === "imported"
-                        ? ("grouped" satisfies ProductStatus)
-                        : product.status,
-                    updatedAt: Date.now(),
-                  }
+                ? { ...product, groupId, updatedAt: Date.now() }
                 : product,
             ),
           }),
@@ -525,7 +512,8 @@ export function AppDataProvider({
           apply: (state) => ({
             ...state,
             products: patchProducts(state.products, productIds, {
-              status: "processing",
+              lastError: undefined,
+              pendingOperation: "publishing",
             }),
           }),
           commit: () =>
@@ -602,7 +590,10 @@ export function AppDataProvider({
                       shopifyFileStatus: undefined,
                       shopifyFileUrl: undefined,
                       shopifyStagedResourceUrl: undefined,
-                      status: statusAfterPhotoRemoval(product),
+                      captureId: undefined,
+                      needsPhotoReview: undefined,
+                      pendingOperation: undefined,
+                      phase: "imported",
                       updatedAt: now,
                     }
                   : product,
@@ -650,12 +641,7 @@ export function AppDataProvider({
             ...state,
             products: state.products.map((product) =>
               candidateIds.includes(product._id)
-                ? {
-                    ...product,
-                    groupId,
-                    status: "grouped",
-                    updatedAt: Date.now(),
-                  }
+                ? { ...product, groupId, updatedAt: Date.now() }
                 : product,
             ),
           }),
@@ -674,7 +660,9 @@ export function AppDataProvider({
           apply: (state) => ({
             ...state,
             products: updateProductFields(state.products, args.productId, {
-              status: "captured",
+              lastError: undefined,
+              needsPhotoReview: undefined,
+              phase: "captured",
             }),
           }),
           commit: () =>
@@ -687,7 +675,9 @@ export function AppDataProvider({
           apply: (state) => ({
             ...state,
             products: updateProductFields(state.products, args.productId, {
-              status: "captured",
+              lastError: undefined,
+              needsPhotoReview: undefined,
+              phase: "captured",
             }),
           }),
           commit: async () => {

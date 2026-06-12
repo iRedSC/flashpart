@@ -1,4 +1,4 @@
-import type { GroupProductProgress } from "../lib/group-product-progress";
+import type { GroupProductProgress } from "../lib/product-state";
 
 function segmentWidth(count: number, total: number) {
   if (total === 0 || count === 0) {
