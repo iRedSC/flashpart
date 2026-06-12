@@ -5,7 +5,10 @@ import { cn } from "../lib/utils";
 type DescriptionFieldProps = {
   "aria-label": string;
   className?: string;
+  onNavigateNext?: () => void;
+  onOpenChange?: (open: boolean) => void;
   onSave: (value: string) => void;
+  open?: boolean;
   placeholder?: string;
   value: string;
 };
@@ -14,27 +17,51 @@ function normalizeDescription(value: string) {
   return value.trim();
 }
 
+const triggerClassName =
+  "flex h-8 w-full min-w-0 items-center rounded-md border border-transparent bg-transparent px-1.5 text-left text-[0.8125rem] transition-colors hover:border-slate-200 hover:bg-white/80 focus-visible:border-slate-950 focus-visible:bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-950";
+
 export function DescriptionField({
   "aria-label": ariaLabel,
   className,
+  onNavigateNext,
+  onOpenChange,
   onSave,
+  open: openProp,
   placeholder = "Add description…",
   value,
 }: DescriptionFieldProps) {
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const popoverRef = React.useRef<HTMLDivElement>(null);
-  const [open, setOpen] = React.useState(false);
+  const isNavigatingRef = React.useRef(false);
+  const [internalOpen, setInternalOpen] = React.useState(false);
   const [draft, setDraft] = React.useState(value);
   const [position, setPosition] = React.useState({
+    height: 32,
     left: 0,
     top: 0,
-    width: 280,
+    width: 0,
   });
 
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : internalOpen;
+
+  const setOpen = React.useCallback(
+    (next: boolean) => {
+      if (isControlled) {
+        onOpenChange?.(next);
+      } else {
+        setInternalOpen(next);
+      }
+    },
+    [isControlled, onOpenChange],
+  );
+
   React.useEffect(() => {
-    setDraft(value);
-  }, [value]);
+    if (!open) {
+      setDraft(value);
+    }
+  }, [open, value]);
 
   const updatePosition = React.useCallback(() => {
     const rect = triggerRef.current?.getBoundingClientRect();
@@ -43,12 +70,41 @@ export function DescriptionField({
       return;
     }
 
-    const width = Math.max(rect.width, 280);
-    const left = Math.min(rect.left, window.innerWidth - width - 12);
-    const top = rect.bottom + 4;
-
-    setPosition({ left, top, width });
+    setPosition({
+      height: rect.height,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+    });
   }, []);
+
+  const draftRef = React.useRef(draft);
+  draftRef.current = draft;
+
+  const valueRef = React.useRef(value);
+  valueRef.current = value;
+
+  const saveIfChanged = React.useCallback(() => {
+    if (
+      normalizeDescription(draftRef.current) !==
+      normalizeDescription(valueRef.current)
+    ) {
+      onSave(normalizeDescription(draftRef.current));
+    }
+  }, [onSave]);
+
+  const closeEditor = React.useCallback(
+    (save: boolean) => {
+      setOpen(false);
+
+      if (save) {
+        saveIfChanged();
+      } else {
+        setDraft(valueRef.current);
+      }
+    },
+    [saveIfChanged, setOpen],
+  );
 
   React.useLayoutEffect(() => {
     if (!open) {
@@ -57,10 +113,8 @@ export function DescriptionField({
 
     updatePosition();
     textareaRef.current?.focus();
-    textareaRef.current?.setSelectionRange(
-      textareaRef.current.value.length,
-      textareaRef.current.value.length,
-    );
+    const length = textareaRef.current?.value.length ?? 0;
+    textareaRef.current?.setSelectionRange(length, length);
 
     function handleScrollOrResize() {
       updatePosition();
@@ -73,26 +127,6 @@ export function DescriptionField({
       window.removeEventListener("resize", handleScrollOrResize);
     };
   }, [open, updatePosition]);
-
-  const draftRef = React.useRef(draft);
-  draftRef.current = draft;
-
-  const valueRef = React.useRef(value);
-  valueRef.current = value;
-
-  const closeEditor = React.useCallback((save: boolean) => {
-    setOpen(false);
-
-    if (
-      save &&
-      normalizeDescription(draftRef.current) !==
-        normalizeDescription(valueRef.current)
-    ) {
-      onSave(normalizeDescription(draftRef.current));
-    } else {
-      setDraft(valueRef.current);
-    }
-  }, [onSave]);
 
   React.useEffect(() => {
     if (!open) {
@@ -127,6 +161,31 @@ export function DescriptionField({
     };
   }, [closeEditor, open]);
 
+  function handleNavigateNext() {
+    saveIfChanged();
+    isNavigatingRef.current = true;
+    setOpen(false);
+    onNavigateNext?.();
+  }
+
+  function handleTextareaKeyDown(
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+  ) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleNavigateNext();
+    }
+  }
+
+  function handleTextareaBlur() {
+    if (isNavigatingRef.current) {
+      isNavigatingRef.current = false;
+      return;
+    }
+
+    closeEditor(true);
+  }
+
   const displayValue = value.trim();
   const isEmpty = !displayValue;
 
@@ -137,9 +196,9 @@ export function DescriptionField({
         aria-haspopup="dialog"
         aria-label={ariaLabel}
         className={cn(
-          "flex h-8 w-full min-w-0 items-center rounded-md border border-transparent bg-transparent px-1.5 text-left text-[0.8125rem] transition-colors hover:border-slate-200 hover:bg-white/80 focus-visible:border-slate-950 focus-visible:bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-950",
+          triggerClassName,
           isEmpty ? "text-slate-400" : "truncate text-slate-500",
-          open && "border-slate-950 bg-white ring-1 ring-slate-950",
+          open && "invisible",
           className,
         )}
         onClick={() => {
@@ -154,24 +213,27 @@ export function DescriptionField({
       {open
         ? createPortal(
             <div
-              className="fixed z-50 rounded-md border border-slate-200 bg-white p-2 shadow-lg"
+              className="fixed z-50 overflow-hidden rounded-md border border-slate-950 bg-white shadow-lg ring-1 ring-slate-950"
               onMouseDown={(event) => event.preventDefault()}
               ref={popoverRef}
               role="dialog"
               style={{
                 left: `${position.left}px`,
+                minHeight: `${position.height}px`,
                 top: `${position.top}px`,
                 width: `${position.width}px`,
               }}
             >
               <textarea
                 aria-label={ariaLabel}
-                className="min-h-24 w-full resize-y rounded-md border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-950 outline-none focus-visible:border-slate-950 focus-visible:ring-1 focus-visible:ring-slate-950"
-                onBlur={() => closeEditor(true)}
+                className="block min-h-24 w-full resize-y border-0 bg-white px-1.5 py-1.5 text-[0.8125rem] leading-snug text-slate-500 outline-none placeholder:text-slate-400"
+                onBlur={handleTextareaBlur}
                 onChange={(event) => setDraft(event.currentTarget.value)}
+                onKeyDown={handleTextareaKeyDown}
                 placeholder={placeholder}
                 ref={textareaRef}
-                rows={4}
+                rows={3}
+                style={{ minHeight: `${Math.max(position.height, 96)}px` }}
                 value={draft}
               />
             </div>,

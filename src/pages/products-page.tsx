@@ -595,6 +595,11 @@ export function ProductsPage() {
   const [selectedGroupId, setSelectedGroupId] = React.useState<Id<"groups"> | "">("");
   const [photoProductId, setPhotoProductId] =
     React.useState<Id<"products"> | null>(null);
+  const [activeDescriptionId, setActiveDescriptionId] =
+    React.useState<Id<"products"> | null>(null);
+  const focusNextDescriptionRef = React.useRef<
+    (currentId: Id<"products">) => void
+  >(() => {});
   const photoProduct = React.useMemo(
     () =>
       photoProductId
@@ -713,6 +718,19 @@ export function ProductsPage() {
         cell: ({ row }) => (
           <DescriptionField
             aria-label={`Description for ${row.original.sku}`}
+            onNavigateNext={() =>
+              focusNextDescriptionRef.current(row.original._id)
+            }
+            onOpenChange={(open) => {
+              if (open) {
+                setActiveDescriptionId(row.original._id);
+                return;
+              }
+
+              if (activeDescriptionId === row.original._id) {
+                setActiveDescriptionId(null);
+              }
+            }}
             onSave={(description) => {
               const current = row.original.description ?? "";
 
@@ -723,6 +741,7 @@ export function ProductsPage() {
                 }).catch(() => undefined);
               }
             }}
+            open={activeDescriptionId === row.original._id}
             value={row.original.description ?? ""}
           />
         ),
@@ -821,7 +840,7 @@ export function ProductsPage() {
         },
       }),
     ],
-    [groupById, isProductPending, latestJobByProductId, updateProduct],
+    [activeDescriptionId, groupById, isProductPending, latestJobByProductId, updateProduct],
   );
   const table = useReactTable({
     columns,
@@ -841,6 +860,23 @@ export function ProductsPage() {
     getScrollElement: () => parentRef.current,
     overscan: 12,
   });
+
+  React.useEffect(() => {
+    focusNextDescriptionRef.current = (currentId) => {
+      const index = rows.findIndex((row) => row.original._id === currentId);
+
+      if (index === -1 || index >= rows.length - 1) {
+        setActiveDescriptionId(null);
+        return;
+      }
+
+      const nextIndex = index + 1;
+      rowVirtualizer.scrollToIndex(nextIndex, { align: "auto" });
+      window.requestAnimationFrame(() => {
+        setActiveDescriptionId(rows[nextIndex].original._id);
+      });
+    };
+  }, [rows, rowVirtualizer]);
   const cardVirtualizer = useVirtualizer({
     count: rows.length,
     estimateSize: () => 136,
