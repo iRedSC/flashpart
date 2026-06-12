@@ -897,8 +897,8 @@ export function ProductsPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden md:overflow-visible">
-      <div className="flex flex-wrap items-center justify-between gap-2 md:gap-4">
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center justify-between gap-2 md:gap-4">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-sm text-slate-500">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -930,7 +930,7 @@ export function ProductsPage() {
             </DropdownMenuContent>
           </DropdownMenu>
           <Button
-            className="hidden text-slate-950 md:inline-flex"
+            className="hidden shrink-0 text-slate-950 md:inline-flex"
             onClick={() => setImportOpen(true)}
             variant="outline"
           >
@@ -938,38 +938,53 @@ export function ProductsPage() {
             Import CSV
           </Button>
           {hasSelection ? (
-            <span>{selectedCount.toLocaleString()} selected</span>
+            <span className="shrink-0">
+              {selectedCount.toLocaleString()} selected
+            </span>
           ) : null}
-          {isLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
+          {isLoading ? (
+            <RefreshCw className="h-4 w-4 shrink-0 animate-spin" />
+          ) : null}
         </div>
-        <div className="flex flex-nowrap gap-2">
-          <Button
-            className="px-3 md:px-4"
-            disabled={!hasSelection}
-            onClick={() => void handleDeleteSelected().catch(() => undefined)}
-            variant="destructive"
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete
-          </Button>
-          <Button
-            className="px-3 md:px-4"
-            disabled={!hasSelection}
-            onClick={() => setAddToGroupOpen(true)}
-            variant="outline"
-          >
-            <FolderPlus className="h-4 w-4" />
-            Add to group
-          </Button>
-          <Button
-            className="px-3 md:px-4"
-            disabled={!hasSelection}
-            onClick={() => void handlePublishSelected().catch(() => undefined)}
-          >
-            <Send className="h-4 w-4" />
-            Publish
-          </Button>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label="Bulk actions"
+              className="h-9 w-9 shrink-0 p-0"
+              variant="outline"
+            >
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              disabled={!hasSelection}
+              onSelect={() => setAddToGroupOpen(true)}
+            >
+              <FolderPlus />
+              Add to group
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!hasSelection}
+              onSelect={() =>
+                void handlePublishSelected().catch(() => undefined)
+              }
+            >
+              <Send />
+              Publish
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-red-600 focus:bg-red-50 focus:text-red-600"
+              disabled={!hasSelection}
+              onSelect={() =>
+                void handleDeleteSelected().catch(() => undefined)
+              }
+            >
+              <Trash2 />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <Dialog
