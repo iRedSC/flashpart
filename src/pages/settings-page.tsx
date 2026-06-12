@@ -90,17 +90,14 @@ export function SettingsPage() {
         <CardContent className="grid gap-4">
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
             <div>
-              <p className="font-medium">
-                {updateExisting ? "Update existing Shopify products" : "Block existing Shopify SKUs"}
-              </p>
+              <p className="font-medium">Existing SKU matches</p>
               <p className="text-sm text-slate-500">
-                {updateExisting
-                  ? "If a SKU already exists, the listing job may update its draft data."
-                  : "If a SKU already exists, the row should be blocked before Shopify writes."}
+                Choose whether duplicate SKUs are blocked before Shopify writes or
+                updated in place.
               </p>
             </div>
             <Switch
-              aria-label="Toggle existing SKU behavior"
+              aria-label="Update existing Shopify products when SKU matches"
               checked={updateExisting}
               onCheckedChange={(checked) =>
                 void setDuplicatePolicy(
@@ -111,19 +108,14 @@ export function SettingsPage() {
           </div>
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
             <div>
-              <p className="font-medium">
-                {publishDirectly
-                  ? "Create published Shopify products"
-                  : "Create Shopify drafts"}
-              </p>
+              <p className="font-medium">Publish target</p>
               <p className="text-sm text-slate-500">
-                {publishDirectly
-                  ? "Products will go live as soon as the listing job succeeds."
-                  : "Products stay in Shopify drafts for review before they go live."}
+                Choose whether listing creates reviewable Shopify drafts or live
+                products.
               </p>
             </div>
             <Switch
-              aria-label="Toggle Shopify publish target"
+              aria-label="Publish products live instead of as Shopify drafts"
               checked={publishDirectly}
               onCheckedChange={(checked) =>
                 void setShopifyPublishTarget(
