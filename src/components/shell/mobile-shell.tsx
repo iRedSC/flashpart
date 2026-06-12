@@ -70,7 +70,7 @@ export function MobileShell({ onSignOut }: MobileShellProps) {
         </div>
       </header>
       <MutationErrorBanner />
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4">
+      <main className="box-content flex min-h-0 flex-1 flex-col overflow-hidden px-4 pt-4">
         <Outlet />
       </main>
       <nav
