@@ -1,7 +1,6 @@
 import * as React from "react";
-import { Camera, PackagePlus } from "lucide-react";
+import { Camera, FolderPlus, MoreVertical, PackagePlus } from "lucide-react";
 import { Link } from "react-router-dom";
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -10,6 +9,12 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
 import { Input } from "../components/ui/input";
 import { GroupProgressBar } from "../components/group-progress-bar";
 import { useAppData } from "../data/app-data-provider";
@@ -73,7 +78,31 @@ export function GroupsPage() {
                       {progress.total.toLocaleString()} products
                     </CardDescription>
                   </div>
-                  <Badge variant="secondary">{group.status}</Badge>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        aria-label={`Actions for ${group.name}`}
+                        className="relative z-10 h-9 w-9 shrink-0 p-0"
+                        variant="ghost"
+                      >
+                        <MoreVertical className="h-[18px] w-[18px]" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        disabled={ungroupedCount === 0}
+                        onSelect={() => {
+                          triggerHaptic();
+                          void assignFirstUngrouped(group._id).catch(
+                            () => undefined,
+                          );
+                        }}
+                      >
+                        <FolderPlus />
+                        Assign ungrouped
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -91,16 +120,6 @@ export function GroupsPage() {
                       <Camera className="h-5 w-5 md:h-4 md:w-4" />
                       Capture
                     </Link>
-                  </Button>
-                  <Button
-                    className="h-11 rounded-xl md:h-10 md:rounded-md"
-                    onClick={() => {
-                      triggerHaptic();
-                      void assignFirstUngrouped(group._id).catch(() => undefined);
-                    }}
-                    variant="outline"
-                  >
-                    Assign ungrouped
                   </Button>
                 </div>
               </CardContent>
