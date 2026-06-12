@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
-import { duplicatePolicy, productStatus } from "./schema";
+import { productStatus } from "./schema";
 
 const importedProduct = v.object({
   sku: v.string(),
@@ -84,10 +84,6 @@ export const seedSampleProducts = mutation({
     }
 
     const now = Date.now();
-    const settings = await ctx.db
-      .query("appSettings")
-      .withIndex("by_key", (q) => q.eq("key", "singleton"))
-      .unique();
 
     for (const [sku, name, price] of sampleProducts) {
       await ctx.db.insert("products", {
@@ -95,7 +91,6 @@ export const seedSampleProducts = mutation({
         name,
         price,
         status: "imported",
-        duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",
         createdAt: now,
         updatedAt: now,
       });
@@ -114,23 +109,40 @@ export const update = mutation({
     description: v.optional(v.string()),
     price: v.optional(v.number()),
     status: v.optional(productStatus),
-    duplicatePolicy: v.optional(duplicatePolicy),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
 
-    await ctx.db.patch(args.id, {
-      sku: args.sku,
-      name: args.name,
-      description:
-        args.description === undefined
-          ? undefined
-          : args.description.trim() || undefined,
-      price: args.price,
-      status: args.status,
-      duplicatePolicy: args.duplicatePolicy,
-      updatedAt: Date.now(),
-    });
+    const patch: {
+      description?: string;
+      name?: string;
+      price?: number;
+      sku?: string;
+      status?: typeof args.status;
+      updatedAt: number;
+    } = { updatedAt: Date.now() };
+
+    if (args.sku !== undefined) {
+      patch.sku = args.sku;
+    }
+
+    if (args.name !== undefined) {
+      patch.name = args.name;
+    }
+
+    if (args.description !== undefined) {
+      patch.description = args.description.trim() || undefined;
+    }
+
+    if (args.price !== undefined) {
+      patch.price = args.price;
+    }
+
+    if (args.status !== undefined) {
+      patch.status = args.status;
+    }
+
+    await ctx.db.patch(args.id, patch);
   },
 });
 
@@ -166,10 +178,6 @@ export const create = mutation({
       throw new ConvexError(`A product with SKU "${sku}" already exists.`);
     }
 
-    const settings = await ctx.db
-      .query("appSettings")
-      .withIndex("by_key", (q) => q.eq("key", "singleton"))
-      .unique();
     const now = Date.now();
 
     const id = await ctx.db.insert("products", {
@@ -178,7 +186,6 @@ export const create = mutation({
       description,
       price: args.price,
       status: "imported",
-      duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",
       createdAt: now,
       updatedAt: now,
     });
@@ -196,10 +203,6 @@ export const importProducts = mutation({
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
 
-    const settings = await ctx.db
-      .query("appSettings")
-      .withIndex("by_key", (q) => q.eq("key", "singleton"))
-      .unique();
     const now = Date.now();
     let inserted = 0;
     let overwritten = 0;
@@ -242,7 +245,6 @@ export const importProducts = mutation({
         description: product.description?.trim() || undefined,
         price: product.price,
         status: "imported",
-        duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",
         createdAt: now,
         updatedAt: now,
       });
@@ -329,26 +331,5 @@ export const markShopifyFileDeleted = internalMutation({
         updatedAt: args.deletedAt,
       });
     }
-  },
-});
-
-export const setDuplicatePolicyForAll = mutation({
-  args: {
-    sessionToken: v.string(),
-    duplicatePolicy,
-  },
-  handler: async (ctx, args) => {
-    await requireSessionUser(ctx, args.sessionToken);
-    const products = await ctx.db.query("products").collect();
-    const now = Date.now();
-
-    for (const product of products) {
-      await ctx.db.patch(product._id, {
-        duplicatePolicy: args.duplicatePolicy,
-        updatedAt: now,
-      });
-    }
-
-    return { updated: products.length };
   },
 });

@@ -337,7 +337,7 @@ export const processQueuedJob = internalAction({
         payload.product.sku,
       );
 
-      if (existing && payload.product.duplicatePolicy === "blockExisting") {
+      if (existing && payload.settings.duplicatePolicy === "blockExisting") {
         await ctx.runMutation(listingJobModel.markJobBlockedExistingSku, {
           existingShopifyProductId: existing.productId,
           jobId: args.jobId,

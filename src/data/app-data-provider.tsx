@@ -72,7 +72,6 @@ type AppDataContextValue = {
     name?: string;
     description?: string;
     price?: number;
-    duplicatePolicy?: DuplicatePolicy;
   }) => Promise<null>;
   deleteProducts: (ids: Id<"products">[]) => Promise<{ deleted: number } | null>;
   reorderProducts: (
@@ -96,7 +95,7 @@ type AppDataContextValue = {
   ) => Promise<{ queued: number } | null>;
   setDuplicatePolicy: (
     duplicatePolicy: DuplicatePolicy,
-  ) => Promise<{ updatedProducts: number } | null>;
+  ) => Promise<{ duplicatePolicy: DuplicatePolicy } | null>;
   setShopifyPublishTarget: (
     shopifyPublishTarget: ShopifyPublishTarget,
   ) => Promise<{ shopifyPublishTarget: ShopifyPublishTarget } | null>;
@@ -472,8 +471,6 @@ export function AppDataProvider({
                 _creationTime: now,
                 _id: optimisticId,
                 createdAt: now,
-                duplicatePolicy:
-                  state.settings?.duplicatePolicy ?? "blockExisting",
                 name,
                 price: args.price,
                 sku,
@@ -546,9 +543,6 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            products: patchProducts(state.products, state.products.map((product) => product._id), {
-              duplicatePolicy,
-            }),
             settings: state.settings
               ? {
                   ...state.settings,

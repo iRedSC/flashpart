@@ -27,7 +27,7 @@ const INLINE_CAMERA_UNAVAILABLE =
 
 export function CapturePage() {
   const { groupId } = useParams();
-  const { groups, products, submitCapture } = useAppData();
+  const { groups, products, settings, submitCapture } = useAppData();
   const isMobile = useIsMobile();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
@@ -308,9 +308,9 @@ export function CapturePage() {
                 </p>
               </div>
             </div>
-            {nextProduct.duplicatePolicy === "blockExisting" ? (
+            {settings?.duplicatePolicy === "blockExisting" ? (
               <p className="mt-2 text-xs text-slate-500">
-                Existing SKUs are blocked for this part.
+                Existing SKUs are blocked in Shopify.
               </p>
             ) : null}
           </div>

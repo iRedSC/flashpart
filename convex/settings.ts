@@ -52,16 +52,7 @@ export const setDuplicatePolicy = mutation({
       });
     }
 
-    const products = await ctx.db.query("products").collect();
-
-    for (const product of products) {
-      await ctx.db.patch(product._id, {
-        duplicatePolicy: args.duplicatePolicy,
-        updatedAt: now,
-      });
-    }
-
-    return { updatedProducts: products.length };
+    return { duplicatePolicy: args.duplicatePolicy };
   },
 });
 

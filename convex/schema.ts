@@ -138,7 +138,6 @@ export default defineSchema({
     description: v.optional(v.string()),
     price: v.number(),
     status: productStatus,
-    duplicatePolicy,
     groupId: v.optional(v.id("groups")),
     captureId: v.optional(v.id("captures")),
     shopifyFileId: v.optional(v.string()),
