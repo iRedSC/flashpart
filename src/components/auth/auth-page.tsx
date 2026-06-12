@@ -30,7 +30,7 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
     hintEmail && browserSupportsWebAuthn() ? "checking" : "ready",
   );
   const showReturn = Boolean(hintEmail) && !useOtherAccount;
-  const tryPasskeySignIn = usePasskeySignIn((session) => {
+  const { trySignIn } = usePasskeySignIn((session) => {
     setHintEmail(session.email);
     setUseOtherAccount(false);
     onSignedIn(session);
@@ -52,7 +52,7 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
       }
 
       try {
-        await tryPasskeySignIn();
+        await trySignIn();
       } catch {
         if (!cancelled) {
           setBoot("ready");
@@ -65,7 +65,7 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [tryPasskeySignIn]);
+  }, [trySignIn]);
 
   function handleDifferentAccount() {
     clearPasskeyHintEmail();

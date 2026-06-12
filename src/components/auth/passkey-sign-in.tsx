@@ -12,7 +12,7 @@ export function PasskeySignIn({
   label = "Sign in with passkey",
   onSignedIn,
 }: PasskeySignInProps) {
-  const trySignIn = usePasskeySignIn(onSignedIn);
+  const { trySignIn } = usePasskeySignIn(onSignedIn);
 
   return (
     <Button

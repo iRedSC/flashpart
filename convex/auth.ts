@@ -21,6 +21,7 @@ const authModel = {
   verifyOtpAndCreateUser: makeFunctionReference(
     "authModel.js:verifyOtpAndCreateUser",
   ) as any,
+  getUserByEmail: makeFunctionReference("authModel.js:getUserByEmail") as any,
   getUserPasskeys: makeFunctionReference("authModel.js:getUserPasskeys") as any,
   storeChallenge: makeFunctionReference("authModel.js:storeChallenge") as any,
   getChallengeById: makeFunctionReference("authModel.js:getChallengeById") as any,
@@ -42,6 +43,9 @@ const SESSION_DAYS = 30;
 
 type ExcludeCredential = NonNullable<
   Parameters<typeof generateRegistrationOptions>[0]["excludeCredentials"]
+>[number];
+type AllowCredential = NonNullable<
+  Parameters<typeof generateAuthenticationOptions>[0]["allowCredentials"]
 >[number];
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
@@ -229,6 +233,50 @@ export const startPasskeySignIn = action({
   },
 });
 
+export const startPasskeySignInForEmail = action({
+  args: { email: v.string(), origin: v.string() },
+  handler: async (ctx, args) => {
+    const email = normalizeEmail(args.email);
+    const now = Date.now();
+    const user = await ctx.runQuery(authModel.getUserByEmail, { email });
+
+    if (!user) {
+      return { available: false as const };
+    }
+
+    const passkeys = (await ctx.runQuery(authModel.getUserPasskeys, {
+      userId: user.userId,
+    })) as Doc<"passkeys">[];
+
+    if (passkeys.length === 0) {
+      return { available: false as const };
+    }
+
+    const { rpID } = getWebAuthnConfig(args.origin);
+    const options = await generateAuthenticationOptions({
+      rpID,
+      userVerification: "preferred",
+      allowCredentials: passkeys.map((passkey): AllowCredential => ({
+        id: passkey.credentialId,
+        transports: passkey.transports as AllowCredential["transports"],
+      })),
+    });
+    const challengeId = await ctx.runMutation(
+      authModel.storeChallenge,
+      {
+        userId: user.userId,
+        email,
+        challenge: options.challenge,
+        purpose: "login",
+        expiresAt: now + CHALLENGE_MINUTES * 60 * 1000,
+        createdAt: now,
+      },
+    );
+
+    return { available: true as const, options, challengeId };
+  },
+});
+
 export const completePasskeySignIn = action({
   args: { challengeId: v.id("authChallenges"), response: v.any(), origin: v.string() },
   handler: async (ctx, args) => {
@@ -247,6 +295,10 @@ export const completePasskeySignIn = action({
 
     if (!challenge || !passkey) {
       throw new Error("Passkey sign-in challenge expired.");
+    }
+
+    if (challenge.userId && passkey.userId !== challenge.userId) {
+      throw new Error("Passkey does not match this account.");
     }
 
     const { expectedOrigin, rpID } = getWebAuthnConfig(args.origin);

@@ -96,6 +96,22 @@ export const consumeChallenge = internalMutation({
   },
 });
 
+export const getUserByEmail = internalQuery({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .unique();
+
+    if (!user) {
+      return null;
+    }
+
+    return { userId: user._id, email: user.email };
+  },
+});
+
 export const getUserPasskeys = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {

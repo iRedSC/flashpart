@@ -31,6 +31,9 @@ export const convexApi = {
     startPasskeySignIn: deployedFunction<typeof api.auth.startPasskeySignIn>(
       "auth.js:startPasskeySignIn",
     ),
+    startPasskeySignInForEmail: deployedFunction<
+      typeof api.auth.startPasskeySignInForEmail
+    >("auth.js:startPasskeySignInForEmail"),
     completePasskeySignIn: deployedFunction<
       typeof api.auth.completePasskeySignIn
     >("auth.js:completePasskeySignIn"),
