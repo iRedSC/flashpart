@@ -246,24 +246,42 @@ function MobileProductCard({
   virtualRow: VirtualItem;
 }) {
   const product = row.original;
-  const { attributes, listeners, setNodeRef } = useSortable({ id: row.id });
+  const { attributes, listeners, setNodeRef, transform, transition } =
+    useSortable({ id: row.id });
+  const translateY = virtualRow.start + (transform?.y ?? 0);
 
   return (
     <div
       className="absolute left-0 top-0 w-full pb-2"
       data-index={virtualRow.index}
-      ref={measureElement}
-      style={{ transform: `translateY(${virtualRow.start}px)` }}
+      ref={(node) => {
+        setNodeRef(node);
+        measureElement(node);
+      }}
+      style={{
+        transform: `translate3d(0, ${translateY}px, 0)`,
+        transition,
+      }}
     >
       <div
         className={cn(
-          "rounded-xl border border-slate-200 bg-white px-3.5 py-4 shadow-sm",
+          "cursor-pointer rounded-xl border border-slate-200 bg-white px-3.5 py-4 shadow-sm transition-opacity",
           row.getIsSelected() && "border-slate-950",
           isPending && "bg-amber-50/70",
-          isDragSource && "opacity-40",
+          isDragSource && "opacity-0",
           dropIndicatorClass(dropEdge),
         )}
-        ref={setNodeRef}
+        onClick={(event) => {
+          if (
+            (event.target as HTMLElement).closest(
+              "button, a, [role='button'], [role='checkbox'], input, label",
+            )
+          ) {
+            return;
+          }
+
+          row.toggleSelected();
+        }}
       >
         <div className="flex items-stretch gap-3.5">
           {product.shopifyFileUrl ? (
@@ -1280,41 +1298,79 @@ export function ProductsPage() {
             </div>
           </div>
         </SortableContext>
-        <DragOverlay dropAnimation={null}>
-          {activeDragProduct ? (
-            <div className="pointer-events-none relative h-full rounded-xl border border-slate-200 bg-white/75 p-3 shadow-lg backdrop-blur-sm">
-              <div className="flex items-start gap-2">
-                <GripVertical className="mt-1 h-4 w-4 shrink-0 text-slate-400" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
+        <DragOverlay adjustScale={false} dropAnimation={null}>
+          {activeDragProduct && activeDragRow ? (
+            <div
+              className={cn(
+                "pointer-events-none relative mx-3 w-[calc(100%-1.5rem)] origin-center scale-[0.88] rounded-xl border border-slate-200 bg-white/75 px-3.5 py-4 shadow-lg backdrop-blur-sm",
+                activeDragRow.getIsSelected() && "border-slate-950",
+                isProductPending(activeDragProduct._id) && "bg-amber-50/70",
+              )}
+            >
+              <div className="flex items-stretch gap-3.5">
+                {activeDragProduct.shopifyFileUrl ? (
+                  <img
+                    alt=""
+                    className="h-[52px] w-[52px] shrink-0 rounded-lg object-cover"
+                    src={activeDragProduct.shopifyFileUrl}
+                  />
+                ) : (
+                  <div
+                    aria-hidden="true"
+                    className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-400"
+                  >
+                    <Image className="h-5 w-5" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1 self-center pr-1">
+                  <p
+                    className="line-clamp-2 text-sm font-medium"
+                    title={activeDragProduct.name}
+                  >
                     {activeDragProduct.name}
                   </p>
                   <p className="truncate font-mono text-xs text-slate-500">
                     {activeDragProduct.sku}
                   </p>
                 </div>
-                {activeDragProduct.shopifyFileUrl ? (
-                  <img
-                    alt=""
-                    className="h-12 w-12 shrink-0 rounded-lg object-cover"
-                    src={activeDragProduct.shopifyFileUrl}
-                  />
-                ) : null}
-                <span className="text-sm font-medium">
-                  ${activeDragProduct.price.toFixed(2)}
-                </span>
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center self-center text-slate-400">
+                  <GripVertical className="h-[18px] w-[18px]" />
+                </div>
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                <ProductStatusBadge
-                  error={activeDragProduct.error}
-                  hasCapture={Boolean(activeDragProduct.shopifyFileId)}
-                  latestJob={latestJobByProductId.get(activeDragProduct._id)}
-                  status={activeDragProduct.status}
-                />
-                <span>{activeDragGroupLabel}</span>
-                <span className="font-mono">
-                  {activeDragProduct.shopifyProductId ?? "Draft pending"}
-                </span>
+              <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
+                  <ShopifyListingIcon
+                    shopifyProductId={activeDragProduct.shopifyProductId}
+                  />
+                  <ProductStatusBadge
+                    error={activeDragProduct.error}
+                    hasCapture={Boolean(activeDragProduct.shopifyFileId)}
+                    latestJob={latestJobByProductId.get(activeDragProduct._id)}
+                    status={activeDragProduct.status}
+                  />
+                  {isProductPending(activeDragProduct._id) ? (
+                    <Badge
+                      className="border-amber-300 text-amber-800"
+                      variant="outline"
+                    >
+                      saving
+                    </Badge>
+                  ) : null}
+                  <span>{activeDragGroupLabel}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2.5">
+                  <span className="text-sm font-medium">
+                    ${activeDragProduct.price.toFixed(2)}
+                  </span>
+                  <div className="flex h-9 w-9 items-center justify-center text-slate-500">
+                    <MoreVertical className="h-[18px] w-[18px]" />
+                  </div>
+                  <Checkbox
+                    aria-hidden="true"
+                    checked={activeDragRow.getIsSelected()}
+                    tabIndex={-1}
+                  />
+                </div>
               </div>
               {dragCount > 1 ? (
                 <span className="absolute -right-2 -top-2 rounded-full bg-slate-950 px-2 py-0.5 text-xs font-medium text-white shadow">
