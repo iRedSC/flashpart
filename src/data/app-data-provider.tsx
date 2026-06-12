@@ -108,6 +108,9 @@ type AppDataContextValue = {
   assignFirstUngrouped: (
     groupId: Id<"groups">,
   ) => Promise<{ assigned: number } | null>;
+  deleteGroup: (
+    groupId: Id<"groups">,
+  ) => Promise<{ deleted: boolean; ungrouped: number } | null>;
   uploadCaptureImage: (file: File) => Promise<ShopifyFileUpload>;
   recordCapture: (args: {
     productId: Id<"products">;
@@ -206,6 +209,7 @@ export function AppDataProvider({
   const assignFirstUngroupedMutation = useMutation(
     convexApi.groups.assignFirstUngrouped,
   );
+  const deleteGroupMutation = useMutation(convexApi.groups.remove);
   const recordCaptureMutation = useMutation(convexApi.captures.record);
   const operationIdRef = React.useRef(0);
   const hasInitializedFailedJobTrackingRef = React.useRef(false);
@@ -654,6 +658,30 @@ export function AppDataProvider({
           productIds: candidateIds,
         });
       },
+      deleteGroup: (groupId) => {
+        const affectedProductIds = optimisticData.products
+          .filter((product) => product.groupId === groupId)
+          .map((product) => product._id);
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            groups: state.groups.filter((group) => group._id !== groupId),
+            products: state.products.map((product) =>
+              product.groupId === groupId
+                ? { ...product, groupId: undefined, updatedAt: Date.now() }
+                : product,
+            ),
+          }),
+          commit: () =>
+            deleteGroupMutation({
+              groupId,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Deleting group",
+          productIds: affectedProductIds,
+        });
+      },
       uploadCaptureImage: uploadCaptureFile,
       recordCapture: (args) =>
         runOptimistic({
@@ -700,6 +728,7 @@ export function AppDataProvider({
       assignFirstUngroupedMutation,
       assignProductsMutation,
       createGroupMutation,
+      deleteGroupMutation,
       createProductMutation,
       deleteProductsMutation,
       deleteProductFileAction,

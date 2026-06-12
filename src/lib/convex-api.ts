@@ -50,6 +50,7 @@ export const convexApi = {
     assignProducts: deployedFunction<typeof api.groups.assignProducts>(
       "groups.js:assignProducts",
     ),
+    remove: deployedFunction<typeof api.groups.remove>("groups.js:remove"),
   },
   listingJobs: {
     list: deployedFunction<typeof api.listingJobs.list>("listingJobs.js:list"),

@@ -72,6 +72,38 @@ export const assignFirstUngrouped = mutation({
   },
 });
 
+export const remove = mutation({
+  args: {
+    sessionToken: v.string(),
+    groupId: v.id("groups"),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const group = await ctx.db.get(args.groupId);
+
+    if (!group) {
+      return { deleted: false, ungrouped: 0 };
+    }
+
+    const products = await ctx.db
+      .query("products")
+      .withIndex("by_group", (q) => q.eq("groupId", args.groupId))
+      .collect();
+    const now = Date.now();
+
+    for (const product of products) {
+      await ctx.db.patch(product._id, {
+        groupId: undefined,
+        updatedAt: now,
+      });
+    }
+
+    await ctx.db.delete(args.groupId);
+
+    return { deleted: true, ungrouped: products.length };
+  },
+});
+
 export const assignProducts = mutation({
   args: {
     sessionToken: v.string(),

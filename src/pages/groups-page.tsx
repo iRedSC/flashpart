@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Camera, FolderPlus, MoreVertical, Plus } from "lucide-react";
+import { Camera, FolderPlus, MoreVertical, Plus, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import {
@@ -22,7 +22,7 @@ import { triggerHaptic } from "../lib/haptics";
 import { groupProductProgress } from "../lib/product-state";
 
 export function GroupsPage() {
-  const { assignFirstUngrouped, groups, products } = useAppData();
+  const { assignFirstUngrouped, deleteGroup, groups, products } = useAppData();
   const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
   const ungroupedCount = products.filter((product) => !product.groupId).length;
 
@@ -91,6 +91,16 @@ export function GroupsPage() {
                       >
                         <FolderPlus />
                         Assign ungrouped
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-red-600 focus:bg-red-50 focus:text-red-600"
+                        onSelect={() => {
+                          triggerHaptic();
+                          void deleteGroup(group._id).catch(() => undefined);
+                        }}
+                      >
+                        <Trash2 />
+                        Delete
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
