@@ -1,23 +1,20 @@
 import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  closestCenter,
   DndContext,
   DragOverlay,
+  getClientRect,
   MouseSensor,
   TouchSensor,
+  useDraggable,
   useSensor,
   useSensors,
-  type DragEndEvent,
-  type DragOverEvent,
+  type DragMoveEvent,
   type DragStartEvent,
+  type MeasuringConfiguration,
 } from "@dnd-kit/core";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import {
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { arrayMove } from "@dnd-kit/sortable";
 import {
   createColumnHelper,
   flexRender,
@@ -26,7 +23,11 @@ import {
   type RowSelectionState,
   useReactTable,
 } from "@tanstack/react-table";
-import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
+import {
+  useVirtualizer,
+  type VirtualItem,
+  type Virtualizer,
+} from "@tanstack/react-virtual";
 import {
   Check,
   FilePenLine,
@@ -88,11 +89,6 @@ type ImportResult = {
   overwritten: number;
 };
 
-type DropEdge = "top" | "bottom";
-type DropTarget = {
-  id: Id<"products">;
-  edge: DropEdge;
-};
 const UNGROUPED_FILTER = "ungrouped";
 const desktopGridColumns =
   "grid-cols-[36px_48px_180px_minmax(240px,1.6fr)_120px_160px_minmax(150px,1fr)_minmax(220px,1.2fr)]";
@@ -102,16 +98,46 @@ const desktopCellClass =
 
 const columnHelper = createColumnHelper<Product>();
 
-function dropIndicatorClass(edge: DropEdge | null) {
-  if (edge === "top") {
-    return "shadow-[inset_0_2px_0_0_#020617]";
+// By default dnd-kit ignores an element's own CSS transform when measuring
+// it, but the virtualizer positions rows entirely with transforms, so the
+// default measurement would place every row at the top of the list.
+const dndMeasuring: MeasuringConfiguration = {
+  draggable: { measure: getClientRect },
+};
+
+// How far rows around the drag source slide aside to preview the drop slot.
+function getDropShift({
+  activeIndex,
+  activeSize,
+  index,
+  projectedIndex,
+}: {
+  activeIndex: number;
+  activeSize: number;
+  index: number;
+  projectedIndex: number | null;
+}) {
+  if (activeIndex < 0 || projectedIndex === null || index === activeIndex) {
+    return 0;
   }
 
-  if (edge === "bottom") {
-    return "shadow-[inset_0_-2px_0_0_#020617]";
+  if (
+    activeIndex < projectedIndex &&
+    index > activeIndex &&
+    index <= projectedIndex
+  ) {
+    return -activeSize;
   }
 
-  return undefined;
+  if (
+    activeIndex > projectedIndex &&
+    index >= projectedIndex &&
+    index < activeIndex
+  ) {
+    return activeSize;
+  }
+
+  return 0;
 }
 
 function DragHandle({
@@ -121,11 +147,11 @@ function DragHandle({
   label,
   listeners,
 }: {
-  attributes: ReturnType<typeof useSortable>["attributes"];
+  attributes: ReturnType<typeof useDraggable>["attributes"];
   className?: string;
   iconClassName?: string;
   label: string;
-  listeners: ReturnType<typeof useSortable>["listeners"];
+  listeners: ReturnType<typeof useDraggable>["listeners"];
 }) {
   return (
     <button
@@ -144,19 +170,21 @@ function DragHandle({
 }
 
 function DesktopProductRow({
-  dropEdge,
+  dragActive,
   isDragSource,
   isPending,
   row,
+  shiftY,
   virtualRow,
 }: {
-  dropEdge: DropEdge | null;
+  dragActive: boolean;
   isDragSource: boolean;
   isPending: boolean;
   row: Row<Product>;
+  shiftY: number;
   virtualRow: VirtualItem;
 }) {
-  const { attributes, listeners, setNodeRef } = useSortable({ id: row.id });
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: row.id });
 
   return (
     <TableRow
@@ -165,14 +193,17 @@ function DesktopProductRow({
         desktopGridColumns,
         virtualRow.index % 2 === 0 && "bg-slate-50/50",
         isPending && "bg-amber-50/70",
-        isDragSource && "opacity-40",
-        dropIndicatorClass(dropEdge),
+        isDragSource && "opacity-0",
       )}
       data-index={virtualRow.index}
       ref={setNodeRef}
       style={{
         height: `${desktopRowHeight}px`,
         transform: `translateY(${virtualRow.start}px)`,
+        // `translate` composes with `transform`, so the drop-preview shift can
+        // animate independently of the virtualizer positioning.
+        translate: `0 ${shiftY}px`,
+        transition: dragActive ? "translate 200ms ease" : undefined,
       }}
     >
       <TableCell className="flex items-center px-2 py-0">
@@ -218,7 +249,7 @@ function ShopifyListingIcon({
 }
 
 function MobileProductCard({
-  dropEdge,
+  dragActive,
   groupLabel,
   isDragSource,
   isPending,
@@ -230,9 +261,10 @@ function MobileProductCard({
   onOpenPhoto,
   onPublish,
   row,
+  shiftY,
   virtualRow,
 }: {
-  dropEdge: DropEdge | null;
+  dragActive: boolean;
   groupLabel: string;
   isDragSource: boolean;
   isPending: boolean;
@@ -244,24 +276,23 @@ function MobileProductCard({
   onOpenPhoto: (product: Product) => void;
   onPublish: (product: Product) => void;
   row: Row<Product>;
+  shiftY: number;
   virtualRow: VirtualItem;
 }) {
   const product = row.original;
-  const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: row.id });
-  const translateY = virtualRow.start + (transform?.y ?? 0);
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: row.id });
 
   return (
     <div
       className="absolute left-0 top-0 w-full pb-2"
       data-index={virtualRow.index}
-      ref={(node) => {
-        setNodeRef(node);
-        measureElement(node);
-      }}
+      ref={measureElement}
       style={{
-        transform: `translate3d(0, ${translateY}px, 0)`,
-        transition,
+        transform: `translate3d(0, ${virtualRow.start}px, 0)`,
+        // `translate` composes with `transform`, so the drop-preview shift can
+        // animate independently of the virtualizer positioning.
+        translate: `0 ${shiftY}px`,
+        transition: dragActive ? "translate 200ms ease" : undefined,
       }}
     >
       <div
@@ -270,8 +301,8 @@ function MobileProductCard({
           row.getIsSelected() && "border-slate-950",
           isPending && "bg-amber-50/70",
           isDragSource && "opacity-0",
-          dropIndicatorClass(dropEdge),
         )}
+        ref={setNodeRef}
         onClick={(event) => {
           if (
             (event.target as HTMLElement).closest(
@@ -484,7 +515,9 @@ export function ProductsPage() {
     updateProduct,
   } = useAppData();
   const parentRef = React.useRef<HTMLDivElement>(null);
+  const desktopBodyRef = React.useRef<HTMLTableSectionElement>(null);
   const cardListRef = React.useRef<HTMLDivElement>(null);
+  const mobileListRef = React.useRef<HTMLDivElement>(null);
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [searchParams, setSearchParams] = useSearchParams();
   const groupFilter = searchParams.get("group");
@@ -499,16 +532,12 @@ export function ProductsPage() {
 
     return products.filter((product) => product.groupId === groupFilter);
   }, [groupFilter, products]);
-  const [activeDragIds, setActiveDragIds] = React.useState<
-    Id<"products">[] | null
-  >(null);
   const [activeDragProductId, setActiveDragProductId] =
     React.useState<Id<"products"> | null>(null);
-  const [dropTarget, setDropTarget] = React.useState<DropTarget | null>(null);
-  const dragSourceIds = React.useMemo(
-    () => new Set(activeDragIds ?? []),
-    [activeDragIds],
+  const [projectedIndex, setProjectedIndex] = React.useState<number | null>(
+    null,
   );
+  const activeCardSizeRef = React.useRef(136);
   const dndSensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
     useSensor(TouchSensor, {
@@ -764,7 +793,9 @@ export function ProductsPage() {
     : groupFilter === UNGROUPED_FILTER
       ? "Ungrouped"
       : groupById.get(groupFilter as Id<"groups">) ?? "Group";
-  const dragCount = activeDragIds?.length ?? 0;
+  const activeDragIndex = activeDragProductId
+    ? visibleIds.indexOf(activeDragProductId)
+    : -1;
   const activeDragRow = activeDragProductId
     ? rows.find((row) => row.id === activeDragProductId) ?? null
     : null;
@@ -796,58 +827,65 @@ export function ProductsPage() {
 
   function handleDragStart(event: DragStartEvent) {
     const activeId = event.active.id as Id<"products">;
-    const selectedVisibleIds = visibleIds.filter((id) => rowSelection[id]);
+    const activeIndex = visibleIds.indexOf(activeId);
 
-    setActiveDragIds(
-      selectedVisibleIds.includes(activeId) ? selectedVisibleIds : [activeId],
-    );
+    // Capture the dragged card's height once, while it is still rendered, so
+    // the gap stays stable even if the source scrolls out of the viewport.
+    activeCardSizeRef.current =
+      cardVirtualizer
+        .getVirtualItems()
+        .find((item) => item.index === activeIndex)?.size ?? 136;
     setActiveDragProductId(activeId);
+    setProjectedIndex(activeIndex);
   }
 
-  function handleDragOver(event: DragOverEvent) {
-    const overId = event.over?.id as Id<"products"> | undefined;
+  // Hit-test the dragged item's center against the virtualizer's row
+  // positions instead of dnd-kit droppables, which go stale in a virtualized
+  // list as rows mount and unmount.
+  function updateProjectedIndex(
+    event: DragMoveEvent,
+    listElement: HTMLElement | null,
+    virtualizer: Virtualizer<HTMLDivElement, Element>,
+  ) {
+    const translated = event.active.rect.current.translated;
 
-    if (!overId || !activeDragIds || activeDragIds.includes(overId)) {
-      setDropTarget(null);
+    if (!translated || !listElement) {
       return;
     }
 
-    const activeIndex = visibleIds.indexOf(event.active.id as Id<"products">);
-    const overIndex = visibleIds.indexOf(overId);
+    const centerY =
+      translated.top +
+      translated.height / 2 -
+      listElement.getBoundingClientRect().top;
+    let closestIndex: number | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
 
-    setDropTarget({
-      edge: activeIndex < overIndex ? "bottom" : "top",
-      id: overId,
-    });
+    for (const item of virtualizer.getVirtualItems()) {
+      const distance = Math.abs(item.start + item.size / 2 - centerY);
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = item.index;
+      }
+    }
+
+    if (closestIndex !== null) {
+      setProjectedIndex(closestIndex);
+    }
   }
 
-  function handleDragEnd(event: DragEndEvent) {
-    const draggedIds = activeDragIds;
+  function handleDragEnd() {
+    const fromIndex = activeDragIndex;
+    const toIndex = projectedIndex;
 
-    setActiveDragIds(null);
     setActiveDragProductId(null);
-    setDropTarget(null);
+    setProjectedIndex(null);
 
-    const overId = event.over?.id as Id<"products"> | undefined;
-
-    if (!draggedIds || !overId || draggedIds.includes(overId)) {
+    if (fromIndex < 0 || toIndex === null || toIndex === fromIndex) {
       return;
     }
 
-    const remainingIds = visibleIds.filter((id) => !draggedIds.includes(id));
-    const activeIndex = visibleIds.indexOf(event.active.id as Id<"products">);
-    const overIndex = visibleIds.indexOf(overId);
-    const insertIndex =
-      remainingIds.indexOf(overId) + (activeIndex < overIndex ? 1 : 0);
-    const nextVisibleIds = [
-      ...remainingIds.slice(0, insertIndex),
-      ...draggedIds,
-      ...remainingIds.slice(insertIndex),
-    ];
-
-    if (nextVisibleIds.every((id, index) => id === visibleIds[index])) {
-      return;
-    }
+    const nextVisibleIds = arrayMove(visibleIds, fromIndex, toIndex);
 
     // Re-thread the visible ordering through the global list so hidden
     // (filtered-out) products keep their positions.
@@ -861,9 +899,8 @@ export function ProductsPage() {
   }
 
   function handleDragCancel() {
-    setActiveDragIds(null);
     setActiveDragProductId(null);
-    setDropTarget(null);
+    setProjectedIndex(null);
   }
 
   async function handleDeleteSelected() {
@@ -1364,85 +1401,90 @@ export function ProductsPage() {
       />
 
       <DndContext
-        collisionDetection={closestCenter}
+        measuring={dndMeasuring}
         modifiers={[restrictToVerticalAxis]}
         onDragCancel={handleDragCancel}
         onDragEnd={handleDragEnd}
-        onDragOver={handleDragOver}
+        onDragMove={(event) =>
+          updateProjectedIndex(event, mobileListRef.current, cardVirtualizer)
+        }
         onDragStart={handleDragStart}
         sensors={dndSensors}
       >
-        <SortableContext items={visibleIds} strategy={verticalListSortingStrategy}>
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain md:hidden"
+          ref={cardListRef}
+        >
+          {!isLoading && rows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-500">
+              {groupFilter
+                ? "No products match this filter."
+                : "No products yet."}
+            </p>
+          ) : null}
           <div
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain md:hidden"
-            ref={cardListRef}
+            className="relative"
+            ref={mobileListRef}
+            style={{ height: `${cardVirtualizer.getTotalSize()}px` }}
           >
-            {!isLoading && rows.length === 0 ? (
-              <p className="py-8 text-center text-sm text-slate-500">
-                {groupFilter
-                  ? "No products match this filter."
-                  : "No products yet."}
-              </p>
-            ) : null}
-            <div
-              className="relative"
-              style={{ height: `${cardVirtualizer.getTotalSize()}px` }}
-            >
-              {cardVirtualizer.getVirtualItems().map((virtualRow) => {
-                const row = rows[virtualRow.index];
-                const product = row.original;
+            {cardVirtualizer.getVirtualItems().map((virtualRow) => {
+              const row = rows[virtualRow.index];
+              const product = row.original;
 
-                return (
-                  <MobileProductCard
-                    dropEdge={
-                      dropTarget?.id === product._id ? dropTarget.edge : null
-                    }
-                    groupLabel={
-                      product.groupId
-                        ? groupById.get(product.groupId) ?? "Assigned"
-                        : "Ungrouped"
-                    }
-                    isDragSource={dragSourceIds.has(product._id)}
-                    isPending={isProductPending(product._id)}
-                    key={row.id}
-                    latestJob={latestJobByProductId.get(product._id)}
-                    measureElement={cardVirtualizer.measureElement}
-                    onAddToGroup={(target) => {
-                      setRowSelection({ [target._id]: true });
-                      setAddToGroupOpen(true);
-                    }}
-                    onDelete={(target) =>
-                      void deleteProducts([target._id]).catch(() => undefined)
-                    }
-                    onDeleteShopifyFile={(target) => {
-                      const confirmed =
-                        target.shopifyStatus === "published"
-                          ? window.confirm(
-                              "This product is published. Delete its Shopify photo anyway?",
-                            )
-                          : true;
+              return (
+                <MobileProductCard
+                  dragActive={activeDragProductId !== null}
+                  groupLabel={
+                    product.groupId
+                      ? groupById.get(product.groupId) ?? "Assigned"
+                      : "Ungrouped"
+                  }
+                  isDragSource={product._id === activeDragProductId}
+                  isPending={isProductPending(product._id)}
+                  key={row.id}
+                  latestJob={latestJobByProductId.get(product._id)}
+                  measureElement={cardVirtualizer.measureElement}
+                  onAddToGroup={(target) => {
+                    setRowSelection({ [target._id]: true });
+                    setAddToGroupOpen(true);
+                  }}
+                  onDelete={(target) =>
+                    void deleteProducts([target._id]).catch(() => undefined)
+                  }
+                  onDeleteShopifyFile={(target) => {
+                    const confirmed =
+                      target.shopifyStatus === "published"
+                        ? window.confirm(
+                            "This product is published. Delete its Shopify photo anyway?",
+                          )
+                        : true;
 
-                      if (!confirmed) {
-                        return;
-                      }
-
-                      void deleteShopifyFile(
-                        target._id,
-                        target.shopifyStatus === "published",
-                      ).catch(() => undefined);
-                    }}
-                    onOpenPhoto={(target) => setPhotoProductId(target._id)}
-                    onPublish={(target) =>
-                      void publishProducts([target._id]).catch(() => undefined)
+                    if (!confirmed) {
+                      return;
                     }
-                    row={row}
-                    virtualRow={virtualRow}
-                  />
-                );
-              })}
-            </div>
+
+                    void deleteShopifyFile(
+                      target._id,
+                      target.shopifyStatus === "published",
+                    ).catch(() => undefined);
+                  }}
+                  onOpenPhoto={(target) => setPhotoProductId(target._id)}
+                  onPublish={(target) =>
+                    void publishProducts([target._id]).catch(() => undefined)
+                  }
+                  row={row}
+                  shiftY={getDropShift({
+                    activeIndex: activeDragIndex,
+                    activeSize: activeCardSizeRef.current,
+                    index: virtualRow.index,
+                    projectedIndex,
+                  })}
+                  virtualRow={virtualRow}
+                />
+              );
+            })}
           </div>
-        </SortableContext>
+        </div>
         <DragOverlay adjustScale={false} dropAnimation={null}>
           {activeDragProduct && activeDragRow ? (
             <div
@@ -1517,87 +1559,85 @@ export function ProductsPage() {
                   />
                 </div>
               </div>
-              {dragCount > 1 ? (
-                <span className="absolute -right-2 -top-2 rounded-full bg-slate-950 px-2 py-0.5 text-xs font-medium text-white shadow">
-                  {dragCount.toLocaleString()}
-                </span>
-              ) : null}
             </div>
           ) : null}
         </DragOverlay>
       </DndContext>
 
       <DndContext
-        collisionDetection={closestCenter}
+        measuring={dndMeasuring}
         modifiers={[restrictToVerticalAxis]}
         onDragCancel={handleDragCancel}
         onDragEnd={handleDragEnd}
-        onDragOver={handleDragOver}
+        onDragMove={(event) =>
+          updateProjectedIndex(event, desktopBodyRef.current, rowVirtualizer)
+        }
         onDragStart={handleDragStart}
         sensors={dndSensors}
       >
-        <SortableContext items={visibleIds} strategy={verticalListSortingStrategy}>
-          <div
-            className="hidden h-[560px] overflow-auto rounded-md border border-slate-200 md:block"
-            ref={parentRef}
-          >
-            <table className="grid w-full min-w-[1200px] text-sm">
-              <TableHeader className="sticky top-0 z-10 grid bg-white">
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <TableRow
-                    className={cn("grid", desktopGridColumns)}
-                    key={headerGroup.id}
-                  >
-                    <TableHead aria-hidden className="px-2" />
-                    {headerGroup.headers.map((header) => (
-                      <TableHead
-                        className="flex items-center whitespace-nowrap"
-                        key={header.id}
-                      >
-                        {header.isPlaceholder
-                          ? null
-                          : flexRender(
-                              header.column.columnDef.header,
-                              header.getContext(),
-                            )}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableHeader>
-              <TableBody
-                className="relative grid"
-                style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
-              >
-                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                  const row = rows[virtualRow.index];
+        <div
+          className="hidden h-[560px] overflow-auto rounded-md border border-slate-200 md:block"
+          ref={parentRef}
+        >
+          <table className="grid w-full min-w-[1200px] text-sm">
+            <TableHeader className="sticky top-0 z-10 grid bg-white">
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow
+                  className={cn("grid", desktopGridColumns)}
+                  key={headerGroup.id}
+                >
+                  <TableHead aria-hidden className="px-2" />
+                  {headerGroup.headers.map((header) => (
+                    <TableHead
+                      className="flex items-center whitespace-nowrap"
+                      key={header.id}
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext(),
+                          )}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody
+              className="relative grid"
+              ref={desktopBodyRef}
+              style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const row = rows[virtualRow.index];
 
-                  return (
-                    <DesktopProductRow
-                      dropEdge={
-                        dropTarget?.id === row.original._id
-                          ? dropTarget.edge
-                          : null
-                      }
-                      isDragSource={dragSourceIds.has(row.original._id)}
-                      isPending={isProductPending(row.original._id)}
-                      key={row.id}
-                      row={row}
-                      virtualRow={virtualRow}
-                    />
-                  );
-                })}
-              </TableBody>
-            </table>
-            {!isLoading && rows.length === 0 ? (
-              <p className="py-8 text-center text-sm text-slate-500">
-                {groupFilter
-                  ? "No products match this filter."
-                  : "No products yet."}
-              </p>
-            ) : null}
-          </div>
-        </SortableContext>
+                return (
+                  <DesktopProductRow
+                    dragActive={activeDragProductId !== null}
+                    isDragSource={row.original._id === activeDragProductId}
+                    isPending={isProductPending(row.original._id)}
+                    key={row.id}
+                    row={row}
+                    shiftY={getDropShift({
+                      activeIndex: activeDragIndex,
+                      activeSize: desktopRowHeight,
+                      index: virtualRow.index,
+                      projectedIndex,
+                    })}
+                    virtualRow={virtualRow}
+                  />
+                );
+              })}
+            </TableBody>
+          </table>
+          {!isLoading && rows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-500">
+              {groupFilter
+                ? "No products match this filter."
+                : "No products yet."}
+            </p>
+          ) : null}
+        </div>
         <DragOverlay dropAnimation={null}>
           {activeDragRow ? (
             <div
@@ -1614,11 +1654,6 @@ export function ProductsPage() {
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </div>
               ))}
-              {dragCount > 1 ? (
-                <span className="absolute -right-2 -top-2 rounded-full bg-slate-950 px-2 py-0.5 text-xs font-medium text-white shadow">
-                  {dragCount.toLocaleString()}
-                </span>
-              ) : null}
             </div>
           ) : null}
         </DragOverlay>

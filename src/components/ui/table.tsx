@@ -19,7 +19,7 @@ export function TableHeader({
 export function TableBody({
   className,
   ...props
-}: React.HTMLAttributes<HTMLTableSectionElement>) {
+}: React.ComponentProps<"tbody">) {
   return <tbody className={cn("[&_tr:last-child]:border-0", className)} {...props} />;
 }
 
