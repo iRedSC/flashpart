@@ -1735,19 +1735,19 @@ export function ProductsPage() {
       </DndContext>
 
       <div className="relative hidden min-h-0 flex-1 md:flex md:min-h-0 md:flex-col">
-        <div className="relative left-1/2 flex min-h-0 w-[100vw] max-w-[100vw] flex-1 -translate-x-1/2 flex-col">
-          <div className="mx-auto flex min-h-0 w-full max-w-[min(100vw,90rem)] flex-1 flex-col px-4 md:px-6">
-            <DndContext
-              measuring={dndMeasuring}
-              modifiers={[restrictToVerticalAxis]}
-              onDragCancel={handleDragCancel}
-              onDragEnd={handleDragEnd}
-              onDragMove={(event) =>
-                updateProjectedIndex(event, desktopBodyRef.current, rowVirtualizer)
-              }
-              onDragStart={handleDragStart}
-              sensors={dndSensors}
-            >
+        <DndContext
+          measuring={dndMeasuring}
+          modifiers={[restrictToVerticalAxis]}
+          onDragCancel={handleDragCancel}
+          onDragEnd={handleDragEnd}
+          onDragMove={(event) =>
+            updateProjectedIndex(event, desktopBodyRef.current, rowVirtualizer)
+          }
+          onDragStart={handleDragStart}
+          sensors={dndSensors}
+        >
+          <div className="relative left-1/2 flex min-h-0 w-[100vw] max-w-[100vw] flex-1 -translate-x-1/2 flex-col">
+            <div className="mx-auto flex min-h-0 w-full max-w-[min(100vw,90rem)] flex-1 flex-col px-4 md:px-6">
               <div
                 className="min-h-0 flex-1 basis-0 overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm"
                 ref={parentRef}
@@ -1827,40 +1827,40 @@ export function ProductsPage() {
             </p>
           ) : null}
               </div>
-              <DragOverlay dropAnimation={null}>
-                {activeDragRow ? (
+            </div>
+          </div>
+          <DragOverlay dropAnimation={null}>
+            {activeDragRow ? (
+              <div
+                className={cn(
+                  "pointer-events-none relative grid h-full w-full rounded-md border border-slate-200 bg-white/75 text-sm shadow-lg backdrop-blur-sm",
+                  desktopGridColumns,
+                )}
+              >
+                <div className="flex items-center px-2">
+                  <GripVertical className="h-4 w-4 text-slate-400" />
+                </div>
+                {activeDragRow.getVisibleCells().map((cell) => (
                   <div
                     className={cn(
-                      "pointer-events-none relative grid h-full w-full rounded-md border border-slate-200 bg-white/75 text-sm shadow-lg backdrop-blur-sm",
-                      desktopGridColumns,
+                      cell.column.id === "sku" ||
+                        cell.column.id === "name" ||
+                        cell.column.id === "description" ||
+                        cell.column.id === "price"
+                        ? desktopEditableCellClass
+                        : desktopCellClass,
+                      cell.column.id === "select" && "justify-center px-2",
+                      cell.column.id === "price" && "justify-end",
                     )}
+                    key={cell.id}
                   >
-                    <div className="flex items-center px-2">
-                      <GripVertical className="h-4 w-4 text-slate-400" />
-                    </div>
-                    {activeDragRow.getVisibleCells().map((cell) => (
-                      <div
-                        className={cn(
-                          cell.column.id === "sku" ||
-                            cell.column.id === "name" ||
-                            cell.column.id === "description" ||
-                            cell.column.id === "price"
-                            ? desktopEditableCellClass
-                            : desktopCellClass,
-                          cell.column.id === "select" && "justify-center px-2",
-                          cell.column.id === "price" && "justify-end",
-                        )}
-                        key={cell.id}
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </div>
-                    ))}
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </div>
-                ) : null}
-              </DragOverlay>
-            </DndContext>
-          </div>
-        </div>
+                ))}
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       </div>
 
       <DropdownMenu
