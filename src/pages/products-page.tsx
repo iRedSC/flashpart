@@ -96,14 +96,18 @@ type ImportResult = {
 
 const UNGROUPED_FILTER = "ungrouped";
 const desktopGridColumns =
-  "grid-cols-[36px_48px_132px_minmax(200px,1.3fr)_minmax(180px,1.1fr)_96px_88px_minmax(110px,0.75fr)_minmax(190px,1fr)]";
+  "grid-cols-[36px_48px_132px_minmax(200px,320px)_minmax(180px,280px)_96px_88px_minmax(110px,160px)_minmax(190px,280px)]";
 const desktopTableMinWidth = 1320;
 const desktopRowHeight = 58;
-const desktopTableInputClass = "h-8 px-1.5";
+const desktopTableInputClass = "h-8 min-w-0 w-full px-1.5";
 const desktopCellClass =
   "flex min-w-0 items-center overflow-hidden px-4 py-0";
+const desktopEditableCellClass =
+  "flex min-w-0 w-full items-center overflow-hidden px-2 py-0";
 const desktopHeadClass =
   "flex items-center px-4 text-[11px] font-medium uppercase tracking-wide text-slate-500";
+const desktopEditableHeadClass =
+  "flex items-center px-2 text-[11px] font-medium uppercase tracking-wide text-slate-500";
 
 const columnHelper = createColumnHelper<Product>();
 
@@ -230,7 +234,12 @@ function DesktopProductRow({
       {row.getVisibleCells().map((cell) => (
         <TableCell
           className={cn(
-            desktopCellClass,
+            cell.column.id === "sku" ||
+              cell.column.id === "name" ||
+              cell.column.id === "description" ||
+              cell.column.id === "price"
+              ? desktopEditableCellClass
+              : desktopCellClass,
             cell.column.id === "select" && "justify-center px-2",
             cell.column.id === "price" && "justify-end",
           )}
@@ -676,7 +685,7 @@ export function ProductsPage() {
       columnHelper.accessor("name", {
         header: "Name",
         cell: ({ row }) => (
-          <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex min-w-0 w-full items-center gap-2.5">
             {row.original.shopifyFileUrl ? (
               <button
                 aria-label={`View photo for ${row.original.sku}`}
@@ -700,7 +709,7 @@ export function ProductsPage() {
             )}
             <Input
               aria-label={`Name for ${row.original.sku}`}
-              className={desktopTableInputClass}
+              className={cn(desktopTableInputClass, "min-w-0 flex-1")}
               defaultValue={row.original.name}
               title={row.original.name}
               variant="ghost"
@@ -722,6 +731,7 @@ export function ProductsPage() {
         cell: ({ row }) => (
           <DescriptionField
             aria-label={`Description for ${row.original.sku}`}
+            className="w-full"
             onNavigateNext={() =>
               focusNextDescriptionRef.current(row.original._id)
             }
@@ -1718,45 +1728,52 @@ export function ProductsPage() {
         </DragOverlay>
       </DndContext>
 
-      <div className="hidden min-h-0 flex-1 md:flex md:min-h-0 md:flex-col">
-        <DndContext
-          measuring={dndMeasuring}
-          modifiers={[restrictToVerticalAxis]}
-          onDragCancel={handleDragCancel}
-          onDragEnd={handleDragEnd}
-          onDragMove={(event) =>
-            updateProjectedIndex(event, desktopBodyRef.current, rowVirtualizer)
-          }
-          onDragStart={handleDragStart}
-          sensors={dndSensors}
-        >
-          <div
-            className="min-h-0 w-screen max-w-[100vw] flex-1 basis-0 overflow-auto rounded-md border border-slate-200 ml-[calc(50%-50vw)]"
-            ref={parentRef}
-          >
-            <table
-              className="grid w-full text-sm"
-              style={{ minWidth: `${desktopTableMinWidth}px` }}
+      <div className="relative hidden min-h-0 flex-1 md:flex md:min-h-0 md:flex-col">
+        <div className="relative left-1/2 flex min-h-0 w-[100vw] max-w-[100vw] flex-1 -translate-x-1/2 flex-col">
+          <div className="mx-auto flex min-h-0 w-full max-w-[min(100vw,90rem)] flex-1 flex-col px-4 md:px-6">
+            <DndContext
+              measuring={dndMeasuring}
+              modifiers={[restrictToVerticalAxis]}
+              onDragCancel={handleDragCancel}
+              onDragEnd={handleDragEnd}
+              onDragMove={(event) =>
+                updateProjectedIndex(event, desktopBodyRef.current, rowVirtualizer)
+              }
+              onDragStart={handleDragStart}
+              sensors={dndSensors}
             >
-            <TableHeader className="sticky top-0 z-10 grid bg-slate-50">
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow
-                  className={cn(
-                    "grid border-b border-slate-200 hover:bg-slate-50",
-                    desktopGridColumns,
-                  )}
-                  key={headerGroup.id}
+              <div
+                className="min-h-0 flex-1 basis-0 overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm"
+                ref={parentRef}
+              >
+                <table
+                  className="grid w-full text-sm"
+                  style={{ minWidth: `${desktopTableMinWidth}px` }}
                 >
-                  <TableHead aria-hidden className="px-2" />
-                  {headerGroup.headers.map((header) => (
-                    <TableHead
+                <TableHeader className="sticky top-0 z-10 grid bg-slate-50">
+                  {table.getHeaderGroups().map((headerGroup) => (
+                    <TableRow
                       className={cn(
-                        desktopHeadClass,
-                        header.column.id === "select" && "justify-center px-2",
-                        header.column.id === "price" && "justify-end",
+                        "grid border-b border-slate-200 hover:bg-slate-50",
+                        desktopGridColumns,
                       )}
-                      key={header.id}
+                      key={headerGroup.id}
                     >
+                      <TableHead aria-hidden className="px-2" />
+                      {headerGroup.headers.map((header) => (
+                        <TableHead
+                          className={cn(
+                            header.column.id === "sku" ||
+                              header.column.id === "name" ||
+                              header.column.id === "description" ||
+                              header.column.id === "price"
+                              ? desktopEditableHeadClass
+                              : desktopHeadClass,
+                            header.column.id === "select" && "justify-center px-2",
+                            header.column.id === "price" && "justify-end",
+                          )}
+                          key={header.id}
+                        >
                       {header.isPlaceholder
                         ? null
                         : flexRender(
@@ -1802,27 +1819,41 @@ export function ProductsPage() {
                 : "No products yet."}
             </p>
           ) : null}
-        </div>
-        <DragOverlay dropAnimation={null}>
-          {activeDragRow ? (
-            <div
-              className={cn(
-                "pointer-events-none relative grid h-full w-full rounded-md border border-slate-200 bg-white/75 text-sm shadow-lg backdrop-blur-sm",
-                desktopGridColumns,
-              )}
-            >
-              <div className="flex items-center px-2">
-                <GripVertical className="h-4 w-4 text-slate-400" />
               </div>
-              {activeDragRow.getVisibleCells().map((cell) => (
-                <div className={desktopCellClass} key={cell.id}>
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </DragOverlay>
-        </DndContext>
+              <DragOverlay dropAnimation={null}>
+                {activeDragRow ? (
+                  <div
+                    className={cn(
+                      "pointer-events-none relative grid h-full w-full rounded-md border border-slate-200 bg-white/75 text-sm shadow-lg backdrop-blur-sm",
+                      desktopGridColumns,
+                    )}
+                  >
+                    <div className="flex items-center px-2">
+                      <GripVertical className="h-4 w-4 text-slate-400" />
+                    </div>
+                    {activeDragRow.getVisibleCells().map((cell) => (
+                      <div
+                        className={cn(
+                          cell.column.id === "sku" ||
+                            cell.column.id === "name" ||
+                            cell.column.id === "description" ||
+                            cell.column.id === "price"
+                            ? desktopEditableCellClass
+                            : desktopCellClass,
+                          cell.column.id === "select" && "justify-center px-2",
+                          cell.column.id === "price" && "justify-end",
+                        )}
+                        key={cell.id}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
+          </div>
+        </div>
       </div>
     </div>
   );
