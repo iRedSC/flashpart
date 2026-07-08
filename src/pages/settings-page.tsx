@@ -90,10 +90,12 @@ export function SettingsPage() {
         <CardContent className="grid gap-4">
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
             <div>
-              <p className="font-medium">Existing SKU matches</p>
+              <p className="font-medium">
+                Update existing Shopify products when SKU matches
+              </p>
               <p className="text-sm text-slate-500">
-                Choose whether duplicate SKUs are blocked before Shopify writes or
-                updated in place.
+                Replaces the matching Shopify listing with the imported product
+                data.
               </p>
             </div>
             <Switch
@@ -108,14 +110,13 @@ export function SettingsPage() {
           </div>
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
             <div>
-              <p className="font-medium">Publish target</p>
+              <p className="font-medium">Publish products live to Shopify</p>
               <p className="text-sm text-slate-500">
-                Choose whether listing creates reviewable Shopify drafts or live
-                products.
+                Listings go directly to your storefront as published products.
               </p>
             </div>
             <Switch
-              aria-label="Publish products live instead of as Shopify drafts"
+              aria-label="Publish products live to Shopify"
               checked={publishDirectly}
               onCheckedChange={(checked) =>
                 void setShopifyPublishTarget(
