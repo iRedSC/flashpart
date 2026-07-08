@@ -16,6 +16,8 @@ import type * as groups from "../groups.js";
 import type * as http from "../http.js";
 import type * as listingJobs from "../listingJobs.js";
 import type * as migrations from "../migrations.js";
+import type * as photoAi from "../photoAi.js";
+import type * as photoAiConstants from "../photoAiConstants.js";
 import type * as productState from "../productState.js";
 import type * as products from "../products.js";
 import type * as settings from "../settings.js";
@@ -38,6 +40,8 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   listingJobs: typeof listingJobs;
   migrations: typeof migrations;
+  photoAi: typeof photoAi;
+  photoAiConstants: typeof photoAiConstants;
   productState: typeof productState;
   products: typeof products;
   settings: typeof settings;

@@ -257,6 +257,57 @@ export async function createShopifyFile(
   };
 }
 
+const wait = (milliseconds: number) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+export async function uploadImageBufferToShopify(
+  connection: ShopifyConnection,
+  input: {
+    alt: string;
+    data: ArrayBuffer;
+    filename: string;
+    mimeType: string;
+  },
+) {
+  const target = await createStagedImageUpload(connection, {
+    fileSize: input.data.byteLength,
+    filename: input.filename,
+    mimeType: input.mimeType,
+  });
+  const body = new FormData();
+
+  for (const parameter of target.parameters) {
+    body.append(parameter.name, parameter.value);
+  }
+
+  body.append(
+    "file",
+    new Blob([input.data], { type: input.mimeType }),
+    input.filename,
+  );
+
+  const uploadResponse = await fetch(target.url, {
+    body,
+    method: "POST",
+  });
+
+  if (!uploadResponse.ok) {
+    throw new ConvexError("Shopify photo upload failed during AI image save.");
+  }
+
+  let file = await createShopifyFile(connection, {
+    alt: input.alt,
+    originalSource: target.resourceUrl,
+  });
+
+  for (let attempt = 0; attempt < 4 && file.status !== "ready"; attempt += 1) {
+    await wait(750);
+    file = await getShopifyFile(connection, file.id);
+  }
+
+  return file;
+}
+
 export async function getShopifyFile(
   connection: ShopifyConnection,
   fileId: string,

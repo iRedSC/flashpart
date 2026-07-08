@@ -61,6 +61,14 @@ export const convexApi = {
       typeof api.listingJobs.enqueueCreateDrafts
     >("listingJobs.js:enqueueCreateDrafts"),
   },
+  photoAi: {
+    approvePhoto: deployedFunction<typeof api.photoAi.approvePhoto>(
+      "photoAi.js:approvePhoto",
+    ),
+    regenerate: deployedFunction<typeof api.photoAi.regenerate>(
+      "photoAi.js:regenerate",
+    ),
+  },
   products: {
     list: deployedFunction<typeof api.products.list>("products.js:list"),
     update: deployedFunction<typeof api.products.update>("products.js:update"),

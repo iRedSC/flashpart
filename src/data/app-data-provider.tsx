@@ -135,6 +135,11 @@ type AppDataContextValue = {
     groupId: Id<"groups">;
     file?: File;
   }) => Promise<Id<"captures">>;
+  regenerateAiImage: (args: {
+    productId: Id<"products">;
+    prompt: string;
+  }) => Promise<null>;
+  approvePhoto: (productId: Id<"products">) => Promise<null>;
 };
 
 const AppDataContext = React.createContext<AppDataContextValue | null>(null);
@@ -227,6 +232,8 @@ export function AppDataProvider({
   );
   const deleteGroupMutation = useMutation(convexApi.groups.remove);
   const recordCaptureMutation = useMutation(convexApi.captures.record);
+  const regenerateAiImageMutation = useMutation(convexApi.photoAi.regenerate);
+  const approvePhotoMutation = useMutation(convexApi.photoAi.approvePhoto);
   const operationIdRef = React.useRef(0);
   const hasInitializedFailedJobTrackingRef = React.useRef(false);
   const seenFailedListingJobIdsRef = React.useRef<Set<string>>(new Set());
@@ -643,6 +650,12 @@ export function AppDataProvider({
                 product._id === productId
                   ? {
                       ...product,
+                      aiImageError: undefined,
+                      aiImagePrompt: undefined,
+                      aiImageStatus: undefined,
+                      aiShopifyFileId: undefined,
+                      aiShopifyFileStatus: undefined,
+                      aiShopifyFileUrl: undefined,
                       shopifyFileDeletedAt: now,
                       shopifyFileId: undefined,
                       shopifyFileStatus: undefined,
@@ -742,8 +755,13 @@ export function AppDataProvider({
           apply: (state) => ({
             ...state,
             products: updateProductFields(state.products, args.productId, {
+              aiImageStatus: args.shopifyFileId ? "generating" : undefined,
+              aiShopifyFileUrl: undefined,
               lastError: undefined,
               needsPhotoReview: undefined,
+              pendingOperation: args.shopifyFileId
+                ? "aiImageGenerating"
+                : undefined,
               phase: "captured",
             }),
           }),
@@ -757,8 +775,11 @@ export function AppDataProvider({
           apply: (state) => ({
             ...state,
             products: updateProductFields(state.products, args.productId, {
+              aiImageStatus: args.file ? "generating" : undefined,
+              aiShopifyFileUrl: undefined,
               lastError: undefined,
               needsPhotoReview: undefined,
+              pendingOperation: args.file ? "aiImageGenerating" : undefined,
               phase: "captured",
             }),
           }),
@@ -776,6 +797,43 @@ export function AppDataProvider({
           },
           label: args.file ? "Uploading capture photo" : "Recording capture",
           productIds: [args.productId],
+        }),
+      regenerateAiImage: ({ productId, prompt }) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: updateProductFields(state.products, productId, {
+              aiImageStatus: "generating",
+              aiShopifyFileUrl: undefined,
+              lastError: undefined,
+              needsPhotoReview: undefined,
+              pendingOperation: "aiImageGenerating",
+            }),
+          }),
+          commit: () =>
+            regenerateAiImageMutation({
+              productId,
+              prompt,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Regenerating AI photo",
+          productIds: [productId],
+        }),
+      approvePhoto: (productId) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: updateProductFields(state.products, productId, {
+              needsPhotoReview: undefined,
+            }),
+          }),
+          commit: () =>
+            approvePhotoMutation({
+              productId,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Approving AI photo",
+          productIds: [productId],
         }),
     }),
     [
@@ -802,7 +860,9 @@ export function AppDataProvider({
       products,
       publishProductsMutation,
       queryArgs,
+      approvePhotoMutation,
       recordCaptureMutation,
+      regenerateAiImageMutation,
       reorderProductsMutation,
       runOptimistic,
       session.sessionToken,
