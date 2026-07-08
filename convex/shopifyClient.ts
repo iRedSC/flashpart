@@ -367,8 +367,11 @@ export async function createShopifyProduct(
   connection: ShopifyConnection,
   input: {
     handle: string;
+    productType?: string;
     publishTarget: "draft" | "published";
+    tags?: string[];
     title: string;
+    vendor?: string;
   },
 ) {
   const data = await shopifyGraphql<{
@@ -397,8 +400,11 @@ export async function createShopifyProduct(
     {
       product: {
         handle: input.handle,
+        ...(input.productType ? { productType: input.productType } : {}),
         status: input.publishTarget === "published" ? "ACTIVE" : "DRAFT",
+        ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
         title: input.title,
+        ...(input.vendor ? { vendor: input.vendor } : {}),
       },
     },
   );
@@ -415,8 +421,11 @@ export async function updateShopifyProduct(
   input: {
     handle: string;
     productId: string;
+    productType?: string;
     publishTarget: "draft" | "published";
+    tags?: string[];
     title: string;
+    vendor?: string;
   },
 ) {
   const data = await shopifyGraphql<{
@@ -446,8 +455,11 @@ export async function updateShopifyProduct(
       product: {
         handle: input.handle,
         id: input.productId,
+        ...(input.productType ? { productType: input.productType } : {}),
         status: input.publishTarget === "published" ? "ACTIVE" : "DRAFT",
+        ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
         title: input.title,
+        ...(input.vendor ? { vendor: input.vendor } : {}),
       },
     },
   );

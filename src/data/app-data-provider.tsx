@@ -29,6 +29,8 @@ type ImportedProduct = {
   name: string;
   price: number;
   description?: string;
+  vendor?: string;
+  tags?: string;
 };
 type ExistingEntryBehavior = "overwrite" | "ignore";
 
@@ -71,6 +73,8 @@ type AppDataContextValue = {
     sku?: string;
     name?: string;
     description?: string;
+    vendor?: string;
+    tags?: string;
     price?: number;
   }) => Promise<null>;
   deleteProducts: (ids: Id<"products">[]) => Promise<{ deleted: number } | null>;
@@ -99,6 +103,12 @@ type AppDataContextValue = {
   setShopifyPublishTarget: (
     shopifyPublishTarget: ShopifyPublishTarget,
   ) => Promise<{ shopifyPublishTarget: ShopifyPublishTarget } | null>;
+  setShopifyProductType: (
+    shopifyProductType: string,
+  ) => Promise<{ shopifyProductType: string } | null>;
+  setShopifyDefaultTags: (
+    shopifyDefaultTags: string,
+  ) => Promise<{ shopifyDefaultTags: string | undefined } | null>;
   disconnectShopify: () => Promise<null>;
   deleteShopifyFile: (
     productId: Id<"products">,
@@ -200,6 +210,12 @@ export function AppDataProvider({
   );
   const setShopifyPublishTargetMutation = useMutation(
     convexApi.settings.setShopifyPublishTarget,
+  );
+  const setShopifyProductTypeMutation = useMutation(
+    convexApi.settings.setShopifyProductType,
+  );
+  const setShopifyDefaultTagsMutation = useMutation(
+    convexApi.settings.setShopifyDefaultTags,
   );
   const disconnectShopifyMutation = useMutation(convexApi.shopify.disconnect);
   const prepareFileUploadAction = useAction(convexApi.shopify.prepareFileUpload);
@@ -569,6 +585,44 @@ export function AppDataProvider({
             }),
           label: "Saving Shopify publish target",
         }),
+      setShopifyProductType: (shopifyProductType) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  shopifyProductType,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setShopifyProductTypeMutation({
+              sessionToken: session.sessionToken,
+              shopifyProductType,
+            }),
+          label: "Saving Shopify product type",
+        }),
+      setShopifyDefaultTags: (shopifyDefaultTags) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  shopifyDefaultTags,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setShopifyDefaultTagsMutation({
+              sessionToken: session.sessionToken,
+              shopifyDefaultTags,
+            }),
+          label: "Saving default Shopify tags",
+        }),
       disconnectShopify: () =>
         runOptimistic({
           apply: (state) => ({
@@ -756,6 +810,8 @@ export function AppDataProvider({
       uploadCaptureFile,
       setDuplicatePolicyMutation,
       setShopifyPublishTargetMutation,
+      setShopifyProductTypeMutation,
+      setShopifyDefaultTagsMutation,
       disconnectShopifyMutation,
       settings,
       shopifyConnection,

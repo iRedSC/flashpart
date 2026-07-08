@@ -97,6 +97,8 @@ export default defineSchema({
     ),
     shopifyShopDomain: v.optional(v.string()),
     shopifyTokenLastFour: v.optional(v.string()),
+    shopifyProductType: v.optional(v.string()),
+    shopifyDefaultTags: v.optional(v.string()),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
 
@@ -130,6 +132,8 @@ export default defineSchema({
     sku: v.string(),
     name: v.string(),
     description: v.optional(v.string()),
+    vendor: v.optional(v.string()),
+    tags: v.optional(v.string()),
     price: v.number(),
     phase: v.optional(productPhase),
     pendingOperation: v.optional(pendingOperation),

@@ -78,6 +78,7 @@ import { ProductPhotoDialog } from "../components/product-photo-dialog";
 import { useAppData } from "../data/app-data-provider";
 import { createCaptureSelection } from "../lib/capture-selection";
 import { cn } from "../lib/utils";
+import { normalizeTagString } from "../lib/tags";
 import type { Id } from "../../convex/_generated/dataModel";
 
 type Product = ReturnType<typeof useAppData>["products"][number];
@@ -86,6 +87,8 @@ type CsvProduct = {
   name: string;
   price: number;
   description?: string;
+  vendor?: string;
+  tags?: string;
 };
 type ExistingEntryBehavior = "overwrite" | "ignore";
 type ImportResult = {
@@ -96,8 +99,8 @@ type ImportResult = {
 
 const UNGROUPED_FILTER = "ungrouped";
 const desktopGridColumns =
-  "grid-cols-[36px_48px_132px_minmax(200px,320px)_minmax(180px,280px)_96px_88px_minmax(110px,160px)_minmax(190px,280px)]";
-const desktopTableMinWidth = 1320;
+  "grid-cols-[36px_48px_132px_minmax(200px,320px)_minmax(180px,280px)_96px_minmax(110px,160px)_minmax(140px,200px)_88px_minmax(110px,160px)_minmax(190px,280px)]";
+const desktopTableMinWidth = 1540;
 const desktopRowHeight = 58;
 const desktopTableInputClass = "h-8 min-w-0 w-full px-1.5";
 const desktopCellClass =
@@ -243,7 +246,9 @@ function DesktopProductRow({
             cell.column.id === "sku" ||
               cell.column.id === "name" ||
               cell.column.id === "description" ||
-              cell.column.id === "price"
+              cell.column.id === "price" ||
+              cell.column.id === "vendor" ||
+              cell.column.id === "tags"
               ? desktopEditableCellClass
               : desktopCellClass,
             cell.column.id === "select" && "justify-center px-2",
@@ -485,7 +490,11 @@ function parseProductCsv(text: string) {
   const nameIndex = hasHeader ? header.indexOf("name") : 1;
   const priceIndex = hasHeader ? header.indexOf("price") : 2;
   const descriptionIndex = hasHeader ? header.indexOf("description") : -1;
+  const vendorIndex = hasHeader ? header.indexOf("vendor") : -1;
+  const tagsIndex = hasHeader ? header.indexOf("tags") : -1;
   const hasDescriptionColumn = descriptionIndex >= 0;
+  const hasVendorColumn = vendorIndex >= 0;
+  const hasTagsColumn = tagsIndex >= 0;
   const dataRows = hasHeader ? rows.slice(1) : rows;
   const products: CsvProduct[] = [];
   let skippedRows = 0;
@@ -507,6 +516,20 @@ function parseProductCsv(text: string) {
       const description = row[descriptionIndex]?.trim() ?? "";
       if (description) {
         product.description = description;
+      }
+    }
+
+    if (hasVendorColumn) {
+      const vendor = row[vendorIndex]?.trim() ?? "";
+      if (vendor) {
+        product.vendor = vendor;
+      }
+    }
+
+    if (hasTagsColumn) {
+      const tags = normalizeTagString(row[tagsIndex]);
+      if (tags) {
+        product.tags = tags;
       }
     }
 
@@ -755,6 +778,55 @@ export function ProductsPage() {
                 void updateProduct({
                   id: row.original._id,
                   price,
+                }).catch(() => undefined);
+              }
+            }}
+          />
+        ),
+      }),
+      columnHelper.display({
+        id: "vendor",
+        header: "Vendor",
+        cell: ({ row }) => (
+          <Input
+            aria-label={`Vendor for ${row.original.sku}`}
+            className={desktopTableInputClass}
+            defaultValue={row.original.vendor ?? ""}
+            title={row.original.vendor ?? ""}
+            variant="ghost"
+            onBlur={(event) => {
+              const vendor = event.currentTarget.value.trim();
+              const current = row.original.vendor ?? "";
+
+              if (vendor !== current) {
+                void updateProduct({
+                  id: row.original._id,
+                  vendor,
+                }).catch(() => undefined);
+              }
+            }}
+          />
+        ),
+      }),
+      columnHelper.display({
+        id: "tags",
+        header: "Tags",
+        cell: ({ row }) => (
+          <Input
+            aria-label={`Tags for ${row.original.sku}`}
+            className={desktopTableInputClass}
+            defaultValue={row.original.tags ?? ""}
+            placeholder="tag-one, tag-two"
+            title={row.original.tags ?? ""}
+            variant="ghost"
+            onBlur={(event) => {
+              const tags = normalizeTagString(event.currentTarget.value) ?? "";
+              const current = row.original.tags ?? "";
+
+              if (tags !== current) {
+                void updateProduct({
+                  id: row.original._id,
+                  tags,
                 }).catch(() => undefined);
               }
             }}
@@ -1332,9 +1404,9 @@ export function ProductsPage() {
           <DialogHeader>
             <DialogTitle>Import products</DialogTitle>
             <DialogDescription>
-              Upload a CSV with sku, name, and price columns. Description is
-              optional when a description column is present. Existing SKUs can be
-              overwritten or ignored.
+              Upload a CSV with sku, name, and price columns. Description, vendor,
+              and tags are optional when those columns are present. Existing SKUs
+              can be overwritten or ignored.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1352,7 +1424,8 @@ export function ProductsPage() {
               />
               <p className="text-xs text-slate-500">
                 Header row is optional when columns are ordered as SKU, name,
-                price. Add an optional description column when needed.
+                price. Add optional description, vendor, and tags columns when
+                needed. Tags should be comma-separated.
               </p>
             </div>
 
@@ -1772,7 +1845,9 @@ export function ProductsPage() {
                             header.column.id === "sku" ||
                               header.column.id === "name" ||
                               header.column.id === "description" ||
-                              header.column.id === "price"
+                              header.column.id === "price" ||
+                              header.column.id === "vendor" ||
+                              header.column.id === "tags"
                               ? desktopEditableHeadClass
                               : desktopHeadClass,
                             header.column.id === "select" && "justify-center px-2",
@@ -1846,7 +1921,9 @@ export function ProductsPage() {
                       cell.column.id === "sku" ||
                         cell.column.id === "name" ||
                         cell.column.id === "description" ||
-                        cell.column.id === "price"
+                        cell.column.id === "price" ||
+                        cell.column.id === "vendor" ||
+                        cell.column.id === "tags"
                         ? desktopEditableCellClass
                         : desktopCellClass,
                       cell.column.id === "select" && "justify-center px-2",

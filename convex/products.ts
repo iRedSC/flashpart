@@ -10,12 +10,15 @@ import {
   type PendingOperation,
   type ProductPhase,
 } from "./productState";
+import { normalizeTagString } from "./tags";
 
 const importedProduct = v.object({
   sku: v.string(),
   name: v.string(),
   price: v.number(),
   description: v.optional(v.string()),
+  vendor: v.optional(v.string()),
+  tags: v.optional(v.string()),
 });
 
 function normalizeProduct(product: Doc<"products">) {
@@ -74,6 +77,8 @@ export const update = mutation({
     sku: v.optional(v.string()),
     name: v.optional(v.string()),
     description: v.optional(v.string()),
+    vendor: v.optional(v.string()),
+    tags: v.optional(v.string()),
     price: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -84,6 +89,8 @@ export const update = mutation({
       name?: string;
       price?: number;
       sku?: string;
+      tags?: string;
+      vendor?: string;
       updatedAt: number;
     } = { updatedAt: Date.now() };
 
@@ -97,6 +104,14 @@ export const update = mutation({
 
     if (args.description !== undefined) {
       patch.description = args.description.trim() || undefined;
+    }
+
+    if (args.vendor !== undefined) {
+      patch.vendor = args.vendor.trim() || undefined;
+    }
+
+    if (args.tags !== undefined) {
+      patch.tags = normalizeTagString(args.tags);
     }
 
     if (args.price !== undefined) {
@@ -114,6 +129,8 @@ export const create = mutation({
     name: v.string(),
     price: v.number(),
     description: v.optional(v.string()),
+    vendor: v.optional(v.string()),
+    tags: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
@@ -121,6 +138,8 @@ export const create = mutation({
     const sku = args.sku.trim();
     const name = args.name.trim();
     const description = args.description?.trim() || undefined;
+    const vendor = args.vendor?.trim() || undefined;
+    const tags = normalizeTagString(args.tags);
 
     if (!sku || !name) {
       throw new ConvexError("SKU and name are required.");
@@ -145,6 +164,8 @@ export const create = mutation({
       sku,
       name,
       description,
+      vendor,
+      tags,
       price: args.price,
       phase: "imported",
       createdAt: now,
@@ -194,6 +215,12 @@ export const importProducts = mutation({
           ...(product.description !== undefined
             ? { description: product.description.trim() || undefined }
             : {}),
+          ...(product.vendor !== undefined
+            ? { vendor: product.vendor.trim() || undefined }
+            : {}),
+          ...(product.tags !== undefined
+            ? { tags: normalizeTagString(product.tags) }
+            : {}),
           updatedAt: now,
         });
         overwritten += 1;
@@ -204,6 +231,8 @@ export const importProducts = mutation({
         sku,
         name,
         description: product.description?.trim() || undefined,
+        vendor: product.vendor?.trim() || undefined,
+        tags: normalizeTagString(product.tags),
         price: product.price,
         phase: "imported",
         createdAt: now,
