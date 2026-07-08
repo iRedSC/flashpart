@@ -3,8 +3,8 @@ import {
   AlertCircle,
   Camera,
   Check,
-  ImageOff,
   Loader2,
+  PencilLine,
   RefreshCcw,
   Sparkles,
 } from "lucide-react";
@@ -40,17 +40,19 @@ export function ProductPhotoDialog({
     settings?.aiImageDefaultPrompt?.trim() || DEFAULT_AI_IMAGE_PROMPT;
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const touchStartXRef = React.useRef<number | null>(null);
-  const [retakeFile, setRetakeFile] = React.useState<File | null>(null);
+  const [captureFile, setCaptureFile] = React.useState<File | null>(null);
   const [activeView, setActiveView] = React.useState<PhotoView>("ai");
   const [prompt, setPrompt] = React.useState(defaultPrompt);
+  const [draftPrompt, setDraftPrompt] = React.useState(defaultPrompt);
+  const [promptDialogOpen, setPromptDialogOpen] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isRegenerating, setIsRegenerating] = React.useState(false);
   const [isApproving, setIsApproving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [stage, setStage] = React.useState<string | null>(null);
   const previewUrl = React.useMemo(
-    () => (retakeFile ? URL.createObjectURL(retakeFile) : null),
-    [retakeFile],
+    () => (captureFile ? URL.createObjectURL(captureFile) : null),
+    [captureFile],
   );
 
   React.useEffect(() => {
@@ -66,29 +68,30 @@ export function ProductPhotoDialog({
       return;
     }
 
-    setPrompt(product.aiImagePrompt ?? defaultPrompt);
+    const nextPrompt = product.aiImagePrompt ?? defaultPrompt;
+    setPrompt(nextPrompt);
+    setDraftPrompt(nextPrompt);
     setActiveView(
       isAiImageGenerating(product) || isAiImageFailed(product) ? "original" : "ai",
     );
     setError(null);
     setStage(null);
-    setRetakeFile(null);
+    setCaptureFile(null);
+    setPromptDialogOpen(false);
   }, [defaultPrompt, product?._id, product?.aiImageStatus, product?.aiImagePrompt]);
 
   const originalUrl = previewUrl ?? product?.shopifyFileUrl ?? null;
   const aiUrl = product?.aiShopifyFileUrl ?? null;
   const aiGenerating = product ? isAiImageGenerating(product) : false;
   const aiFailed = product ? isAiImageFailed(product) : false;
-  const canRetake = Boolean(product?.groupId);
+  const canTakePhoto = Boolean(product?.groupId);
   const isBusy = isSaving || isRegenerating || isApproving;
+  const hasPhotoTabs = Boolean(originalUrl || aiUrl || aiGenerating || aiFailed);
 
-  const displayUrl =
-    activeView === "ai"
-      ? aiUrl
-      : originalUrl;
+  const displayUrl = activeView === "ai" ? aiUrl : originalUrl;
 
-  function resetRetake() {
-    setRetakeFile(null);
+  function resetCapture() {
+    setCaptureFile(null);
     setError(null);
     setStage(null);
   }
@@ -98,13 +101,33 @@ export function ProductPhotoDialog({
       return;
     }
 
-    resetRetake();
+    resetCapture();
+    setPromptDialogOpen(false);
     onClose();
   }
 
   function switchView(view: PhotoView) {
     setActiveView(view);
     setError(null);
+  }
+
+  function openPromptDialog() {
+    setDraftPrompt(prompt);
+    setPromptDialogOpen(true);
+  }
+
+  function savePrompt() {
+    const trimmed = draftPrompt.trim();
+
+    if (!trimmed) {
+      setError("Enter a prompt before saving.");
+      return;
+    }
+
+    setPrompt(trimmed);
+    setError(null);
+    setPromptDialogOpen(false);
+    triggerHaptic();
   }
 
   function handleTouchStart(event: React.TouchEvent<HTMLDivElement>) {
@@ -114,7 +137,7 @@ export function ProductPhotoDialog({
   function handleTouchEnd(event: React.TouchEvent<HTMLDivElement>) {
     const startX = touchStartXRef.current;
 
-    if (startX === null || retakeFile) {
+    if (startX === null || captureFile) {
       return;
     }
 
@@ -147,7 +170,7 @@ export function ProductPhotoDialog({
     }
 
     try {
-      setRetakeFile(await cropImageFileToSquare(file));
+      setCaptureFile(await cropImageFileToSquare(file));
       setActiveView("original");
       triggerHaptic();
     } catch (caught) {
@@ -159,8 +182,12 @@ export function ProductPhotoDialog({
     }
   }
 
+  function handleTakePhoto() {
+    fileInputRef.current?.click();
+  }
+
   async function handleSave() {
-    if (!product?.groupId || !retakeFile || isBusy) {
+    if (!product?.groupId || !captureFile || isBusy) {
       return;
     }
 
@@ -170,7 +197,7 @@ export function ProductPhotoDialog({
 
     try {
       setStage("Uploading photo to Shopify...");
-      const shopifyFile = await uploadCaptureImage(retakeFile);
+      const shopifyFile = await uploadCaptureImage(captureFile);
 
       setStage("Saving photo...");
       await recordCapture({
@@ -179,8 +206,9 @@ export function ProductPhotoDialog({
         ...shopifyFile,
       });
       triggerHaptic();
-      resetRetake();
+      resetCapture();
       setPrompt(defaultPrompt);
+      setDraftPrompt(defaultPrompt);
       setActiveView("ai");
     } catch (caught) {
       setError(
@@ -243,117 +271,133 @@ export function ProductPhotoDialog({
   }
 
   return (
-    <Dialog
-      onOpenChange={(open) => {
-        if (!open) {
-          handleClose();
-        }
-      }}
-      open={product !== null}
-    >
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="truncate pr-6">
-            {product?.name ?? "Product photo"}
-          </DialogTitle>
-          <DialogDescription className="font-mono">
-            {product?.sku}
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            handleClose();
+          }
+        }}
+        open={product !== null}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="truncate pr-6">
+              {product?.name ?? "Product photo"}
+            </DialogTitle>
+            <DialogDescription className="font-mono">
+              {product?.sku}
+            </DialogDescription>
+          </DialogHeader>
 
-        <input
-          accept="image/*"
-          capture="environment"
-          className="sr-only"
-          onChange={(event) => void handleFileChange(event)}
-          ref={fileInputRef}
-          type="file"
-        />
+          <input
+            accept="image/*"
+            capture="environment"
+            className="sr-only"
+            onChange={(event) => void handleFileChange(event)}
+            ref={fileInputRef}
+            type="file"
+          />
 
-        {originalUrl || aiUrl || aiGenerating || aiFailed ? (
-          <div className="flex rounded-lg bg-slate-100 p-1">
-            <button
-              className={cn(
-                "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                activeView === "original"
-                  ? "bg-white text-slate-950 shadow-sm"
-                  : "text-slate-600",
-              )}
-              onClick={() => switchView("original")}
-              type="button"
-            >
-              Original
-            </button>
-            <button
-              className={cn(
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                activeView === "ai"
-                  ? "bg-white text-slate-950 shadow-sm"
-                  : "text-slate-600",
-              )}
-              disabled={!originalUrl && !aiGenerating && !aiFailed}
-              onClick={() => switchView("ai")}
-              type="button"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              AI
-            </button>
-          </div>
-        ) : null}
-
-        <div
-          className="relative aspect-square w-full overflow-hidden rounded-xl bg-slate-100"
-          onTouchEnd={handleTouchEnd}
-          onTouchStart={handleTouchStart}
-        >
-          {displayUrl ? (
-            <img
-              alt={`${activeView === "ai" ? "AI" : "Original"} photo for ${product?.sku ?? "product"}`}
-              className="absolute inset-0 h-full w-full object-cover"
-              src={displayUrl}
-            />
-          ) : activeView === "ai" && aiGenerating ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
-              <Loader2 className="h-8 w-8 animate-spin" />
-              <span className="text-sm font-medium">Generating AI photo…</span>
-            </div>
-          ) : activeView === "ai" && aiFailed ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-red-600">
-              <AlertCircle className="h-8 w-8" />
-              <span className="text-sm font-medium">
-                {product?.aiImageError ?? "AI photo generation failed."}
-              </span>
-            </div>
-          ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-400">
-              <ImageOff className="h-8 w-8" />
-              <span className="text-sm">No photo yet</span>
-            </div>
-          )}
-          {previewUrl ? (
-            <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white backdrop-blur">
-              New photo
-            </span>
-          ) : null}
-          {activeView === "ai" && aiGenerating && displayUrl ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/35">
-              <Loader2 className="h-8 w-8 animate-spin text-white" />
+          {hasPhotoTabs ? (
+            <div className="flex rounded-lg bg-slate-100 p-1">
+              <button
+                className={cn(
+                  "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  activeView === "original"
+                    ? "bg-white text-slate-950 shadow-sm"
+                    : "text-slate-600",
+                )}
+                onClick={() => switchView("original")}
+                type="button"
+              >
+                Original
+              </button>
+              <button
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  activeView === "ai"
+                    ? "bg-white text-slate-950 shadow-sm"
+                    : "text-slate-600",
+                )}
+                disabled={!originalUrl && !aiGenerating && !aiFailed}
+                onClick={() => switchView("ai")}
+                type="button"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                AI
+              </button>
             </div>
           ) : null}
-        </div>
 
-        {activeView === "ai" && !retakeFile ? (
-          <div className="space-y-3">
-            <label className="block space-y-2">
-              <span className="text-sm font-medium text-slate-700">AI prompt</span>
-              <textarea
-                className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-slate-950/10 focus:ring-2"
-                disabled={isBusy || aiGenerating}
-                onChange={(event) => setPrompt(event.target.value)}
-                value={prompt}
+          <div
+            className="relative aspect-square w-full overflow-hidden rounded-xl bg-slate-100"
+            onTouchEnd={handleTouchEnd}
+            onTouchStart={handleTouchStart}
+          >
+            {displayUrl ? (
+              <img
+                alt={`${activeView === "ai" ? "AI" : "Original"} photo for ${product?.sku ?? "product"}`}
+                className="absolute inset-0 h-full w-full object-cover"
+                src={displayUrl}
               />
-            </label>
-            <div className="flex flex-wrap gap-2">
+            ) : activeView === "ai" && aiGenerating ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
+                <Loader2 className="h-8 w-8 animate-spin" />
+                <span className="text-sm font-medium">Generating AI photo…</span>
+              </div>
+            ) : activeView === "ai" && aiFailed ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-red-600">
+                <AlertCircle className="h-8 w-8" />
+                <span className="text-sm font-medium">
+                  {product?.aiImageError ?? "AI photo generation failed."}
+                </span>
+              </div>
+            ) : (
+              <button
+                className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500 transition-colors hover:bg-slate-200/60 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!canTakePhoto || isBusy}
+                onClick={handleTakePhoto}
+                type="button"
+              >
+                <Camera className="h-8 w-8" />
+                <span className="text-sm font-medium">Take photo</span>
+              </button>
+            )}
+            {previewUrl ? (
+              <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white backdrop-blur">
+                New photo
+              </span>
+            ) : null}
+            {activeView === "ai" && aiGenerating && displayUrl ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/35">
+                <Loader2 className="h-8 w-8 animate-spin text-white" />
+              </div>
+            ) : null}
+          </div>
+
+          {error ? (
+            <p className="text-sm font-medium text-red-600">{error}</p>
+          ) : null}
+          {stage ? (
+            <p className="text-sm font-medium text-slate-600">{stage}</p>
+          ) : null}
+          {!canTakePhoto ? (
+            <p className="text-sm text-slate-500">
+              Assign this product to a group to take its photo.
+            </p>
+          ) : null}
+
+          {activeView === "ai" && !captureFile ? (
+            <DialogFooter className="flex flex-row flex-wrap gap-2 sm:justify-start">
+              <Button
+                disabled={isBusy || aiGenerating}
+                onClick={openPromptDialog}
+                variant="outline"
+              >
+                <PencilLine className="h-4 w-4" />
+                Edit prompt
+              </Button>
               <Button
                 disabled={isBusy || aiGenerating || !originalUrl}
                 onClick={() => void handleRegenerate()}
@@ -376,57 +420,77 @@ export function ProductPhotoDialog({
                   Approve photo
                 </Button>
               ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        {error ? (
-          <p className="text-sm font-medium text-red-600">{error}</p>
-        ) : null}
-        {stage ? (
-          <p className="text-sm font-medium text-slate-600">{stage}</p>
-        ) : null}
-        {!canRetake ? (
-          <p className="text-sm text-slate-500">
-            Assign this product to a group to retake its photo.
-          </p>
-        ) : null}
-
-        <DialogFooter>
-          {retakeFile ? (
-            <>
-              <Button disabled={isBusy} onClick={resetRetake} variant="ghost">
-                Cancel
-              </Button>
-              <Button
-                disabled={isBusy}
-                onClick={() => fileInputRef.current?.click()}
-                variant="outline"
-              >
-                <RefreshCcw className="h-4 w-4" />
-                Retake
-              </Button>
-              <Button disabled={isBusy} onClick={() => void handleSave()}>
-                {isSaving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Check className="h-4 w-4" />
-                )}
-                Save photo
-              </Button>
-            </>
+            </DialogFooter>
           ) : (
-            <Button
-              disabled={!canRetake}
-              onClick={() => fileInputRef.current?.click()}
-              variant="outline"
-            >
-              <Camera className="h-4 w-4" />
-              {product?.shopifyFileUrl ? "Retake photo" : "Take photo"}
-            </Button>
+            <DialogFooter>
+              {captureFile ? (
+                <>
+                  <Button disabled={isBusy} onClick={resetCapture} variant="ghost">
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={isBusy}
+                    onClick={handleTakePhoto}
+                    variant="outline"
+                  >
+                    <Camera className="h-4 w-4" />
+                    Take photo
+                  </Button>
+                  <Button disabled={isBusy} onClick={() => void handleSave()}>
+                    {isSaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                    Save photo
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  disabled={!canTakePhoto || isBusy}
+                  onClick={handleTakePhoto}
+                  variant="outline"
+                >
+                  <Camera className="h-4 w-4" />
+                  Take photo
+                </Button>
+              )}
+            </DialogFooter>
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog onOpenChange={setPromptDialogOpen} open={promptDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>AI prompt</DialogTitle>
+            <DialogDescription>
+              Used for the next regeneration of {product?.sku ?? "this product"}.
+            </DialogDescription>
+          </DialogHeader>
+          <textarea
+            className="min-h-32 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-slate-950/10 focus:ring-2"
+            disabled={isBusy || aiGenerating}
+            onChange={(event) => setDraftPrompt(event.currentTarget.value)}
+            value={draftPrompt}
+          />
+          <DialogFooter>
+            <Button
+              disabled={isBusy || aiGenerating}
+              onClick={() => setPromptDialogOpen(false)}
+              variant="ghost"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={isBusy || aiGenerating || !draftPrompt.trim()}
+              onClick={savePrompt}
+            >
+              Save prompt
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
