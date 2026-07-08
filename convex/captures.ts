@@ -1,7 +1,16 @@
 import { v } from "convex/values";
+import { makeFunctionReference } from "convex/server";
 import { mutation } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
+import { DEFAULT_AI_IMAGE_PROMPT } from "./photoAiConstants";
 import { shopifyFileStatus } from "./schema";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const photoAiModel = {
+  processProductPhoto: makeFunctionReference(
+    "photoAi.js:processProductPhoto",
+  ) as any,
+};
 
 export const record = mutation({
   args: {
@@ -16,6 +25,8 @@ export const record = mutation({
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
     const now = Date.now();
+    const existingProduct = await ctx.db.get(args.productId);
+    const previousAiShopifyFileId = existingProduct?.aiShopifyFileId;
     const captureStatus =
       args.shopifyFileStatus === "ready" ? "ready" : "recorded";
     const captureId = await ctx.db.insert("captures", {
@@ -31,11 +42,16 @@ export const record = mutation({
     });
 
     await ctx.db.patch(args.productId, {
+      aiImageError: undefined,
+      aiImagePrompt: DEFAULT_AI_IMAGE_PROMPT,
+      aiImageStatus: args.shopifyFileId ? "generating" : undefined,
+      aiShopifyFileId: undefined,
+      aiShopifyFileStatus: undefined,
+      aiShopifyFileUrl: undefined,
       captureId,
       lastError: undefined,
       needsPhotoReview: undefined,
-      pendingOperation:
-        captureStatus === "ready" ? undefined : "captureProcessing",
+      pendingOperation: args.shopifyFileId ? "aiImageGenerating" : undefined,
       phase: "captured",
       shopifyFileId: args.shopifyFileId,
       shopifyFileStatus: args.shopifyFileStatus,
@@ -43,6 +59,13 @@ export const record = mutation({
       shopifyStagedResourceUrl: args.shopifyStagedResourceUrl,
       updatedAt: now,
     });
+
+    if (args.shopifyFileId && args.shopifyFileUrl) {
+      await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
+        previousAiShopifyFileId,
+        productId: args.productId,
+      });
+    }
 
     return captureId;
   },

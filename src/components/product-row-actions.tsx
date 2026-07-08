@@ -1,8 +1,14 @@
 import { FolderPlus, Send, Trash2 } from "lucide-react";
+import { isPublishable } from "../lib/product-state";
 import { DropdownMenuItem } from "./ui/dropdown-menu";
 
 type Product = {
   _id: string;
+  aiImageStatus?: "pending" | "generating" | "ready" | "failed";
+  aiShopifyFileId?: string | null;
+  needsPhotoReview?: boolean;
+  pendingOperation?: string | null;
+  phase: "imported" | "captured" | "published";
   shopifyFileId?: string | null;
   shopifyStatus?: string | null;
   sku: string;
@@ -21,13 +27,26 @@ export function ProductRowActionItems({
   onPublish: () => void;
   product: Product;
 }) {
+  const canPublish = isPublishable({
+    aiImageStatus: product.aiImageStatus,
+    aiShopifyFileId: product.aiShopifyFileId ?? undefined,
+    needsPhotoReview: product.needsPhotoReview,
+    pendingOperation: product.pendingOperation as
+      | "captureProcessing"
+      | "aiImageGenerating"
+      | "publishing"
+      | undefined,
+    phase: product.phase,
+    shopifyFileId: product.shopifyFileId ?? undefined,
+  });
+
   return (
     <>
       <DropdownMenuItem onSelect={onAddToGroup}>
         <FolderPlus />
         Add to group
       </DropdownMenuItem>
-      <DropdownMenuItem onSelect={onPublish}>
+      <DropdownMenuItem disabled={!canPublish} onSelect={onPublish}>
         <Send />
         Publish
       </DropdownMenuItem>

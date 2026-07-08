@@ -35,7 +35,6 @@ import {
   FolderPlus,
   Globe,
   GripVertical,
-  Image,
   ListFilter,
   MoreVertical,
   Plus,
@@ -75,6 +74,7 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { ProductPhotoDialog } from "../components/product-photo-dialog";
+import { ProductThumbnail } from "../components/product-thumbnail";
 import { useAppData } from "../data/app-data-provider";
 import { createCaptureSelection } from "../lib/capture-selection";
 import { cn } from "../lib/utils";
@@ -355,27 +355,11 @@ function MobileProductCard({
         }}
       >
         <div className="flex items-stretch gap-3.5">
-          {product.shopifyFileUrl ? (
-            <button
-              aria-label={`View photo for ${product.sku}`}
-              className="shrink-0 rounded-lg transition-transform active:scale-95"
-              onClick={() => onOpenPhoto(product)}
-              type="button"
-            >
-              <img
-                alt={`Shopify file for ${product.sku}`}
-                className="h-[52px] w-[52px] rounded-lg object-cover"
-                src={product.shopifyFileUrl}
-              />
-            </button>
-          ) : (
-            <div
-              aria-hidden="true"
-              className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-400"
-            >
-              <Image className="h-5 w-5" />
-            </div>
-          )}
+          <ProductThumbnail
+            className="h-[52px] w-[52px]"
+            onClick={() => onOpenPhoto(product)}
+            product={product}
+          />
           <div className="min-w-0 flex-1 self-center pr-1">
             <p
               className="line-clamp-2 text-sm font-medium"
@@ -685,27 +669,11 @@ export function ProductsPage() {
         header: "Name",
         cell: ({ row }) => (
           <div className="flex min-w-0 w-full items-center gap-2.5">
-            {row.original.shopifyFileUrl ? (
-              <button
-                aria-label={`View photo for ${row.original.sku}`}
-                className="shrink-0 rounded-lg transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950"
-                onClick={() => setPhotoProductId(row.original._id)}
-                type="button"
-              >
-                <img
-                  alt={`Photo for ${row.original.sku}`}
-                  className="h-10 w-10 rounded-lg object-cover"
-                  src={row.original.shopifyFileUrl}
-                />
-              </button>
-            ) : (
-              <div
-                aria-hidden="true"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-400"
-              >
-                <Image className="h-4 w-4" />
-              </div>
-            )}
+            <ProductThumbnail
+              className="h-10 w-10"
+              onClick={() => setPhotoProductId(row.original._id)}
+              product={row.original}
+            />
             <Input
               aria-label={`Name for ${row.original.sku}`}
               className={cn(desktopTableInputClass, "min-w-0 flex-1")}
@@ -1745,20 +1713,10 @@ export function ProductsPage() {
               )}
             >
               <div className="flex items-stretch gap-3.5">
-                {activeDragProduct.shopifyFileUrl ? (
-                  <img
-                    alt=""
-                    className="h-[52px] w-[52px] shrink-0 rounded-lg object-cover"
-                    src={activeDragProduct.shopifyFileUrl}
-                  />
-                ) : (
-                  <div
-                    aria-hidden="true"
-                    className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-400"
-                  >
-                    <Image className="h-5 w-5" />
-                  </div>
-                )}
+                <ProductThumbnail
+                  className="h-[52px] w-[52px]"
+                  product={activeDragProduct}
+                />
                 <div className="min-w-0 flex-1 self-center pr-1">
                   <p
                     className="line-clamp-2 text-sm font-medium"

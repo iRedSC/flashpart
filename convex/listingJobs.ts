@@ -12,6 +12,7 @@ import {
   addFileReferenceToProduct,
   createShopifyProduct,
   createShopifyVariant,
+  deleteShopifyFiles,
   findProductBySku,
   skuToShopifyHandle,
   updateShopifyProduct,
@@ -66,7 +67,8 @@ export const enqueueCreateDrafts = mutation({
     const now = Date.now();
     const products = [];
     const missingCaptureProducts = [];
-    let queued = 0;
+    const aiNotReadyProducts = [];
+    const needsReviewProducts = [];
 
     for (const productId of args.productIds) {
       const product = await ctx.db.get(productId);
@@ -80,6 +82,19 @@ export const enqueueCreateDrafts = mutation({
         continue;
       }
 
+      if (
+        product.aiImageStatus !== "ready" ||
+        !product.aiShopifyFileId
+      ) {
+        aiNotReadyProducts.push(product);
+        continue;
+      }
+
+      if (product.needsPhotoReview) {
+        needsReviewProducts.push(product);
+        continue;
+      }
+
       products.push(product);
     }
 
@@ -90,6 +105,24 @@ export const enqueueCreateDrafts = mutation({
           : `Capture Shopify-hosted photos for ${missingCaptureProducts.length.toLocaleString()} products before publishing.`,
       );
     }
+
+    if (aiNotReadyProducts.length > 0) {
+      throw new Error(
+        aiNotReadyProducts.length === 1
+          ? `Wait for the AI photo to finish generating for ${aiNotReadyProducts[0].sku} before publishing.`
+          : `Wait for AI photos to finish generating for ${aiNotReadyProducts.length.toLocaleString()} products before publishing.`,
+      );
+    }
+
+    if (needsReviewProducts.length > 0) {
+      throw new Error(
+        needsReviewProducts.length === 1
+          ? `Review and approve the AI photo for ${needsReviewProducts[0].sku} before publishing.`
+          : `Review and approve AI photos for ${needsReviewProducts.length.toLocaleString()} products before publishing.`,
+      );
+    }
+
+    let queued = 0;
 
     for (const product of products) {
       const jobId = await ctx.db.insert("listingJobs", {
@@ -181,6 +214,8 @@ export const markJobRunning = internalMutation({
 export const markJobSucceeded = internalMutation({
   args: {
     jobId: v.id("listingJobs"),
+    originalShopifyFileId: v.optional(v.string()),
+    publishFileId: v.optional(v.string()),
     result: v.any(),
     shopifyProductHandle: v.string(),
     shopifyProductId: v.string(),
@@ -194,6 +229,7 @@ export const markJobSucceeded = internalMutation({
       throw new Error("Listing job not found");
     }
 
+    const product = await ctx.db.get(job.productId);
     const now = Date.now();
 
     await ctx.db.patch(args.jobId, {
@@ -202,11 +238,30 @@ export const markJobSucceeded = internalMutation({
       status: "succeeded",
       updatedAt: now,
     });
+
+    const publishedFileId = args.publishFileId ?? product?.aiShopifyFileId;
+    const publishedFileUrl = product?.aiShopifyFileUrl;
+    const publishedFileStatus = product?.aiShopifyFileStatus;
+
     await ctx.db.patch(job.productId, {
+      aiImageError: undefined,
+      aiImagePrompt: undefined,
+      aiImageStatus: undefined,
+      aiShopifyFileId: undefined,
+      aiShopifyFileStatus: undefined,
+      aiShopifyFileUrl: undefined,
       lastError: undefined,
       needsPhotoReview: undefined,
       pendingOperation: undefined,
       phase: "published",
+      shopifyFileDeletedAt:
+        args.originalShopifyFileId &&
+        args.originalShopifyFileId !== publishedFileId
+          ? now
+          : product?.shopifyFileDeletedAt,
+      shopifyFileId: publishedFileId,
+      shopifyFileStatus: publishedFileStatus,
+      shopifyFileUrl: publishedFileUrl,
       shopifyProductHandle: args.shopifyProductHandle,
       shopifyProductId: args.shopifyProductId,
       shopifyStatus: args.shopifyStatus,
@@ -308,7 +363,14 @@ export const processQueuedJob = internalAction({
         throw new Error(`Unsupported listing job type: ${payload.job.type}.`);
       }
 
-      if (!payload.product.shopifyFileId) {
+      if (!payload.product.aiShopifyFileId) {
+        throw new Error("Generate an AI photo before publishing.");
+      }
+
+      const originalShopifyFileId = payload.product.shopifyFileId;
+      const publishFileId = payload.product.aiShopifyFileId;
+
+      if (!originalShopifyFileId) {
         throw new Error("Capture a Shopify-hosted photo before publishing.");
       }
 
@@ -384,12 +446,18 @@ export const processQueuedJob = internalAction({
       }
 
       await addFileReferenceToProduct(payload.connection, {
-        fileId: payload.product.shopifyFileId,
+        fileId: publishFileId,
         productId: shopifyProductId,
       });
 
+      if (originalShopifyFileId !== publishFileId) {
+        await deleteShopifyFiles(payload.connection, [originalShopifyFileId]);
+      }
+
       await ctx.runMutation(listingJobModel.markJobSucceeded, {
         jobId: args.jobId,
+        originalShopifyFileId,
+        publishFileId,
         result: {
           barcode: payload.product.sku,
           handle,

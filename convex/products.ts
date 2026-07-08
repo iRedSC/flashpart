@@ -302,6 +302,12 @@ export const markShopifyFileDeleted = internalMutation({
     }
 
     await ctx.db.patch(args.productId, {
+      aiImageError: undefined,
+      aiImagePrompt: undefined,
+      aiImageStatus: undefined,
+      aiShopifyFileId: undefined,
+      aiShopifyFileStatus: undefined,
+      aiShopifyFileUrl: undefined,
       captureId: undefined,
       needsPhotoReview: undefined,
       pendingOperation: undefined,
