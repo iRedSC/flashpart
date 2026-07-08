@@ -62,6 +62,38 @@ const getWebAuthnConfig = (origin: string) => {
   return { expectedOrigin, rpID };
 };
 
+const constantTimeEqual = (a: string, b: string) => {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  let result = 0;
+
+  for (let index = 0; index < a.length; index += 1) {
+    result |= a.charCodeAt(index) ^ b.charCodeAt(index);
+  }
+
+  return result === 0;
+};
+
+const getRequiredInviteCode = () => {
+  const code = process.env.FLASHPART_INVITE_CODE;
+
+  if (!code) {
+    throw new ConvexError("Account creation is not available.");
+  }
+
+  return code;
+};
+
+const assertValidInviteCode = (inviteCode: string | undefined) => {
+  const expected = getRequiredInviteCode();
+
+  if (!inviteCode || !constantTimeEqual(inviteCode.trim(), expected)) {
+    throw new ConvexError("That invite code is not correct.");
+  }
+};
+
 const sendOtpEmail = async (email: string, code: string) => {
   const apiKey = process.env.RESEND_API_KEY;
 
@@ -88,10 +120,24 @@ const sendOtpEmail = async (email: string, code: string) => {
   }
 };
 
+export const verifyInviteCode = action({
+  args: { code: v.string() },
+  handler: async (_ctx, args) => {
+    assertValidInviteCode(args.code);
+    return { valid: true as const };
+  },
+});
+
 export const requestEmailOtp = action({
-  args: { email: v.string() },
+  args: { email: v.string(), inviteCode: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const email = normalizeEmail(args.email);
+    const existingUser = await ctx.runQuery(authModel.getUserByEmail, { email });
+
+    if (!existingUser) {
+      assertValidInviteCode(args.inviteCode);
+    }
+
     const code = randomCode();
     const now = Date.now();
 
@@ -110,9 +156,20 @@ export const requestEmailOtp = action({
 });
 
 export const verifyOtpAndStartPasskeySetup = action({
-  args: { email: v.string(), code: v.string(), origin: v.string() },
+  args: {
+    email: v.string(),
+    code: v.string(),
+    origin: v.string(),
+    inviteCode: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const email = normalizeEmail(args.email);
+    const existingUser = await ctx.runQuery(authModel.getUserByEmail, { email });
+
+    if (!existingUser) {
+      assertValidInviteCode(args.inviteCode);
+    }
+
     const now = Date.now();
     const user = await ctx.runMutation(
       authModel.verifyOtpAndCreateUser,

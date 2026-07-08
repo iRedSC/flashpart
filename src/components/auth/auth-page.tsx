@@ -10,6 +10,7 @@ import {
 } from "../ui/card";
 import { LogoMark } from "../logo-mark";
 import { EmailPasskeySetup } from "./email-passkey-setup";
+import { InviteCodeGate } from "./invite-code-gate";
 import { PasskeySignIn } from "./passkey-sign-in";
 import { usePasskeySignIn } from "../../hooks/use-passkey-sign-in";
 import type { AuthSession } from "../../lib/auth-session";
@@ -23,9 +24,15 @@ type AuthPageProps = {
   onSignedIn: (session: AuthSession) => void;
 };
 
+type AuthFlow = "sign-in" | "invite" | "create";
+
 export function AuthPage({ onSignedIn }: AuthPageProps) {
   const [hintEmail, setHintEmail] = React.useState(() => readPasskeyHintEmail());
   const [useOtherAccount, setUseOtherAccount] = React.useState(false);
+  const [authFlow, setAuthFlow] = React.useState<AuthFlow>("sign-in");
+  const [verifiedInviteCode, setVerifiedInviteCode] = React.useState<string | null>(
+    null,
+  );
   const [boot, setBoot] = React.useState<"checking" | "ready">(() =>
     hintEmail && browserSupportsWebAuthn() ? "checking" : "ready",
   );
@@ -71,7 +78,46 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
     clearPasskeyHintEmail();
     setHintEmail(null);
     setUseOtherAccount(true);
+    setAuthFlow("sign-in");
+    setVerifiedInviteCode(null);
   }
+
+  function handleStartCreateAccount() {
+    setAuthFlow("invite");
+    setVerifiedInviteCode(null);
+  }
+
+  function handleInviteVerified(inviteCode: string) {
+    setVerifiedInviteCode(inviteCode);
+    setAuthFlow("create");
+  }
+
+  function handleBackToSignIn() {
+    setAuthFlow("sign-in");
+    setVerifiedInviteCode(null);
+  }
+
+  const title =
+    boot === "checking"
+      ? "Checking for a passkey"
+      : showReturn
+        ? "Welcome back"
+        : authFlow === "invite"
+          ? "Enter invite code"
+          : authFlow === "create"
+            ? "Create account"
+            : "Sign in";
+
+  const description =
+    boot === "checking"
+      ? "Your browser may ask for Face ID, fingerprint, PIN, or a security key."
+      : showReturn && hintEmail
+        ? `Continue as ${maskEmail(hintEmail)}.`
+        : authFlow === "invite"
+          ? "Enter your invite code to create an account."
+          : authFlow === "create"
+            ? "Verify your email, then set up a passkey for this device."
+            : "Verify your email once, then this device signs in with a passkey.";
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center bg-slate-50 px-4 py-10 text-slate-950">
@@ -83,20 +129,8 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">
-              {boot === "checking"
-                ? "Checking for a passkey"
-                : showReturn
-                  ? "Welcome back"
-                  : "Sign in"}
-            </CardTitle>
-            <CardDescription>
-              {boot === "checking"
-                ? "Your browser may ask for Face ID, fingerprint, PIN, or a security key."
-                : showReturn && hintEmail
-                  ? `Continue as ${maskEmail(hintEmail)}.`
-                  : "Verify your email once, then this device signs in with a passkey."}
-            </CardDescription>
+            <CardTitle className="text-lg">{title}</CardTitle>
+            <CardDescription>{description}</CardDescription>
           </CardHeader>
           {boot === "checking" ? null : (
             <CardContent className="grid gap-3">
@@ -111,8 +145,28 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
                     Use a different account
                   </Button>
                 </>
+              ) : authFlow === "invite" ? (
+                <InviteCodeGate
+                  onBack={handleBackToSignIn}
+                  onVerified={handleInviteVerified}
+                />
+              ) : authFlow === "create" && verifiedInviteCode ? (
+                <EmailPasskeySetup
+                  inviteCode={verifiedInviteCode}
+                  mode="create"
+                  onSignedIn={onSignedIn}
+                />
               ) : (
-                <EmailPasskeySetup onSignedIn={onSignedIn} />
+                <>
+                  <EmailPasskeySetup mode="sign-in" onSignedIn={onSignedIn} />
+                  <Button
+                    onClick={handleStartCreateAccount}
+                    type="button"
+                    variant="ghost"
+                  >
+                    Create an account
+                  </Button>
+                </>
               )}
             </CardContent>
           )}

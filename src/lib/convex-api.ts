@@ -19,6 +19,9 @@ function deployedFunction<T>(
 
 export const convexApi = {
   auth: {
+    verifyInviteCode: deployedFunction<typeof api.auth.verifyInviteCode>(
+      "auth.js:verifyInviteCode",
+    ),
     requestEmailOtp: deployedFunction<typeof api.auth.requestEmailOtp>(
       "auth.js:requestEmailOtp",
     ),
