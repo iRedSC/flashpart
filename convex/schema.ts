@@ -1,6 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import {
+  aiImageStatus,
   captureStatus,
   lastError,
   pendingOperation,
@@ -146,6 +147,12 @@ export default defineSchema({
     shopifyFileUrl: v.optional(v.string()),
     shopifyStagedResourceUrl: v.optional(v.string()),
     shopifyFileDeletedAt: v.optional(v.number()),
+    aiShopifyFileId: v.optional(v.string()),
+    aiShopifyFileStatus: v.optional(shopifyFileStatus),
+    aiShopifyFileUrl: v.optional(v.string()),
+    aiImageStatus: v.optional(aiImageStatus),
+    aiImagePrompt: v.optional(v.string()),
+    aiImageError: v.optional(v.string()),
     shopifyProductId: v.optional(v.string()),
     shopifyProductHandle: v.optional(v.string()),
     shopifyVariantId: v.optional(v.string()),

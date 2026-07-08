@@ -8,13 +8,22 @@ export const productPhase = v.union(
 
 export const pendingOperation = v.union(
   v.literal("captureProcessing"),
+  v.literal("aiImageGenerating"),
   v.literal("publishing"),
+);
+
+export const aiImageStatus = v.union(
+  v.literal("pending"),
+  v.literal("generating"),
+  v.literal("ready"),
+  v.literal("failed"),
 );
 
 export const productErrorCode = v.union(
   v.literal("duplicateSku"),
   v.literal("shopifyApi"),
   v.literal("captureUpload"),
+  v.literal("aiImageGeneration"),
   v.literal("unknown"),
 );
 
@@ -33,11 +42,16 @@ export const captureStatus = v.union(
 );
 
 export type ProductPhase = "imported" | "captured" | "published";
-export type PendingOperation = "captureProcessing" | "publishing";
+export type PendingOperation =
+  | "captureProcessing"
+  | "aiImageGenerating"
+  | "publishing";
+export type AiImageStatus = "pending" | "generating" | "ready" | "failed";
 export type ProductErrorCode =
   | "duplicateSku"
   | "shopifyApi"
   | "captureUpload"
+  | "aiImageGeneration"
   | "unknown";
 
 export type LastError = {

@@ -1,11 +1,15 @@
 export type ProductPhase = "imported" | "captured" | "published";
 
-export type PendingOperation = "captureProcessing" | "publishing";
+export type PendingOperation =
+  | "captureProcessing"
+  | "aiImageGenerating"
+  | "publishing";
 
 export type ProductErrorCode =
   | "duplicateSku"
   | "shopifyApi"
   | "captureUpload"
+  | "aiImageGeneration"
   | "unknown";
 
 export type LastError = {
@@ -21,6 +25,8 @@ export type ProductStateFields = {
   needsPhotoReview?: boolean;
   lastError?: LastError;
   shopifyFileId?: string;
+  aiImageStatus?: "pending" | "generating" | "ready" | "failed";
+  aiShopifyFileId?: string;
 };
 
 export type GroupProductProgress = {
@@ -42,6 +48,9 @@ export function isPublishable(product: ProductStateFields): boolean {
   return (
     product.phase === "captured" &&
     Boolean(product.shopifyFileId) &&
+    product.aiImageStatus === "ready" &&
+    Boolean(product.aiShopifyFileId) &&
+    !product.needsPhotoReview &&
     !product.pendingOperation
   );
 }
@@ -146,6 +155,7 @@ export const phaseLabels: Record<ProductPhase, string> = {
 };
 
 export const pendingOperationLabels: Record<PendingOperation, string> = {
+  aiImageGenerating: "Generating AI photo…",
   captureProcessing: "Processing photo…",
   publishing: "Publishing…",
 };
