@@ -1632,6 +1632,7 @@ export function ProductsPage() {
 
       <ProductPhotoDialog
         onClose={() => setPhotoProductId(null)}
+        onOpenProduct={setPhotoProductId}
         product={photoProduct}
       />
 

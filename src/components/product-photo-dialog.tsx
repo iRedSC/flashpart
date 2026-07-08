@@ -21,21 +21,35 @@ import { useAppData } from "../data/app-data-provider";
 import { cropImageFileToSquare } from "../lib/capture-image";
 import { triggerHaptic } from "../lib/haptics";
 import { DEFAULT_AI_IMAGE_PROMPT } from "../lib/ai-image-settings";
-import { isAiImageFailed, isAiImageGenerating } from "../lib/product-photo";
+import {
+  findNextPhotoNeedingApproval,
+  isAiImageFailed,
+  isAiImageGenerating,
+  needsPhotoApproval,
+} from "../lib/product-photo";
 import { cn } from "../lib/utils";
+import type { Id } from "../../convex/_generated/dataModel";
 
 type Product = ReturnType<typeof useAppData>["products"][number];
 type PhotoView = "original" | "ai";
 
 export function ProductPhotoDialog({
   onClose,
+  onOpenProduct,
   product,
 }: {
   onClose: () => void;
+  onOpenProduct: (productId: Id<"products">) => void;
   product: Product | null;
 }) {
-  const { approvePhoto, recordCapture, regenerateAiImage, settings, uploadCaptureImage } =
-    useAppData();
+  const {
+    approvePhoto,
+    products,
+    recordCapture,
+    regenerateAiImage,
+    settings,
+    uploadCaptureImage,
+  } = useAppData();
   const defaultPrompt =
     settings?.aiImageDefaultPrompt?.trim() || DEFAULT_AI_IMAGE_PROMPT;
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -259,6 +273,13 @@ export function ProductPhotoDialog({
 
     try {
       await approvePhoto(product._id);
+      const nextProduct = findNextPhotoNeedingApproval(products, product._id);
+
+      if (nextProduct) {
+        onOpenProduct(nextProduct._id);
+      } else {
+        onClose();
+      }
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -410,14 +431,14 @@ export function ProductPhotoDialog({
                 )}
                 Regenerate
               </Button>
-              {product?.needsPhotoReview && aiUrl ? (
+              {product && needsPhotoApproval(product) ? (
                 <Button disabled={isBusy} onClick={() => void handleApprove()}>
                   {isApproving ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Check className="h-4 w-4" />
                   )}
-                  Approve photo
+                  Approve & next
                 </Button>
               ) : null}
             </DialogFooter>

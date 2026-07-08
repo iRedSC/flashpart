@@ -8,6 +8,8 @@ export {
   type AiImageModelId,
 } from "./ai-image-settings";
 
+import { compareProductDisplayOrder } from "./product-state";
+
 type ProductPhotoFields = {
   aiImageStatus?: "pending" | "generating" | "ready" | "failed";
   aiShopifyFileUrl?: string;
@@ -36,6 +38,41 @@ export function isAiImageFailed(product: {
   aiImageStatus?: ProductPhotoFields["aiImageStatus"];
 }) {
   return product.aiImageStatus === "failed";
+}
+
+export function needsPhotoApproval(product: {
+  aiImageStatus?: ProductPhotoFields["aiImageStatus"];
+  aiShopifyFileUrl?: string;
+  needsPhotoReview?: boolean;
+}) {
+  return (
+    product.needsPhotoReview === true &&
+    product.aiImageStatus === "ready" &&
+    Boolean(product.aiShopifyFileUrl)
+  );
+}
+
+export function findNextPhotoNeedingApproval<
+  T extends {
+    _id: string;
+    aiImageStatus?: ProductPhotoFields["aiImageStatus"];
+    aiShopifyFileUrl?: string;
+    createdAt: number;
+    needsPhotoReview?: boolean;
+    sortOrder?: number;
+  },
+>(products: T[], currentProductId: string) {
+  const sorted = [...products].sort(compareProductDisplayOrder);
+  const currentIndex = sorted.findIndex((product) => product._id === currentProductId);
+  const startIndex = currentIndex === -1 ? 0 : currentIndex + 1;
+
+  for (let index = startIndex; index < sorted.length; index += 1) {
+    if (needsPhotoApproval(sorted[index])) {
+      return sorted[index];
+    }
+  }
+
+  return null;
 }
 
 export function canPublishProduct(product: {
