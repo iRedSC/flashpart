@@ -17,6 +17,7 @@ import {
   updateShopifyProduct,
   updateShopifyVariant,
 } from "./shopifyClient";
+import { mergeTagLists } from "./tags";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const listingJobModel = {
@@ -145,6 +146,8 @@ export const jobPayload = internalQuery({
       product,
       settings: {
         duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",
+        shopifyDefaultTags: settings?.shopifyDefaultTags,
+        shopifyProductType: settings?.shopifyProductType ?? "Part",
         shopifyPublishTarget: settings?.shopifyPublishTarget ?? "draft",
       },
     };
@@ -331,16 +334,28 @@ export const processQueuedJob = internalAction({
       const publishTarget = payload.settings.shopifyPublishTarget;
       const shopifyStatus =
         publishTarget === "published" ? ("published" as const) : ("draft" as const);
+      const productType = payload.settings.shopifyProductType.trim() || "Part";
+      const tags = mergeTagLists(
+        payload.settings.shopifyDefaultTags,
+        payload.product.tags,
+      );
+      const vendor = payload.product.vendor?.trim() || undefined;
+      const shopifyListing = {
+        handle,
+        productType,
+        publishTarget,
+        tags,
+        title: payload.product.name,
+        vendor,
+      };
       let shopifyProductId: string;
       let shopifyVariantId: string | undefined;
       let mode: "created" | "updated";
 
       if (existing) {
         const product = await updateShopifyProduct(payload.connection, {
-          handle,
+          ...shopifyListing,
           productId: existing.productId,
-          publishTarget,
-          title: payload.product.name,
         });
         shopifyProductId = product.id;
         shopifyVariantId = existing.variantId
@@ -356,11 +371,7 @@ export const processQueuedJob = internalAction({
           : undefined;
         mode = "updated";
       } else {
-        const product = await createShopifyProduct(payload.connection, {
-          handle,
-          publishTarget,
-          title: payload.product.name,
-        });
+        const product = await createShopifyProduct(payload.connection, shopifyListing);
         const variant = await createShopifyVariant(payload.connection, {
           barcode: payload.product.sku,
           price: payload.product.price,

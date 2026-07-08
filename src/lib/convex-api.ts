@@ -80,6 +80,12 @@ export const convexApi = {
     setShopifyPublishTarget: deployedFunction<
       typeof api.settings.setShopifyPublishTarget
     >("settings.js:setShopifyPublishTarget"),
+    setShopifyProductType: deployedFunction<
+      typeof api.settings.setShopifyProductType
+    >("settings.js:setShopifyProductType"),
+    setShopifyDefaultTags: deployedFunction<
+      typeof api.settings.setShopifyDefaultTags
+    >("settings.js:setShopifyDefaultTags"),
   },
   shopify: {
     currentConnection: deployedFunction<typeof api.shopify.currentConnection>(

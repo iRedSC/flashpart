@@ -19,6 +19,8 @@ export function SettingsPage() {
   const {
     disconnectShopify,
     setDuplicatePolicy,
+    setShopifyDefaultTags,
+    setShopifyProductType,
     setShopifyPublishTarget,
     session,
     settings,
@@ -30,8 +32,22 @@ export function SettingsPage() {
   );
   const [message, setMessage] = React.useState("");
   const [isConnecting, setIsConnecting] = React.useState(false);
+  const [productType, setProductType] = React.useState(
+    settings?.shopifyProductType ?? "Part",
+  );
+  const [defaultTags, setDefaultTags] = React.useState(
+    settings?.shopifyDefaultTags ?? "",
+  );
   const updateExisting = settings?.duplicatePolicy === "updateExisting";
   const publishDirectly = settings?.shopifyPublishTarget === "published";
+
+  React.useEffect(() => {
+    setProductType(settings?.shopifyProductType ?? "Part");
+  }, [settings?.shopifyProductType]);
+
+  React.useEffect(() => {
+    setDefaultTags(settings?.shopifyDefaultTags ?? "");
+  }, [settings?.shopifyDefaultTags]);
 
   React.useEffect(() => {
     setShopDomain(shopifyConnection?.shopDomain ?? "");
@@ -124,6 +140,46 @@ export function SettingsPage() {
                 ).catch(() => undefined)
               }
             />
+          </div>
+          <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
+            <label className="grid gap-2 text-sm font-medium" htmlFor="product-type">
+              Shopify product type
+              <Input
+                id="product-type"
+                onBlur={() => {
+                  const value = productType.trim() || "Part";
+
+                  if (value !== (settings?.shopifyProductType ?? "Part")) {
+                    void setShopifyProductType(value).catch(() => undefined);
+                  }
+                }}
+                onChange={(event) => setProductType(event.currentTarget.value)}
+                placeholder="Part"
+                value={productType}
+              />
+            </label>
+            <p className="text-sm text-slate-500">
+              Applied to every part when it is uploaded to Shopify.
+            </p>
+          </div>
+          <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
+            <label className="grid gap-2 text-sm font-medium" htmlFor="default-tags">
+              Default Shopify tags
+              <Input
+                id="default-tags"
+                onBlur={() => {
+                  if (defaultTags !== (settings?.shopifyDefaultTags ?? "")) {
+                    void setShopifyDefaultTags(defaultTags).catch(() => undefined);
+                  }
+                }}
+                onChange={(event) => setDefaultTags(event.currentTarget.value)}
+                placeholder="parts, inventory"
+                value={defaultTags}
+              />
+            </label>
+            <p className="text-sm text-slate-500">
+              Comma-separated tags merged with each part&apos;s own tags on upload.
+            </p>
           </div>
         </CardContent>
       </Card>
