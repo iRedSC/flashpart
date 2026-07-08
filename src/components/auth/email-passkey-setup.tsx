@@ -11,9 +11,15 @@ import { storePasskeyHintEmail } from "../../lib/passkey-hint-storage";
 
 type EmailPasskeySetupProps = {
   onSignedIn: (session: AuthSession) => void;
+  mode?: "sign-in" | "create";
+  inviteCode?: string;
 };
 
-export function EmailPasskeySetup({ onSignedIn }: EmailPasskeySetupProps) {
+export function EmailPasskeySetup({
+  onSignedIn,
+  mode = "sign-in",
+  inviteCode,
+}: EmailPasskeySetupProps) {
   const requestOtp = useAction(convexApi.auth.requestEmailOtp);
   const startSetup = useAction(convexApi.auth.verifyOtpAndStartPasskeySetup);
   const completeSetup = useAction(convexApi.auth.completePasskeySetup);
@@ -25,7 +31,10 @@ export function EmailPasskeySetup({ onSignedIn }: EmailPasskeySetupProps) {
   const [isBusy, setIsBusy] = React.useState(false);
 
   async function sendOtp() {
-    await requestOtp({ email });
+    await requestOtp({
+      email,
+      ...(mode === "create" && inviteCode ? { inviteCode } : {}),
+    });
     setCodeSent(true);
     setMessage("Check your email for a 6-digit code.");
   }
@@ -36,13 +45,15 @@ export function EmailPasskeySetup({ onSignedIn }: EmailPasskeySetupProps) {
     setMessage("");
 
     try {
-      try {
-        const signedIn = await trySignInForEmail(email);
-        if (signedIn) {
-          return;
+      if (mode === "sign-in") {
+        try {
+          const signedIn = await trySignInForEmail(email);
+          if (signedIn) {
+            return;
+          }
+        } catch {
+          // Fall through to email verification when passkey sign-in is unavailable.
         }
-      } catch {
-        // Fall through to email verification when passkey sign-in is unavailable.
       }
 
       await sendOtp();
@@ -60,7 +71,12 @@ export function EmailPasskeySetup({ onSignedIn }: EmailPasskeySetupProps) {
 
     try {
       const origin = window.location.origin;
-      const { options, challengeId } = await startSetup({ email, code, origin });
+      const { options, challengeId } = await startSetup({
+        email,
+        code,
+        origin,
+        ...(mode === "create" && inviteCode ? { inviteCode } : {}),
+      });
       const response = await startRegistration({ optionsJSON: options });
       const session = await completeSetup({ challengeId, response, origin });
 
@@ -122,8 +138,12 @@ export function EmailPasskeySetup({ onSignedIn }: EmailPasskeySetupProps) {
             ? "Creating passkey..."
             : "Create passkey"
           : isBusy
-            ? "Signing in..."
-            : "Sign in"}
+            ? mode === "create"
+              ? "Sending code..."
+              : "Signing in..."
+            : mode === "create"
+              ? "Continue"
+              : "Sign in"}
       </Button>
     </form>
   );
