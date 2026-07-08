@@ -5,6 +5,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import type { AuthSession } from "../lib/auth-session";
 import { convexApi } from "../lib/convex-api";
 import { isGroupCaptureComplete } from "../lib/product-state";
+import type { AiImageModelId } from "../lib/ai-image-settings";
 
 type Product = FunctionReturnType<typeof convexApi.products.list>[number];
 type Group = FunctionReturnType<typeof convexApi.groups.list>[number];
@@ -109,6 +110,12 @@ type AppDataContextValue = {
   setShopifyDefaultTags: (
     shopifyDefaultTags: string,
   ) => Promise<{ shopifyDefaultTags: string | undefined } | null>;
+  setAiImageDefaultPrompt: (
+    aiImageDefaultPrompt: string,
+  ) => Promise<{ aiImageDefaultPrompt: string } | null>;
+  setAiImageModel: (
+    aiImageModel: AiImageModelId,
+  ) => Promise<{ aiImageModel: AiImageModelId } | null>;
   disconnectShopify: () => Promise<null>;
   deleteShopifyFile: (
     productId: Id<"products">,
@@ -222,6 +229,10 @@ export function AppDataProvider({
   const setShopifyDefaultTagsMutation = useMutation(
     convexApi.settings.setShopifyDefaultTags,
   );
+  const setAiImageDefaultPromptMutation = useMutation(
+    convexApi.settings.setAiImageDefaultPrompt,
+  );
+  const setAiImageModelMutation = useMutation(convexApi.settings.setAiImageModel);
   const disconnectShopifyMutation = useMutation(convexApi.shopify.disconnect);
   const prepareFileUploadAction = useAction(convexApi.shopify.prepareFileUpload);
   const finalizeFileUploadAction = useAction(convexApi.shopify.finalizeFileUpload);
@@ -630,6 +641,44 @@ export function AppDataProvider({
             }),
           label: "Saving default Shopify tags",
         }),
+      setAiImageDefaultPrompt: (aiImageDefaultPrompt) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  aiImageDefaultPrompt,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setAiImageDefaultPromptMutation({
+              aiImageDefaultPrompt,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving AI photo prompt",
+        }),
+      setAiImageModel: (aiImageModel) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  aiImageModel,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setAiImageModelMutation({
+              aiImageModel,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving AI photo model",
+        }),
       disconnectShopify: () =>
         runOptimistic({
           apply: (state) => ({
@@ -868,6 +917,8 @@ export function AppDataProvider({
       session.sessionToken,
       session,
       uploadCaptureFile,
+      setAiImageDefaultPromptMutation,
+      setAiImageModelMutation,
       setDuplicatePolicyMutation,
       setShopifyPublishTargetMutation,
       setShopifyProductTypeMutation,

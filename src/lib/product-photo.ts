@@ -1,5 +1,9 @@
-export const DEFAULT_AI_IMAGE_PROMPT =
-  "A professionally lit product photo with white background. Do not change the shape of the subject. Clean up blemishes and scratches. Keep the product shadow.";
+export {
+  AI_IMAGE_MODEL_OPTIONS,
+  DEFAULT_AI_IMAGE_MODEL,
+  DEFAULT_AI_IMAGE_PROMPT,
+  type AiImageModelId,
+} from "./ai-image-settings";
 
 type ProductPhotoFields = {
   aiImageStatus?: "pending" | "generating" | "ready" | "failed";

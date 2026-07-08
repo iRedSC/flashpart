@@ -13,11 +13,19 @@ import {
 import { Input } from "../components/ui/input";
 import { Switch } from "../components/ui/switch";
 import { useAppData } from "../data/app-data-provider";
+import {
+  AI_IMAGE_MODEL_OPTIONS,
+  DEFAULT_AI_IMAGE_MODEL,
+  DEFAULT_AI_IMAGE_PROMPT,
+  type AiImageModelId,
+} from "../lib/ai-image-settings";
 import { convexApi } from "../lib/convex-api";
 
 export function SettingsPage() {
   const {
     disconnectShopify,
+    setAiImageDefaultPrompt,
+    setAiImageModel,
     setDuplicatePolicy,
     setShopifyDefaultTags,
     setShopifyProductType,
@@ -38,6 +46,13 @@ export function SettingsPage() {
   const [defaultTags, setDefaultTags] = React.useState(
     settings?.shopifyDefaultTags ?? "",
   );
+  const [aiImageDefaultPrompt, setAiImageDefaultPromptState] = React.useState(
+    settings?.aiImageDefaultPrompt ?? DEFAULT_AI_IMAGE_PROMPT,
+  );
+  const [aiImageModel, setAiImageModelState] = React.useState<AiImageModelId>(
+    (settings?.aiImageModel as AiImageModelId | undefined) ??
+      DEFAULT_AI_IMAGE_MODEL,
+  );
   const updateExisting = settings?.duplicatePolicy === "updateExisting";
   const publishDirectly = settings?.shopifyPublishTarget === "published";
 
@@ -48,6 +63,19 @@ export function SettingsPage() {
   React.useEffect(() => {
     setDefaultTags(settings?.shopifyDefaultTags ?? "");
   }, [settings?.shopifyDefaultTags]);
+
+  React.useEffect(() => {
+    setAiImageDefaultPromptState(
+      settings?.aiImageDefaultPrompt ?? DEFAULT_AI_IMAGE_PROMPT,
+    );
+  }, [settings?.aiImageDefaultPrompt]);
+
+  React.useEffect(() => {
+    setAiImageModelState(
+      (settings?.aiImageModel as AiImageModelId | undefined) ??
+        DEFAULT_AI_IMAGE_MODEL,
+    );
+  }, [settings?.aiImageModel]);
 
   React.useEffect(() => {
     setShopDomain(shopifyConnection?.shopDomain ?? "");
@@ -179,6 +207,75 @@ export function SettingsPage() {
             </label>
             <p className="text-sm text-slate-500">
               Comma-separated tags merged with each part&apos;s own tags on upload.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>AI photo editing</CardTitle>
+          <CardDescription>
+            Default prompt and model used when product photos are enhanced after
+            capture.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
+            <label className="grid gap-2 text-sm font-medium" htmlFor="ai-image-model">
+              Gemini model
+              <select
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none ring-slate-950/10 focus:ring-2"
+                id="ai-image-model"
+                onChange={(event) => {
+                  const value = event.currentTarget.value as AiImageModelId;
+
+                  setAiImageModelState(value);
+                  void setAiImageModel(value).catch(() => undefined);
+                }}
+                value={aiImageModel}
+              >
+                {AI_IMAGE_MODEL_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-sm text-slate-500">
+              Applies to new captures and regenerations. Existing in-progress jobs
+              keep their current model.
+            </p>
+          </div>
+          <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
+            <label
+              className="grid gap-2 text-sm font-medium"
+              htmlFor="ai-image-default-prompt"
+            >
+              Default AI prompt
+              <textarea
+                className="min-h-28 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-slate-950/10 focus:ring-2"
+                id="ai-image-default-prompt"
+                onBlur={() => {
+                  const value =
+                    aiImageDefaultPrompt.trim() || DEFAULT_AI_IMAGE_PROMPT;
+
+                  if (
+                    value !==
+                    (settings?.aiImageDefaultPrompt ?? DEFAULT_AI_IMAGE_PROMPT)
+                  ) {
+                    void setAiImageDefaultPrompt(value).catch(() => undefined);
+                  }
+                }}
+                onChange={(event) =>
+                  setAiImageDefaultPromptState(event.currentTarget.value)
+                }
+                value={aiImageDefaultPrompt}
+              />
+            </label>
+            <p className="text-sm text-slate-500">
+              Used for new captures and retakes. Per-product prompt edits in the
+              photo dialog are kept until the photo is retaken.
             </p>
           </div>
         </CardContent>

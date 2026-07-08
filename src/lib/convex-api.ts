@@ -97,6 +97,12 @@ export const convexApi = {
     setShopifyDefaultTags: deployedFunction<
       typeof api.settings.setShopifyDefaultTags
     >("settings.js:setShopifyDefaultTags"),
+    setAiImageDefaultPrompt: deployedFunction<
+      typeof api.settings.setAiImageDefaultPrompt
+    >("settings.js:setAiImageDefaultPrompt"),
+    setAiImageModel: deployedFunction<typeof api.settings.setAiImageModel>(
+      "settings.js:setAiImageModel",
+    ),
   },
   shopify: {
     currentConnection: deployedFunction<typeof api.shopify.currentConnection>(

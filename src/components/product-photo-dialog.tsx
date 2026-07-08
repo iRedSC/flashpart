@@ -20,11 +20,8 @@ import {
 import { useAppData } from "../data/app-data-provider";
 import { cropImageFileToSquare } from "../lib/capture-image";
 import { triggerHaptic } from "../lib/haptics";
-import {
-  DEFAULT_AI_IMAGE_PROMPT,
-  isAiImageFailed,
-  isAiImageGenerating,
-} from "../lib/product-photo";
+import { DEFAULT_AI_IMAGE_PROMPT } from "../lib/ai-image-settings";
+import { isAiImageFailed, isAiImageGenerating } from "../lib/product-photo";
 import { cn } from "../lib/utils";
 
 type Product = ReturnType<typeof useAppData>["products"][number];
@@ -37,13 +34,15 @@ export function ProductPhotoDialog({
   onClose: () => void;
   product: Product | null;
 }) {
-  const { approvePhoto, recordCapture, regenerateAiImage, uploadCaptureImage } =
+  const { approvePhoto, recordCapture, regenerateAiImage, settings, uploadCaptureImage } =
     useAppData();
+  const defaultPrompt =
+    settings?.aiImageDefaultPrompt?.trim() || DEFAULT_AI_IMAGE_PROMPT;
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const touchStartXRef = React.useRef<number | null>(null);
   const [retakeFile, setRetakeFile] = React.useState<File | null>(null);
   const [activeView, setActiveView] = React.useState<PhotoView>("ai");
-  const [prompt, setPrompt] = React.useState(DEFAULT_AI_IMAGE_PROMPT);
+  const [prompt, setPrompt] = React.useState(defaultPrompt);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isRegenerating, setIsRegenerating] = React.useState(false);
   const [isApproving, setIsApproving] = React.useState(false);
@@ -67,14 +66,14 @@ export function ProductPhotoDialog({
       return;
     }
 
-    setPrompt(product.aiImagePrompt ?? DEFAULT_AI_IMAGE_PROMPT);
+    setPrompt(product.aiImagePrompt ?? defaultPrompt);
     setActiveView(
       isAiImageGenerating(product) || isAiImageFailed(product) ? "original" : "ai",
     );
     setError(null);
     setStage(null);
     setRetakeFile(null);
-  }, [product?._id, product?.aiImageStatus, product?.aiImagePrompt]);
+  }, [defaultPrompt, product?._id, product?.aiImageStatus, product?.aiImagePrompt]);
 
   const originalUrl = previewUrl ?? product?.shopifyFileUrl ?? null;
   const aiUrl = product?.aiShopifyFileUrl ?? null;
@@ -181,7 +180,7 @@ export function ProductPhotoDialog({
       });
       triggerHaptic();
       resetRetake();
-      setPrompt(DEFAULT_AI_IMAGE_PROMPT);
+      setPrompt(defaultPrompt);
       setActiveView("ai");
     } catch (caught) {
       setError(

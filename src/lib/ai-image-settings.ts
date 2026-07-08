@@ -1,9 +1,5 @@
-import { v } from "convex/values";
-
 export const DEFAULT_AI_IMAGE_PROMPT =
   "A professionally lit product photo with white background. Do not change the shape of the subject. Clean up blemishes and scratches. Keep the product shadow.";
-
-export const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image";
 
 export const AI_IMAGE_MODEL_OPTIONS = [
   {
@@ -18,11 +14,4 @@ export const AI_IMAGE_MODEL_OPTIONS = [
 
 export type AiImageModelId = (typeof AI_IMAGE_MODEL_OPTIONS)[number]["id"];
 
-export const aiImageModel = v.union(
-  v.literal("gemini-3.1-flash-image"),
-  v.literal("gemini-2.5-flash-image"),
-);
-
-export function isAiImageModel(value: string): value is AiImageModelId {
-  return AI_IMAGE_MODEL_OPTIONS.some((option) => option.id === value);
-}
+export const DEFAULT_AI_IMAGE_MODEL: AiImageModelId = "gemini-3.1-flash-image";

@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import { mutation } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
-import { DEFAULT_AI_IMAGE_PROMPT } from "./photoAiConstants";
+import { resolveAiImageSettings } from "./settings";
 import { shopifyFileStatus } from "./schema";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,6 +29,11 @@ export const record = mutation({
     const previousAiShopifyFileId = existingProduct?.aiShopifyFileId;
     const captureStatus =
       args.shopifyFileStatus === "ready" ? "ready" : "recorded";
+    const settings = await ctx.db
+      .query("appSettings")
+      .withIndex("by_key", (q) => q.eq("key", "singleton"))
+      .unique();
+    const { aiImageDefaultPrompt } = resolveAiImageSettings(settings);
     const captureId = await ctx.db.insert("captures", {
       productId: args.productId,
       groupId: args.groupId,
@@ -43,7 +48,7 @@ export const record = mutation({
 
     await ctx.db.patch(args.productId, {
       aiImageError: undefined,
-      aiImagePrompt: DEFAULT_AI_IMAGE_PROMPT,
+      aiImagePrompt: aiImageDefaultPrompt,
       aiImageStatus: args.shopifyFileId ? "generating" : undefined,
       aiShopifyFileId: undefined,
       aiShopifyFileStatus: undefined,

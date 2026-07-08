@@ -8,9 +8,10 @@ import {
 } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import {
-  DEFAULT_AI_IMAGE_PROMPT,
   GEMINI_IMAGE_MODEL,
+  isAiImageModel,
 } from "./photoAiConstants";
+import { resolveAiImageSettings } from "./settings";
 import {
   deleteShopifyFiles,
   uploadImageBufferToShopify,
@@ -88,11 +89,13 @@ function base64ToArrayBuffer(base64: string) {
 async function generateEditedImage(input: {
   imageData: ArrayBuffer;
   mimeType: string;
+  model: string;
   prompt: string;
 }) {
   const apiKey = assertGeminiEnv();
+  const model = isAiImageModel(input.model) ? input.model : GEMINI_IMAGE_MODEL;
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
       body: JSON.stringify({
         contents: [
@@ -168,8 +171,16 @@ export const processingPayload = internalQuery({
       return null;
     }
 
+    const settings = await ctx.db
+      .query("appSettings")
+      .withIndex("by_key", (q) => q.eq("key", "singleton"))
+      .unique();
+    const aiSettings = resolveAiImageSettings(settings);
+
     return {
-      aiImagePrompt: product.aiImagePrompt ?? DEFAULT_AI_IMAGE_PROMPT,
+      aiImageModel: aiSettings.aiImageModel,
+      aiImagePrompt:
+        product.aiImagePrompt ?? aiSettings.aiImageDefaultPrompt,
       aiShopifyFileId: product.aiShopifyFileId,
       productId: product._id,
       shopifyFileUrl: product.shopifyFileUrl,
@@ -269,7 +280,11 @@ export const scheduleProcessing = internalMutation({
     };
 
     if (args.resetPrompt) {
-      patch.aiImagePrompt = DEFAULT_AI_IMAGE_PROMPT;
+      const settings = await ctx.db
+        .query("appSettings")
+        .withIndex("by_key", (q) => q.eq("key", "singleton"))
+        .unique();
+      patch.aiImagePrompt = resolveAiImageSettings(settings).aiImageDefaultPrompt;
       patch.aiShopifyFileId = undefined;
       patch.aiShopifyFileStatus = undefined;
       patch.aiShopifyFileUrl = undefined;
@@ -329,6 +344,7 @@ export const processProductPhoto = internalAction({
       const generated = await generateEditedImage({
         imageData: originalData,
         mimeType: originalMimeType,
+        model: payload.aiImageModel,
         prompt: payload.aiImagePrompt,
       });
       const extension = generated.mimeType.includes("png") ? "png" : "jpg";
