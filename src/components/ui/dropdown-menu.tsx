@@ -2,6 +2,8 @@ import * as React from "react";
 import * as DropdownMenuPrimitives from "@radix-ui/react-dropdown-menu";
 import { cn } from "../../lib/utils";
 
+const TOUCH_SLOP_PX = 10;
+
 type DropdownMenuContextValue = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -52,31 +54,52 @@ export function DropdownMenu({
 export const DropdownMenuTrigger = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitives.Trigger>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitives.Trigger>
->(({ disabled = false, onClick, onPointerDown, ...props }, ref) => {
+>(({ disabled = false, onPointerDown, ...props }, ref) => {
   const context = React.useContext(DropdownMenuContext);
+  const contextRef = React.useRef(context);
+  contextRef.current = context;
 
   return (
     <DropdownMenuPrimitives.Trigger
       disabled={disabled}
-      onClick={(event) => {
-        const pointerType = (event.nativeEvent as PointerEvent).pointerType;
-        if (
-          pointerType === "touch" &&
-          !disabled &&
-          event.button === 0 &&
-          !event.ctrlKey &&
-          context
-        ) {
-          context.onOpenChange(!context.open);
-        }
-
-        onClick?.(event);
-      }}
       onPointerDown={(event) => {
-        // Radix opens on pointerdown, which fires while scrolling on touch.
-        // Defer to click so the menu only opens on tap-release.
-        if (event.pointerType === "touch") {
+        if (event.pointerType === "touch" && !disabled && context) {
+          // Radix opens on pointerdown, which fires while scrolling on touch.
+          // Suppress that and open on pointerup instead, but only if the finger
+          // did not move enough to count as a scroll.
           event.preventDefault();
+
+          const pointerId = event.pointerId;
+          const startX = event.clientX;
+          const startY = event.clientY;
+
+          function handleTouchPointerEnd(endEvent: PointerEvent) {
+            if (endEvent.pointerId !== pointerId) {
+              return;
+            }
+
+            document.removeEventListener("pointerup", handleTouchPointerEnd);
+            document.removeEventListener(
+              "pointercancel",
+              handleTouchPointerEnd,
+            );
+
+            const moved =
+              Math.hypot(
+                endEvent.clientX - startX,
+                endEvent.clientY - startY,
+              ) > TOUCH_SLOP_PX;
+
+            if (!moved) {
+              const currentContext = contextRef.current;
+              if (currentContext) {
+                currentContext.onOpenChange(!currentContext.open);
+              }
+            }
+          }
+
+          document.addEventListener("pointerup", handleTouchPointerEnd);
+          document.addEventListener("pointercancel", handleTouchPointerEnd);
         }
 
         onPointerDown?.(event);
