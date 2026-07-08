@@ -181,6 +181,32 @@ export const storePasskeyAndSession = internalMutation({
   },
 });
 
+export const createSessionForUser = internalMutation({
+  args: {
+    userId: v.id("users"),
+    sessionTokenHash: v.string(),
+    sessionExpiresAt: v.number(),
+    now: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+
+    if (!user) {
+      throw new ConvexError("User not found.");
+    }
+
+    await ctx.db.insert("authSessions", {
+      userId: args.userId,
+      tokenHash: args.sessionTokenHash,
+      expiresAt: args.sessionExpiresAt,
+      createdAt: args.now,
+    });
+    await ctx.db.patch(args.userId, { lastLoginAt: args.now });
+
+    return { userId: args.userId, email: user.email };
+  },
+});
+
 export const updatePasskeyAndCreateSession = internalMutation({
   args: {
     credentialId: v.string(),

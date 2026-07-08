@@ -40,6 +40,9 @@ export const convexApi = {
     completePasskeySignIn: deployedFunction<
       typeof api.auth.completePasskeySignIn
     >("auth.js:completePasskeySignIn"),
+    createPreviewAutologinSession: deployedFunction<
+      typeof api.auth.createPreviewAutologinSession
+    >("auth.js:createPreviewAutologinSession"),
   },
   captures: {
     record: deployedFunction<typeof api.captures.record>("captures.js:record"),
