@@ -2,8 +2,91 @@ import * as React from "react";
 import * as DropdownMenuPrimitives from "@radix-ui/react-dropdown-menu";
 import { cn } from "../../lib/utils";
 
-export const DropdownMenu = DropdownMenuPrimitives.Root;
-export const DropdownMenuTrigger = DropdownMenuPrimitives.Trigger;
+type DropdownMenuContextValue = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+};
+
+const DropdownMenuContext = React.createContext<DropdownMenuContextValue | null>(
+  null,
+);
+
+export function DropdownMenu({
+  defaultOpen,
+  onOpenChange,
+  open: openProp,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitives.Root>) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(
+    defaultOpen ?? false,
+  );
+  const isControlled = openProp !== undefined;
+  const open = openProp ?? uncontrolledOpen;
+
+  const handleOpenChange = React.useCallback(
+    (nextOpen: boolean) => {
+      if (!isControlled) {
+        setUncontrolledOpen(nextOpen);
+      }
+      onOpenChange?.(nextOpen);
+    },
+    [isControlled, onOpenChange],
+  );
+
+  const contextValue = React.useMemo(
+    () => ({ onOpenChange: handleOpenChange, open }),
+    [handleOpenChange, open],
+  );
+
+  return (
+    <DropdownMenuContext.Provider value={contextValue}>
+      <DropdownMenuPrimitives.Root
+        {...props}
+        onOpenChange={handleOpenChange}
+        open={open}
+      />
+    </DropdownMenuContext.Provider>
+  );
+}
+
+export const DropdownMenuTrigger = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitives.Trigger>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitives.Trigger>
+>(({ disabled = false, onClick, onPointerDown, ...props }, ref) => {
+  const context = React.useContext(DropdownMenuContext);
+
+  return (
+    <DropdownMenuPrimitives.Trigger
+      disabled={disabled}
+      onClick={(event) => {
+        const pointerType = (event.nativeEvent as PointerEvent).pointerType;
+        if (
+          pointerType === "touch" &&
+          !disabled &&
+          event.button === 0 &&
+          !event.ctrlKey &&
+          context
+        ) {
+          context.onOpenChange(!context.open);
+        }
+
+        onClick?.(event);
+      }}
+      onPointerDown={(event) => {
+        // Radix opens on pointerdown, which fires while scrolling on touch.
+        // Defer to click so the menu only opens on tap-release.
+        if (event.pointerType === "touch") {
+          event.preventDefault();
+        }
+
+        onPointerDown?.(event);
+      }}
+      ref={ref}
+      {...props}
+    />
+  );
+});
+DropdownMenuTrigger.displayName = DropdownMenuPrimitives.Trigger.displayName;
 
 export const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitives.Content>,
