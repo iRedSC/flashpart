@@ -35,6 +35,9 @@ const authModel = {
   updatePasskeyAndCreateSession: makeFunctionReference(
     "authModel.js:updatePasskeyAndCreateSession",
   ) as any,
+  createSessionForUser: makeFunctionReference(
+    "authModel.js:createSessionForUser",
+  ) as any,
 };
 
 const OTP_MINUTES = 10;
@@ -331,6 +334,41 @@ export const startPasskeySignInForEmail = action({
     );
 
     return { available: true as const, options, challengeId };
+  },
+});
+
+export const createPreviewAutologinSession = action({
+  args: {},
+  handler: async (ctx) => {
+    if (process.env.ENV !== "PREVIEW") {
+      throw new ConvexError("Preview autologin is disabled.");
+    }
+
+    const email = process.env.ENV_AUTOLOGIN_EMAIL?.trim();
+
+    if (!email) {
+      throw new ConvexError("ENV_AUTOLOGIN_EMAIL is not configured.");
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+    const user = await ctx.runQuery(authModel.getUserByEmail, {
+      email: normalizedEmail,
+    });
+
+    if (!user) {
+      throw new ConvexError("Preview autologin user not found.");
+    }
+
+    const now = Date.now();
+    const sessionToken = randomToken();
+    const session = await ctx.runMutation(authModel.createSessionForUser, {
+      userId: user.userId,
+      sessionTokenHash: hashValue(sessionToken),
+      sessionExpiresAt: now + SESSION_DAYS * 24 * 60 * 60 * 1000,
+      now,
+    });
+
+    return { ...session, sessionToken };
   },
 });
 
