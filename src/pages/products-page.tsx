@@ -937,6 +937,41 @@ export function ProductsPage() {
     setRowSelection({});
   }
 
+  function handleDeleteProducts(ids: Id<"products">[]) {
+    if (ids.length === 0) {
+      return Promise.resolve();
+    }
+
+    const idSet = new Set(ids);
+
+    setRowSelection((current) => {
+      const next = { ...current };
+      let changed = false;
+
+      for (const id of ids) {
+        if (next[id]) {
+          delete next[id];
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+    setPhotoProductId((current) =>
+      current && idSet.has(current) ? null : current,
+    );
+    setActiveDragProductId((current) => {
+      if (current && idSet.has(current)) {
+        setProjectedIndex(null);
+        return null;
+      }
+
+      return current;
+    });
+
+    return deleteProducts(ids);
+  }
+
   function setGroupFilter(value: string | null) {
     setSearchParams(
       (params) => {
@@ -1037,7 +1072,7 @@ export function ProductsPage() {
       return;
     }
 
-    await deleteProducts(selectedProductIds);
+    await handleDeleteProducts(selectedProductIds).catch(() => undefined);
     clearSelection();
   }
 
@@ -1665,6 +1700,10 @@ export function ProductsPage() {
           >
             {cardVirtualizer.getVirtualItems().map((virtualRow) => {
               const row = rows[virtualRow.index];
+              if (!row) {
+                return null;
+              }
+
               const product = row.original;
 
               return (
@@ -1684,7 +1723,7 @@ export function ProductsPage() {
                     setAddToGroupOpen(true);
                   }}
                   onDelete={(target) =>
-                    void deleteProducts([target._id]).catch(() => undefined)
+                    void handleDeleteProducts([target._id]).catch(() => undefined)
                   }
                   onDeleteShopifyFile={handleDeleteShopifyFileForProduct}
                   onOpenPhoto={(target) => setPhotoProductId(target._id)}
@@ -1832,6 +1871,9 @@ export function ProductsPage() {
             >
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                 const row = rows[virtualRow.index];
+                if (!row) {
+                  return null;
+                }
 
                 return (
                   <DesktopProductRow
@@ -1926,7 +1968,7 @@ export function ProductsPage() {
             <ProductRowActionItems
               onAddToGroup={() => openAddToGroupForProduct(desktopRowMenu.product)}
               onDelete={() =>
-                void deleteProducts([desktopRowMenu.product._id]).catch(
+                void handleDeleteProducts([desktopRowMenu.product._id]).catch(
                   () => undefined,
                 )
               }
