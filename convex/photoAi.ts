@@ -8,7 +8,10 @@ import {
 } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import {
+  buildAiGenerationRequest,
   GEMINI_IMAGE_MODEL,
+  imageSizeForModel,
+  isAiImageEditStrength,
   isAiImageModel,
 } from "./photoAiConstants";
 import { resolveAiImageSettings } from "./settings";
@@ -87,6 +90,7 @@ function base64ToArrayBuffer(base64: string) {
 }
 
 async function generateEditedImage(input: {
+  editStrength: string;
   imageData: ArrayBuffer;
   mimeType: string;
   model: string;
@@ -94,6 +98,10 @@ async function generateEditedImage(input: {
 }) {
   const apiKey = assertGeminiEnv();
   const model = isAiImageModel(input.model) ? input.model : GEMINI_IMAGE_MODEL;
+  const editStrength = isAiImageEditStrength(input.editStrength)
+    ? input.editStrength
+    : "balanced";
+  const generation = buildAiGenerationRequest(input.prompt, editStrength);
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
@@ -107,16 +115,17 @@ async function generateEditedImage(input: {
                   mime_type: input.mimeType,
                 },
               },
-              { text: input.prompt },
+              { text: generation.prompt },
             ],
           },
         ],
         generationConfig: {
           imageConfig: {
             aspectRatio: "1:1",
-            imageSize: "1K",
+            imageSize: imageSizeForModel(model),
           },
           responseModalities: ["TEXT", "IMAGE"],
+          temperature: generation.temperature,
         },
       }),
       headers: { "content-type": "application/json" },
@@ -178,6 +187,7 @@ export const processingPayload = internalQuery({
     const aiSettings = resolveAiImageSettings(settings);
 
     return {
+      aiImageEditStrength: aiSettings.aiImageEditStrength,
       aiImageModel: aiSettings.aiImageModel,
       aiImagePrompt:
         product.aiImagePrompt ?? aiSettings.aiImageDefaultPrompt,
@@ -342,6 +352,7 @@ export const processProductPhoto = internalAction({
         originalResponse.headers.get("content-type") ?? "image/jpeg";
       const originalData = await originalResponse.arrayBuffer();
       const generated = await generateEditedImage({
+        editStrength: payload.aiImageEditStrength,
         imageData: originalData,
         mimeType: originalMimeType,
         model: payload.aiImageModel,

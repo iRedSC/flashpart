@@ -1,6 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { aiImageModel } from "./photoAiConstants";
+import { aiImageEditStrength, aiImageModel } from "./photoAiConstants";
 import {
   aiImageStatus,
   captureStatus,
@@ -89,6 +89,7 @@ export default defineSchema({
   appSettings: defineTable({
     key: v.literal("singleton"),
     aiImageDefaultPrompt: v.optional(v.string()),
+    aiImageEditStrength: v.optional(aiImageEditStrength),
     aiImageModel: v.optional(aiImageModel),
     duplicatePolicy,
     shopifyPublishTarget: v.optional(shopifyPublishTarget),

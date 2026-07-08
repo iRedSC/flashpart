@@ -5,7 +5,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import type { AuthSession } from "../lib/auth-session";
 import { convexApi } from "../lib/convex-api";
 import { isGroupCaptureComplete } from "../lib/product-state";
-import type { AiImageModelId } from "../lib/ai-image-settings";
+import type { AiImageEditStrength, AiImageModelId } from "../lib/ai-image-settings";
 
 type Product = FunctionReturnType<typeof convexApi.products.list>[number];
 type Group = FunctionReturnType<typeof convexApi.groups.list>[number];
@@ -116,6 +116,9 @@ type AppDataContextValue = {
   setAiImageModel: (
     aiImageModel: AiImageModelId,
   ) => Promise<{ aiImageModel: AiImageModelId } | null>;
+  setAiImageEditStrength: (
+    aiImageEditStrength: AiImageEditStrength,
+  ) => Promise<{ aiImageEditStrength: AiImageEditStrength } | null>;
   disconnectShopify: () => Promise<null>;
   deleteShopifyFile: (
     productId: Id<"products">,
@@ -233,6 +236,9 @@ export function AppDataProvider({
     convexApi.settings.setAiImageDefaultPrompt,
   );
   const setAiImageModelMutation = useMutation(convexApi.settings.setAiImageModel);
+  const setAiImageEditStrengthMutation = useMutation(
+    convexApi.settings.setAiImageEditStrength,
+  );
   const disconnectShopifyMutation = useMutation(convexApi.shopify.disconnect);
   const prepareFileUploadAction = useAction(convexApi.shopify.prepareFileUpload);
   const finalizeFileUploadAction = useAction(convexApi.shopify.finalizeFileUpload);
@@ -679,6 +685,25 @@ export function AppDataProvider({
             }),
           label: "Saving AI photo model",
         }),
+      setAiImageEditStrength: (aiImageEditStrength) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  aiImageEditStrength,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setAiImageEditStrengthMutation({
+              aiImageEditStrength,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving AI edit strength",
+        }),
       disconnectShopify: () =>
         runOptimistic({
           apply: (state) => ({
@@ -918,6 +943,7 @@ export function AppDataProvider({
       session,
       uploadCaptureFile,
       setAiImageDefaultPromptMutation,
+      setAiImageEditStrengthMutation,
       setAiImageModelMutation,
       setDuplicatePolicyMutation,
       setShopifyPublishTargetMutation,

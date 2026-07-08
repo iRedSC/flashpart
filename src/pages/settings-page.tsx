@@ -14,9 +14,12 @@ import { Input } from "../components/ui/input";
 import { Switch } from "../components/ui/switch";
 import { useAppData } from "../data/app-data-provider";
 import {
+  AI_IMAGE_EDIT_STRENGTH_OPTIONS,
   AI_IMAGE_MODEL_OPTIONS,
+  DEFAULT_AI_IMAGE_EDIT_STRENGTH,
   DEFAULT_AI_IMAGE_MODEL,
   DEFAULT_AI_IMAGE_PROMPT,
+  type AiImageEditStrength,
   type AiImageModelId,
 } from "../lib/ai-image-settings";
 import { convexApi } from "../lib/convex-api";
@@ -25,6 +28,7 @@ export function SettingsPage() {
   const {
     disconnectShopify,
     setAiImageDefaultPrompt,
+    setAiImageEditStrength,
     setAiImageModel,
     setDuplicatePolicy,
     setShopifyDefaultTags,
@@ -53,6 +57,17 @@ export function SettingsPage() {
     (settings?.aiImageModel as AiImageModelId | undefined) ??
       DEFAULT_AI_IMAGE_MODEL,
   );
+  const [aiImageEditStrength, setAiImageEditStrengthState] =
+    React.useState<AiImageEditStrength>(
+      (settings?.aiImageEditStrength as AiImageEditStrength | undefined) ??
+        DEFAULT_AI_IMAGE_EDIT_STRENGTH,
+    );
+  const selectedModel = AI_IMAGE_MODEL_OPTIONS.find(
+    (option) => option.id === aiImageModel,
+  );
+  const selectedEditStrength = AI_IMAGE_EDIT_STRENGTH_OPTIONS.find(
+    (option) => option.id === aiImageEditStrength,
+  );
   const updateExisting = settings?.duplicatePolicy === "updateExisting";
   const publishDirectly = settings?.shopifyPublishTarget === "published";
 
@@ -76,6 +91,13 @@ export function SettingsPage() {
         DEFAULT_AI_IMAGE_MODEL,
     );
   }, [settings?.aiImageModel]);
+
+  React.useEffect(() => {
+    setAiImageEditStrengthState(
+      (settings?.aiImageEditStrength as AiImageEditStrength | undefined) ??
+        DEFAULT_AI_IMAGE_EDIT_STRENGTH,
+    );
+  }, [settings?.aiImageEditStrength]);
 
   React.useEffect(() => {
     setShopDomain(shopifyConnection?.shopDomain ?? "");
@@ -216,8 +238,10 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle>AI photo editing</CardTitle>
           <CardDescription>
-            Default prompt and model used when product photos are enhanced after
-            capture.
+            Default prompt, model, and edit strength used when product photos are
+            enhanced after capture. Gemini does not expose a reference-image
+            weight slider, so edit strength adjusts prompt framing and model
+            temperature instead.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -243,8 +267,38 @@ export function SettingsPage() {
               </select>
             </label>
             <p className="text-sm text-slate-500">
-              Applies to new captures and regenerations. Existing in-progress jobs
-              keep their current model.
+              {selectedModel?.description ??
+                "Applies to new captures and regenerations."}
+            </p>
+          </div>
+          <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
+            <label
+              className="grid gap-2 text-sm font-medium"
+              htmlFor="ai-image-edit-strength"
+            >
+              Edit strength
+              <select
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none ring-slate-950/10 focus:ring-2"
+                id="ai-image-edit-strength"
+                onChange={(event) => {
+                  const value = event.currentTarget.value as AiImageEditStrength;
+
+                  setAiImageEditStrengthState(value);
+                  void setAiImageEditStrength(value).catch(() => undefined);
+                }}
+                value={aiImageEditStrength}
+              >
+                {AI_IMAGE_EDIT_STRENGTH_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-sm text-slate-500">
+              {selectedEditStrength?.description ??
+                "Controls how much the AI changes the original capture."}
+              {" "}Try Strong if results look too similar to the original photo.
             </p>
           </div>
           <div className="grid gap-2 rounded-lg border border-slate-200 p-4">

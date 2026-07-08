@@ -3,17 +3,19 @@ import { v } from "convex/values";
 import { requireSessionUser } from "./authUtils";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { duplicatePolicy, shopifyPublishTarget } from "./schema";
-import { aiImageModel } from "./photoAiConstants";
+import { aiImageEditStrength, aiImageModel } from "./photoAiConstants";
 import {
+  DEFAULT_AI_IMAGE_EDIT_STRENGTH,
   DEFAULT_AI_IMAGE_PROMPT,
   GEMINI_IMAGE_MODEL,
 } from "./photoAiConstants";
-import type { AiImageModelId } from "./photoAiConstants";
+import type { AiImageEditStrength, AiImageModelId } from "./photoAiConstants";
 import { normalizeTagString } from "./tags";
 
 const defaultSettings = {
   key: "singleton" as const,
   aiImageDefaultPrompt: DEFAULT_AI_IMAGE_PROMPT,
+  aiImageEditStrength: DEFAULT_AI_IMAGE_EDIT_STRENGTH as AiImageEditStrength,
   aiImageModel: GEMINI_IMAGE_MODEL as AiImageModelId,
   duplicatePolicy: "blockExisting" as const,
   shopifyPublishTarget: "draft" as const,
@@ -24,15 +26,19 @@ const defaultSettings = {
 export function resolveAiImageSettings(
   settings: {
     aiImageDefaultPrompt?: string;
+    aiImageEditStrength?: AiImageEditStrength;
     aiImageModel?: AiImageModelId;
   } | null,
 ) {
   const aiImageDefaultPrompt =
     settings?.aiImageDefaultPrompt?.trim() || DEFAULT_AI_IMAGE_PROMPT;
   const aiImageModel = settings?.aiImageModel ?? GEMINI_IMAGE_MODEL;
+  const aiImageEditStrength =
+    settings?.aiImageEditStrength ?? DEFAULT_AI_IMAGE_EDIT_STRENGTH;
 
   return {
     aiImageDefaultPrompt,
+    aiImageEditStrength,
     aiImageModel,
   };
 }
@@ -221,6 +227,33 @@ export const setAiImageModel = mutation({
     }
 
     return { aiImageModel: args.aiImageModel };
+  },
+});
+
+export const setAiImageEditStrength = mutation({
+  args: {
+    aiImageEditStrength,
+    sessionToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const settings = await getSettingsDocument(ctx);
+    const now = Date.now();
+
+    if (settings) {
+      await ctx.db.patch(settings._id, {
+        aiImageEditStrength: args.aiImageEditStrength,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("appSettings", {
+        ...defaultSettings,
+        aiImageEditStrength: args.aiImageEditStrength,
+        updatedAt: now,
+      });
+    }
+
+    return { aiImageEditStrength: args.aiImageEditStrength };
   },
 });
 
