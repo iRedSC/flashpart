@@ -51,20 +51,25 @@ export function ProductRowActionItems({
 }) {
   const archived = isArchived(product);
   const archiveAllowed = canArchive(product);
-  const canPublish = canPublishProduct(
-    {
-      aiImageStatus: product.aiImageStatus,
-      aiShopifyFileId: product.aiShopifyFileId ?? undefined,
-      needsPhotoReview: product.needsPhotoReview,
-      pendingOperation: product.pendingOperation ?? undefined,
-      phase: product.phase,
-      shopifyFileId: product.shopifyFileId ?? undefined,
-    },
-    photos,
-  );
+  const photosLoading = photos === undefined;
+  const canPublish =
+    !photosLoading &&
+    canPublishProduct(
+      {
+        aiImageStatus: product.aiImageStatus,
+        aiShopifyFileId: product.aiShopifyFileId ?? undefined,
+        needsPhotoReview: product.needsPhotoReview,
+        pendingOperation: product.pendingOperation ?? undefined,
+        phase: product.phase,
+        shopifyFileId: product.shopifyFileId ?? undefined,
+      },
+      photos,
+    );
   const hasPhotoRows = (photos?.length ?? 0) > 0;
   const originalCount = hasPhotoRows ? listOriginals(photos ?? []).length : 0;
-  const isLegacyOnly = !hasPhotoRows && Boolean(product.shopifyFileId);
+  // Only treat as legacy once photos have resolved to an empty list.
+  const isLegacyOnly =
+    !photosLoading && !hasPhotoRows && Boolean(product.shopifyFileId);
 
   return (
     <>
@@ -72,7 +77,10 @@ export function ProductRowActionItems({
         <FolderPlus />
         Add to group
       </DropdownMenuItem>
-      <DropdownMenuItem disabled={!canPublish || archived} onSelect={onPublish}>
+      <DropdownMenuItem
+        disabled={!canPublish || archived || photosLoading}
+        onSelect={onPublish}
+      >
         <Send />
         Publish
       </DropdownMenuItem>

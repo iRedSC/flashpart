@@ -176,6 +176,13 @@ type AppDataContextValue = {
     groupId: Id<"groups">;
     file: File;
   }) => Promise<{ captureId: Id<"captures">; photoId: Id<"productPhotos"> }>;
+  /** Upload + replace an existing original in-place (same slot); resets paired AI. */
+  replaceProductPhoto: (args: {
+    photoId: Id<"productPhotos">;
+    productId: Id<"products">;
+    groupId: Id<"groups">;
+    file: File;
+  }) => Promise<{ captureId: Id<"captures">; photoId: Id<"productPhotos"> }>;
   /** Deletes a productPhotos row (and AI child), including Shopify files when promoted. */
   deleteProductPhoto: (
     photoId: Id<"productPhotos">,
@@ -361,8 +368,15 @@ export function AppDataProvider({
   const generateUploadUrlMutation = useMutation(
     convexApi.productPhotos.generateUploadUrl,
   );
-  const createOriginalFromUploadMutation = useMutation(
-    convexApi.productPhotos.createOriginalFromUpload,
+  const reserveOriginalSlotMutation = useMutation(
+    convexApi.productPhotos.reserveOriginalSlot,
+  );
+  const finalizeOriginalUploadMutation = useMutation(
+    convexApi.productPhotos.finalizeOriginalUpload,
+  );
+  const deletePhotoMutation = useMutation(convexApi.productPhotos.deletePhoto);
+  const replaceOriginalFromUploadMutation = useMutation(
+    convexApi.productPhotos.replaceOriginalFromUpload,
   );
   const regenerateAiImageMutation = useMutation(convexApi.photoAi.regenerate);
   const regenerateAiImageForPhotoMutation = useMutation(
@@ -478,6 +492,49 @@ export function AppDataProvider({
       };
     },
     [generateUploadUrlMutation, session.sessionToken],
+  );
+  /** Reserve slot first so UI sees uploading rows, then upload + finalize. */
+  const reserveUploadAndFinalizePhoto = React.useCallback(
+    async (args: {
+      productId: Id<"products">;
+      captureId?: Id<"captures">;
+      file: File;
+    }) => {
+      const reserved = await reserveOriginalSlotMutation({
+        captureId: args.captureId,
+        productId: args.productId,
+        sessionToken: session.sessionToken,
+      });
+
+      try {
+        const uploaded = await uploadCaptureFile(args.file);
+        await finalizeOriginalUploadMutation({
+          captureId: args.captureId,
+          originalPhotoId: reserved.originalPhotoId,
+          sessionToken: session.sessionToken,
+          storageId: uploaded.storageId,
+        });
+        return reserved.originalPhotoId;
+      } catch (error) {
+        // Drop reserved Convex-only rows (no Shopify files yet).
+        try {
+          await deletePhotoMutation({
+            photoId: reserved.originalPhotoId,
+            sessionToken: session.sessionToken,
+          });
+        } catch {
+          // Best-effort cleanup; surface the original upload error.
+        }
+        throw error;
+      }
+    },
+    [
+      deletePhotoMutation,
+      finalizeOriginalUploadMutation,
+      reserveOriginalSlotMutation,
+      session.sessionToken,
+      uploadCaptureFile,
+    ],
   );
   const runOptimistic = React.useCallback(
     async <T,>({
@@ -1129,12 +1186,30 @@ export function AppDataProvider({
             });
 
             if (args.storageId) {
-              await createOriginalFromUploadMutation({
+              // Legacy path: storage already uploaded before recordCapture.
+              const reserved = await reserveOriginalSlotMutation({
                 captureId,
                 productId: args.productId,
                 sessionToken: session.sessionToken,
-                storageId: args.storageId,
               });
+              try {
+                await finalizeOriginalUploadMutation({
+                  captureId,
+                  originalPhotoId: reserved.originalPhotoId,
+                  sessionToken: session.sessionToken,
+                  storageId: args.storageId,
+                });
+              } catch (error) {
+                try {
+                  await deletePhotoMutation({
+                    photoId: reserved.originalPhotoId,
+                    sessionToken: session.sessionToken,
+                  });
+                } catch {
+                  // Best-effort cleanup; surface the finalize error.
+                }
+                throw error;
+              }
             }
 
             return captureId;
@@ -1154,10 +1229,6 @@ export function AppDataProvider({
             }),
           }),
           commit: async () => {
-            const uploaded = args.file
-              ? await uploadCaptureFile(args.file)
-              : undefined;
-
             const captureId = await recordConvexCaptureMutation({
               groupId: args.groupId,
               productId: args.productId,
@@ -1166,12 +1237,11 @@ export function AppDataProvider({
 
             let photoId: Id<"productPhotos"> | undefined;
 
-            if (uploaded) {
-              photoId = await createOriginalFromUploadMutation({
+            if (args.file) {
+              photoId = await reserveUploadAndFinalizePhoto({
                 captureId,
+                file: args.file,
                 productId: args.productId,
-                sessionToken: session.sessionToken,
-                storageId: uploaded.storageId,
               });
             }
 
@@ -1208,22 +1278,67 @@ export function AppDataProvider({
             }),
           }),
           commit: async () => {
+            const captureId = await recordConvexCaptureMutation({
+              groupId: args.groupId,
+              productId: args.productId,
+              sessionToken: session.sessionToken,
+            });
+            const photoId = await reserveUploadAndFinalizePhoto({
+              captureId,
+              file: args.file,
+              productId: args.productId,
+            });
+
+            return { captureId, photoId };
+          },
+          label: "Adding product photo",
+          productIds: [args.productId],
+        });
+      },
+      replaceProductPhoto: (args) => {
+        const product = optimisticData.products.find(
+          (entry) => entry._id === args.productId,
+        );
+
+        if (!product?.groupId) {
+          throw new Error(
+            "This product is not in a group. Assign it to a group before replacing photos.",
+          );
+        }
+
+        if (product.groupId !== args.groupId) {
+          throw new Error(
+            "groupId does not match the product's assigned group.",
+          );
+        }
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: updateProductFields(state.products, args.productId, {
+              lastError: undefined,
+              needsPhotoReview: undefined,
+              pendingOperation: "aiImageGenerating",
+              phase: "captured",
+            }),
+          }),
+          commit: async () => {
             const uploaded = await uploadCaptureFile(args.file);
             const captureId = await recordConvexCaptureMutation({
               groupId: args.groupId,
               productId: args.productId,
               sessionToken: session.sessionToken,
             });
-            const photoId = await createOriginalFromUploadMutation({
+            const photoId = await replaceOriginalFromUploadMutation({
               captureId,
-              productId: args.productId,
+              photoId: args.photoId,
               sessionToken: session.sessionToken,
               storageId: uploaded.storageId,
             });
 
             return { captureId, photoId };
           },
-          label: "Adding product photo",
+          label: "Replacing product photo",
           productIds: [args.productId],
         });
       },
@@ -1334,9 +1449,13 @@ export function AppDataProvider({
       queryArgs,
       approveAiPhotoMutation,
       approvePhotoMutation,
-      createOriginalFromUploadMutation,
+      deletePhotoMutation,
+      finalizeOriginalUploadMutation,
       generateUploadUrlMutation,
       recordConvexCaptureMutation,
+      reserveOriginalSlotMutation,
+      reserveUploadAndFinalizePhoto,
+      replaceOriginalFromUploadMutation,
       regenerateAiImageForPhotoMutation,
       regenerateAiImageMutation,
       reorderProductsMutation,

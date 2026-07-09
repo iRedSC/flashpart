@@ -106,29 +106,23 @@ export const convexApi = {
     createOriginalFromUpload: deployedFunction<
       typeof api.productPhotos.createOriginalFromUpload
     >("productPhotos.js:createOriginalFromUpload"),
+    reserveOriginalSlot: deployedFunction<
+      typeof api.productPhotos.reserveOriginalSlot
+    >("productPhotos.js:reserveOriginalSlot"),
+    finalizeOriginalUpload: deployedFunction<
+      typeof api.productPhotos.finalizeOriginalUpload
+    >("productPhotos.js:finalizeOriginalUpload"),
+    replaceOriginalFromUpload: deployedFunction<
+      typeof api.productPhotos.replaceOriginalFromUpload
+    >("productPhotos.js:replaceOriginalFromUpload"),
     setSortOrder: deployedFunction<typeof api.productPhotos.setSortOrder>(
       "productPhotos.js:setSortOrder",
     ),
     deletePhoto: deployedFunction<typeof api.productPhotos.deletePhoto>(
       "productPhotos.js:deletePhoto",
     ),
-    markAiGenerating: deployedFunction<
-      typeof api.productPhotos.markAiGenerating
-    >("productPhotos.js:markAiGenerating"),
-    markAiReady: deployedFunction<typeof api.productPhotos.markAiReady>(
-      "productPhotos.js:markAiReady",
-    ),
-    markAiFailed: deployedFunction<typeof api.productPhotos.markAiFailed>(
-      "productPhotos.js:markAiFailed",
-    ),
     approveAiPhoto: deployedFunction<typeof api.productPhotos.approveAiPhoto>(
       "productPhotos.js:approveAiPhoto",
-    ),
-    markPromoted: deployedFunction<typeof api.productPhotos.markPromoted>(
-      "productPhotos.js:markPromoted",
-    ),
-    clearStorageId: deployedFunction<typeof api.productPhotos.clearStorageId>(
-      "productPhotos.js:clearStorageId",
     ),
   },
   products: {
