@@ -720,3 +720,40 @@ export async function addFileReferenceToProduct(
     },
   );
 }
+
+/** Detach a Files-library image from a product media gallery (does not delete the file). */
+export async function removeFileReferenceFromProduct(
+  connection: ShopifyConnection,
+  input: {
+    fileId: string;
+    productId: string;
+  },
+) {
+  await shopifyGraphql<{
+    fileUpdate: {
+      files: Array<{ id: string }>;
+    };
+  }>(
+    connection,
+    `mutation fileUpdate($files: [FileUpdateInput!]!) {
+      fileUpdate(files: $files) {
+        files {
+          id
+        }
+        userErrors {
+          field
+          message
+          code
+        }
+      }
+    }`,
+    {
+      files: [
+        {
+          id: input.fileId,
+          referencesToRemove: [input.productId],
+        },
+      ],
+    },
+  );
+}

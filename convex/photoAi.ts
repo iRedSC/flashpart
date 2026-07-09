@@ -19,6 +19,7 @@ import { maybeUnarchiveGroupForActiveProduct } from "./groups";
 import {
   applyApproveAiPhoto,
   applyMarkAiGenerating,
+  getAiForOriginal,
   productHasPhotoRows,
 } from "./productPhotos";
 import { productErrorFields } from "./productState";
@@ -58,6 +59,9 @@ const productPhotosModel = {
 const shopifyModel = {
   firstActiveConnection: makeFunctionReference(
     "shopifyModel.js:firstActiveConnection",
+  ) as any,
+  detachAndDeleteShopifyFiles: makeFunctionReference(
+    "shopify.js:detachAndDeleteShopifyFiles",
   ) as any,
 };
 
@@ -104,6 +108,42 @@ async function deleteShopifyFilesBestEffort(
       console.error("Failed to delete previous Shopify files:", message);
     }
   }
+}
+
+/**
+ * Detach Files from a published product gallery (when known), then delete.
+ * Falls back to bare fileDelete when there is no Shopify product id yet.
+ */
+async function detachAndDeleteShopifyFilesBestEffort(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { runAction: (...args: any[]) => Promise<unknown> },
+  connection: ShopifyConnection,
+  fileIds: string[],
+  shopifyProductId?: string | null,
+) {
+  const unique = [...new Set(fileIds.filter(Boolean))];
+  if (unique.length === 0) {
+    return;
+  }
+
+  if (shopifyProductId) {
+    try {
+      await ctx.runAction(shopifyModel.detachAndDeleteShopifyFiles, {
+        fileIds: unique,
+        shopifyProductId,
+      });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        "Failed to detach/delete previous Shopify files:",
+        message,
+      );
+      // Fall through to bare delete as a second best-effort.
+    }
+  }
+
+  await deleteShopifyFilesBestEffort(connection, unique);
 }
 
 function assertGeminiEnv() {
@@ -253,12 +293,7 @@ export const processingPayload = internalQuery({
         return null;
       }
 
-      const existingAi = await ctx.db
-        .query("productPhotos")
-        .withIndex("by_source", (q) =>
-          q.eq("sourcePhotoId", args.originalPhotoId!),
-        )
-        .unique();
+      const existingAi = await getAiForOriginal(ctx, args.originalPhotoId!);
 
       return {
         mode: "convex" as const,
@@ -272,6 +307,7 @@ export const processingPayload = internalQuery({
         originalStorageId: original.storageId,
         originalUrl: original.url,
         productId: product._id,
+        shopifyProductId: product.shopifyProductId,
         sku: product.sku,
       };
     }
@@ -289,6 +325,7 @@ export const processingPayload = internalQuery({
       aiShopifyFileId: product.aiShopifyFileId,
       productId: product._id,
       shopifyFileUrl: product.shopifyFileUrl,
+      shopifyProductId: product.shopifyProductId,
       sku: product.sku,
     };
   },
@@ -472,19 +509,6 @@ export const processProductPhoto = internalAction({
       }
 
       try {
-        if (previousShopifyFileIds.length > 0) {
-          const connection = await ctx.runQuery(
-            shopifyModel.firstActiveConnection,
-            {},
-          );
-          if (connection) {
-            await deleteShopifyFilesBestEffort(
-              connection,
-              previousShopifyFileIds,
-            );
-          }
-        }
-
         const payload = await ctx.runQuery(photoAiModel.processingPayload, {
           productId: args.productId,
           originalPhotoId: args.originalPhotoId,
@@ -492,6 +516,23 @@ export const processProductPhoto = internalAction({
 
         if (!payload || payload.mode !== "convex") {
           throw new ConvexError("Original product photo is missing image data.");
+        }
+
+        if (previousShopifyFileIds.length > 0) {
+          const connection = await ctx.runQuery(
+            shopifyModel.firstActiveConnection,
+            {},
+          );
+          if (connection) {
+            // Prefer detach+delete when product is already on Shopify so
+            // gallery refs are cleared before fileDelete (regen-after-publish).
+            await detachAndDeleteShopifyFilesBestEffort(
+              ctx,
+              connection,
+              previousShopifyFileIds,
+              payload.shopifyProductId,
+            );
+          }
         }
 
         let originalData: ArrayBuffer;
@@ -587,9 +628,12 @@ export const processProductPhoto = internalAction({
       }
 
       if (args.previousAiShopifyFileId) {
-        await deleteShopifyFilesBestEffort(connection, [
-          args.previousAiShopifyFileId,
-        ]);
+        await detachAndDeleteShopifyFilesBestEffort(
+          ctx,
+          connection,
+          [args.previousAiShopifyFileId],
+          payload.shopifyProductId,
+        );
       }
 
       const originalResponse = await fetch(payload.shopifyFileUrl);

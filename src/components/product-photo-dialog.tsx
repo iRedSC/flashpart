@@ -237,6 +237,7 @@ export function ProductPhotoDialog({
   const [pairIndex, setPairIndex] = React.useState(0);
   const [prompt, setPrompt] = React.useState(defaultPrompt);
   const [draftPrompt, setDraftPrompt] = React.useState(defaultPrompt);
+  const [promptDirty, setPromptDirty] = React.useState(false);
   const [promptDialogOpen, setPromptDialogOpen] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isRegenerating, setIsRegenerating] = React.useState(false);
@@ -292,6 +293,7 @@ export function ProductPhotoDialog({
     const nextPrompt = product.aiImagePrompt ?? defaultPrompt;
     setPrompt(nextPrompt);
     setDraftPrompt(nextPrompt);
+    setPromptDirty(false);
     setPairIndex(0);
     setError(null);
     setStage(null);
@@ -324,6 +326,7 @@ export function ProductPhotoDialog({
       if (focusIndex >= 0) {
         pendingFocusOriginalIdRef.current = null;
         setPairIndex(focusIndex);
+        setPromptDirty(false);
         initializedForProductRef.current = `${product._id}:${
           pairs.some((pair) => pair.isLegacy) ? "legacy" : "photos"
         }`;
@@ -347,6 +350,7 @@ export function ProductPhotoDialog({
       mode === "photos"
     ) {
       setPairIndex(0);
+      setPromptDirty(false);
     }
 
     const firstNeedingApproval = pairs.findIndex(
@@ -356,17 +360,53 @@ export function ProductPhotoDialog({
     if (firstNeedingApproval >= 0) {
       setPairIndex(firstNeedingApproval);
       setActiveView("ai");
+      setPromptDirty(false);
     }
   }, [product?._id, productPhotos, pairs]);
 
+  // Clamp pair index when pairs shrink (e.g. after delete) — avoid stale closure.
   React.useEffect(() => {
     if (pendingFocusOriginalIdRef.current) {
       return;
     }
-    if (pairIndex >= pairs.length && pairs.length > 0) {
+    if (pairs.length === 0) {
+      if (pairIndex !== 0) {
+        setPairIndex(0);
+      }
+      return;
+    }
+    if (pairIndex > pairs.length - 1) {
       setPairIndex(pairs.length - 1);
     }
   }, [pairIndex, pairs.length]);
+
+  // Keep prompt in sync with the active pair unless the user has dirty edits.
+  const currentPairAiPrompt = currentPair?.ai?.aiPrompt;
+  const currentPairOriginalId = currentPair?.original?._id;
+  const currentPairAiId = currentPair?.ai?._id;
+  const currentPairIsLegacy = currentPair?.isLegacy === true;
+  React.useEffect(() => {
+    if (!currentPair || promptDirty) {
+      return;
+    }
+
+    const pairPrompt =
+      currentPairAiPrompt?.trim() ||
+      (currentPairIsLegacy ? product?.aiImagePrompt?.trim() : undefined) ||
+      defaultPrompt;
+    setPrompt(pairPrompt);
+    setDraftPrompt(pairPrompt);
+  }, [
+    currentPair,
+    currentPairAiId,
+    currentPairAiPrompt,
+    currentPairIsLegacy,
+    currentPairOriginalId,
+    defaultPrompt,
+    product?.aiImagePrompt,
+    promptDirty,
+    safePairIndex,
+  ]);
 
   const originalUrl =
     previewUrl ??
@@ -390,9 +430,14 @@ export function ProductPhotoDialog({
   const canTakePhoto = Boolean(product?.groupId);
   const isBusy = isSaving || isRegenerating || isApproving || isDeleting;
   const originalCount = pairs.filter((pair) => pair.original != null).length;
-  // U3: once photos loaded, enforce max (no legacy exemption).
+  const isLegacyOnly =
+    pairs.length > 0 && pairs.every((pair) => pair.isLegacy);
+  // U3: once photos loaded, enforce max. Block add on pure legacy until migrated.
   const canAddPhoto =
-    canTakePhoto && !photosLoading && originalCount < maxProductPhotos;
+    canTakePhoto &&
+    !photosLoading &&
+    !isLegacyOnly &&
+    originalCount < maxProductPhotos;
   const canReplacePhoto = Boolean(
     canTakePhoto &&
       currentPair?.original &&
@@ -434,11 +479,22 @@ export function ProductPhotoDialog({
 
   function handleClose() {
     if (isBusy) {
-      return;
+      const confirmed = window.confirm(
+        "A photo action is still in progress. Close anyway?",
+      );
+      if (!confirmed) {
+        return;
+      }
+      setIsSaving(false);
+      setIsRegenerating(false);
+      setIsApproving(false);
+      setIsDeleting(false);
+      setStage(null);
     }
 
     resetCapture();
     setPromptDialogOpen(false);
+    setPromptDirty(false);
     onClose();
   }
 
@@ -459,6 +515,7 @@ export function ProductPhotoDialog({
     }
 
     setPairIndex(clamped);
+    setPromptDirty(false);
     setError(null);
     triggerHaptic();
   }
@@ -478,6 +535,7 @@ export function ProductPhotoDialog({
     }
 
     setPrompt(trimmed);
+    setPromptDirty(true);
     setError(null);
     setPromptDialogOpen(false);
     triggerHaptic();
@@ -591,6 +649,7 @@ export function ProductPhotoDialog({
       resetCapture();
       setPrompt(defaultPrompt);
       setDraftPrompt(defaultPrompt);
+      setPromptDirty(false);
       setActiveView("ai");
     } catch (caught) {
       setError(
@@ -673,7 +732,12 @@ export function ProductPhotoDialog({
       // Fall through to stale map / product-flag dual-read.
     }
 
-    const nextFromPhotos = photosByProductId
+    // Only use the parent map when it covers every product — a filtered/
+    // partial map would treat missing ids as [] and skip products needing review.
+    const photosMapComplete =
+      photosByProductId != null &&
+      products.every((entry) => entry._id in photosByProductId);
+    const nextFromPhotos = photosMapComplete
       ? findNextPhotoNeedingApproval(
           products,
           currentProductId,
@@ -780,7 +844,7 @@ export function ProductPhotoDialog({
         currentPair.original._id as Id<"productPhotos">,
         { confirmPublishedDelete: product.shopifyStatus === "published" },
       );
-      setPairIndex((index) => Math.max(0, Math.min(index, pairs.length - 2)));
+      // Pair index is clamped by the pairs.length effect after the list updates.
     } catch (caught) {
       setError(
         caught instanceof Error

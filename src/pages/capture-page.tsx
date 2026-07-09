@@ -352,6 +352,12 @@ export function CapturePage() {
       return;
     }
 
+    // Multi-photo: skip is session-only (do not permanently complete).
+    if (!withPhoto && maxProductPhotos > 1) {
+      handleNextProduct();
+      return;
+    }
+
     const captureGroupId = resolveCaptureGroupId(currentProduct);
 
     if (!captureGroupId) {
@@ -369,8 +375,64 @@ export function CapturePage() {
       return;
     }
 
+    // Legacy single-photo skip: record capture without a file, then session-advance.
+    if (!withPhoto && maxProductPhotos === 1) {
+      const capturedProductId = currentProduct._id;
+
+      triggerHaptic();
+      setUploadError(null);
+      setSelectedFile(null);
+      setIsSaving(true);
+
+      try {
+        await submitCapture({
+          groupId: captureGroupId,
+          productId: capturedProductId,
+        });
+        // Queue advance via skippedProductIds (backend no longer marks captured).
+        setSkippedProductIds((prev) => {
+          const withCurrent = prev.includes(capturedProductId)
+            ? prev
+            : [...prev, capturedProductId];
+          const nextAfterSkip = captureSelection
+            ? nextUncapturedSelectionProduct(
+                products,
+                captureSelection.productIds,
+                photosByProductId,
+                maxProductPhotos,
+                withCurrent,
+              )
+            : typedGroupId === undefined
+              ? null
+              : nextUncapturedGroupProduct(
+                  products,
+                  typedGroupId,
+                  photosByProductId,
+                  maxProductPhotos,
+                  withCurrent,
+                );
+
+          return nextAfterSkip ? withCurrent : [];
+        });
+        clearHeldProduct();
+        triggerHaptic();
+      } catch (error) {
+        setUploadError(
+          error instanceof Error
+            ? error.message
+            : "Photo could not be saved. Please try again.",
+        );
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
+    if (!withPhoto || !selectedFile) {
+      return;
+    }
+
     const capturedProductId = currentProduct._id;
-    const fileToUpload = withPhoto ? selectedFile : undefined;
     const countBeforeSave = originalCount;
 
     triggerHaptic();
@@ -382,18 +444,14 @@ export function CapturePage() {
       await submitCapture({
         groupId: captureGroupId,
         productId: capturedProductId,
-        file: fileToUpload ?? undefined,
+        file: selectedFile,
       });
 
-      if (withPhoto) {
-        const nextCount = countBeforeSave + 1;
+      const nextCount = countBeforeSave + 1;
 
-        if (nextCount < maxProductPhotos) {
-          setHeldProductId(capturedProductId);
-          setLocalOriginalCount(nextCount);
-        } else {
-          clearHeldProduct();
-        }
+      if (nextCount < maxProductPhotos) {
+        setHeldProductId(capturedProductId);
+        setLocalOriginalCount(nextCount);
       } else {
         clearHeldProduct();
       }

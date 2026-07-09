@@ -124,9 +124,6 @@ export const convexApi = {
     deletePhoto: deployedFunction<typeof api.productPhotos.deletePhoto>(
       "productPhotos.js:deletePhoto",
     ),
-    approveAiPhoto: deployedFunction<typeof api.productPhotos.approveAiPhoto>(
-      "productPhotos.js:approveAiPhoto",
-    ),
   },
   products: {
     list: deployedFunction<typeof api.products.list>("products.js:list"),

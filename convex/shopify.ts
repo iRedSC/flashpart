@@ -17,6 +17,7 @@ import {
   deleteShopifyFiles,
   getShopifyFile,
   pollShopifyFileUntilReady,
+  removeFileReferenceFromProduct,
   uploadImageBufferToShopify,
 } from "./shopifyClient";
 
@@ -44,8 +45,14 @@ const shopifyModel = {
   currentActiveConnection: makeFunctionReference(
     "shopifyModel.js:currentActiveConnection",
   ) as any,
+  firstActiveConnection: makeFunctionReference(
+    "shopifyModel.js:firstActiveConnection",
+  ) as any,
   getConnectionById: makeFunctionReference(
     "shopify.js:getConnectionById",
+  ) as any,
+  getShopifyProductIdForPhoto: makeFunctionReference(
+    "shopify.js:getShopifyProductIdForPhoto",
   ) as any,
 };
 
@@ -385,8 +392,10 @@ async function promotePhotoWithConnection(
     expectedAiGeneration,
   };
 
-  // Fully promoted: return existing Shopify file (retry-safe).
-  if (photo.status === "promoted" && photo.shopifyFileId) {
+  // Concurrent / retry-safe: any non-failed shopifyFileId means resume poll
+  // (do not re-upload). Covers fully promoted rows and partial promotes where
+  // fileCreate succeeded but mark-promoted had not finished.
+  if (photo.shopifyFileId && photo.shopifyFileStatus !== "failed") {
     return await finishPromoteFromShopifyFile(
       ctx,
       connection,
@@ -403,23 +412,28 @@ async function promotePhotoWithConnection(
     );
   }
 
-  // Partial promote: Shopify file id already persisted (upload succeeded, crash
-  // before poll confirmed ready). Resume poll/mark instead of creating a
-  // duplicate — unless Shopify already terminal-failed (re-upload from storage).
-  if (photo.shopifyFileId && photo.shopifyFileStatus !== "failed") {
+  if (!photo.storageId) {
+    throw new ConvexError(
+      "Photo has no Convex storage to promote (Shopify file failed or missing).",
+    );
+  }
+
+  // Light concurrent-promote guard: re-read before upload so a racing promote
+  // that already persisted shopifyFileId wins and we resume instead of re-upload.
+  const latest = (await ctx.runQuery(productPhotosModel.getPhotoForPromote, {
+    photoId,
+  })) as { photo: PromotePhotoRow; sku: string } | null;
+  if (
+    latest?.photo.shopifyFileId &&
+    latest.photo.shopifyFileStatus !== "failed"
+  ) {
     return await finishPromoteFromShopifyFile(
       ctx,
       connection,
       photoId,
-      photo.shopifyFileId,
-      photo,
+      latest.photo.shopifyFileId,
+      latest.photo,
       markOptions,
-    );
-  }
-
-  if (!photo.storageId) {
-    throw new ConvexError(
-      "Photo has no Convex storage to promote (Shopify file failed or missing).",
     );
   }
 
@@ -439,6 +453,7 @@ async function promotePhotoWithConnection(
   const kindLabel = photo.kind === "ai" ? "ai" : "original";
   const data = await blob.arrayBuffer();
   let createdShopifyFileId: string | undefined;
+  let persistedShopifyFileId = false;
 
   let file;
   try {
@@ -454,23 +469,41 @@ async function promotePhotoWithConnection(
         // Persist shopifyFileId immediately after fileCreate so a crash during
         // polling does not re-upload a duplicate Shopify file on retry. Do NOT
         // mark status "promoted" until poll confirms ready (GC skips non-promoted).
+        // If eligibility fails after create, markPromotedInternal cannot stamp a
+        // stale/regenerated row — best-effort delete the orphan Shopify File.
         onFileCreated: async (created) => {
           createdShopifyFileId = created.id;
-          await assertStillEligibleForMarkPromoted(ctx, photoId, markOptions);
-          await ctx.runMutation(productPhotosModel.markPromotedInternal, {
-            photoId,
-            shopifyFileId: created.id,
-            shopifyFileStatus: created.status,
-            shopifyFileUrl: created.url,
-            keepStorageId: true,
-            expectedAiGeneration,
-            markAsPromoted: false,
-          });
+          try {
+            await assertStillEligibleForMarkPromoted(ctx, photoId, markOptions);
+            await ctx.runMutation(productPhotosModel.markPromotedInternal, {
+              photoId,
+              shopifyFileId: created.id,
+              shopifyFileStatus: created.status,
+              shopifyFileUrl: created.url,
+              keepStorageId: true,
+              expectedAiGeneration,
+              markAsPromoted: false,
+            });
+            persistedShopifyFileId = true;
+          } catch (eligibilityError) {
+            try {
+              await deleteShopifyFiles(connection, [created.id]);
+            } catch {
+              // Best-effort orphan cleanup.
+            }
+            throw eligibilityError;
+          }
         },
       },
     );
   } catch (error) {
-    if (createdShopifyFileId) {
+    if (createdShopifyFileId && !persistedShopifyFileId) {
+      try {
+        await deleteShopifyFiles(connection, [createdShopifyFileId]);
+      } catch {
+        // Best-effort orphan cleanup when we never persisted the file id.
+      }
+    } else if (createdShopifyFileId) {
       await markPromoteFailedIfShopifyTerminal(
         ctx,
         connection,
@@ -523,6 +556,23 @@ export const getConnectionById = internalQuery({
     }
 
     return connection;
+  },
+});
+
+/** Product's Shopify product GID for a photo row (detach media before fileDelete). */
+export const getShopifyProductIdForPhoto = internalQuery({
+  args: {
+    photoId: v.id("productPhotos"),
+  },
+  handler: async (ctx, args) => {
+    const photo = await ctx.db.get(args.photoId);
+
+    if (!photo) {
+      return null;
+    }
+
+    const product = await ctx.db.get(photo.productId);
+    return product?.shopifyProductId ?? null;
   },
 });
 
@@ -681,6 +731,44 @@ export const promotePhotoInternal = internalAction({
   },
 });
 
+/**
+ * Best-effort: detach Files from a product gallery, then delete the Files.
+ * Used when regenerating/deleting photos that may already be attached to a
+ * published Shopify product. photoAi.deleteShopifyFilesBestEffort should call
+ * removeFileReferencesFromProductBestEffort (or this helper) when a product id
+ * is known so product media is cleared before fileDelete.
+ */
+export async function removeFileReferencesFromProductBestEffort(
+  connection: ShopifyConnection,
+  input: { fileIds: string[]; productId: string },
+) {
+  const unique = [...new Set(input.fileIds.filter(Boolean))];
+  if (unique.length === 0) {
+    return;
+  }
+
+  for (const fileId of unique) {
+    try {
+      await removeFileReferenceFromProduct(connection, {
+        fileId,
+        productId: input.productId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const alreadyGone =
+        /not found|does not exist|FILE_DOES_NOT_EXIST|already deleted|not associated|reference/i.test(
+          message,
+        );
+      if (!alreadyGone) {
+        console.error(
+          "Failed to remove Shopify file reference from product:",
+          message,
+        );
+      }
+    }
+  }
+}
+
 export const deleteProductPhoto = action({
   args: {
     sessionToken: v.string(),
@@ -688,11 +776,14 @@ export const deleteProductPhoto = action({
     confirmPublishedDelete: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const [connection, deletion] = await Promise.all([
+    const [connection, deletion, shopifyProductId] = await Promise.all([
       ctx.runQuery(shopifyModel.currentActiveConnection, {
         sessionToken: args.sessionToken,
       }),
       ctx.runQuery(productPhotosModel.getPhotoForDeletion, {
+        photoId: args.photoId,
+      }),
+      ctx.runQuery(shopifyModel.getShopifyProductIdForPhoto, {
         photoId: args.photoId,
       }),
     ]);
@@ -713,6 +804,13 @@ export const deleteProductPhoto = action({
         throw new ConvexError(
           "This product is published. Confirm before deleting its Shopify file.",
         );
+      }
+
+      if (typeof shopifyProductId === "string" && shopifyProductId) {
+        await removeFileReferencesFromProductBestEffort(connection, {
+          fileIds: deletion.shopifyFileIds,
+          productId: shopifyProductId,
+        });
       }
 
       try {
@@ -742,6 +840,59 @@ export const deleteProductPhoto = action({
       deletedFileIds: deletion.shopifyFileIds,
       photoId: args.photoId,
     };
+  },
+});
+
+/**
+ * Internal helper for photoAi regen: detach file refs from a product (if any),
+ * then best-effort delete the Shopify Files. Prefer this over bare fileDelete
+ * when the product may already be published with those media.
+ *
+ * photoAi note: replace deleteShopifyFilesBestEffort call sites that know a
+ * shopifyProductId with this action (or call removeFileReferenceFromProduct
+ * from shopifyClient before fileDelete).
+ */
+export const detachAndDeleteShopifyFiles = internalAction({
+  args: {
+    fileIds: v.array(v.string()),
+    shopifyProductId: v.optional(v.string()),
+    connectionId: v.optional(v.id("shopifyConnections")),
+  },
+  handler: async (ctx, args) => {
+    const connection = args.connectionId
+      ? await ctx.runQuery(shopifyModel.getConnectionById, {
+          connectionId: args.connectionId,
+        })
+      : await ctx.runQuery(shopifyModel.firstActiveConnection, {});
+
+    if (!connection) {
+      return { deletedFileIds: [] as string[] };
+    }
+
+    if (args.shopifyProductId) {
+      await removeFileReferencesFromProductBestEffort(connection, {
+        fileIds: args.fileIds,
+        productId: args.shopifyProductId,
+      });
+    }
+
+    try {
+      const deletedFileIds = await deleteShopifyFiles(
+        connection,
+        args.fileIds,
+      );
+      return { deletedFileIds };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const alreadyGone =
+        /not found|does not exist|FILE_DOES_NOT_EXIST|already deleted/i.test(
+          message,
+        );
+      if (!alreadyGone) {
+        console.error("Failed to delete Shopify files:", message);
+      }
+      return { deletedFileIds: [] as string[] };
+    }
   },
 });
 

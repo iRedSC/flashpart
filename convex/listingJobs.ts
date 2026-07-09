@@ -105,7 +105,19 @@ export const enqueueCreateDrafts = mutation({
           ) {
             aiNotReadyProducts.push(product);
           } else {
-            needsReviewProducts.push(product);
+            // Gate maps pending AI slots to aiNotApproved; treat pending as
+            // not-ready so enqueue asks to wait instead of approve.
+            const aiPhotos = await ctx.db
+              .query("productPhotos")
+              .withIndex("by_product_kind", (q) =>
+                q.eq("productId", productId).eq("kind", "ai"),
+              )
+              .collect();
+            if (aiPhotos.some((photo) => photo.aiStatus === "pending")) {
+              aiNotReadyProducts.push(product);
+            } else {
+              needsReviewProducts.push(product);
+            }
           }
           continue;
         }
@@ -146,8 +158,8 @@ export const enqueueCreateDrafts = mutation({
     if (aiNotReadyProducts.length > 0) {
       throw new Error(
         aiNotReadyProducts.length === 1
-          ? `Wait for the AI photo to finish generating for ${aiNotReadyProducts[0].sku} before publishing.`
-          : `Wait for AI photos to finish generating for ${aiNotReadyProducts.length.toLocaleString()} products before publishing.`,
+          ? `Wait for photo upload/AI generation to finish for ${aiNotReadyProducts[0].sku} before publishing.`
+          : `Wait for photo upload/AI generation to finish for ${aiNotReadyProducts.length.toLocaleString()} products before publishing.`,
       );
     }
 
@@ -214,11 +226,35 @@ export const jobPayload = internalQuery({
       ? await productHasPhotoRows(ctx, product._id)
       : false;
     let approvedAiPhotoIds: Id<"productPhotos">[] = [];
+    let publishGateReason:
+      | "missingOriginal"
+      | "aiGenerating"
+      | "aiMissing"
+      | "aiNotApproved"
+      | null = null;
 
     if (product && useProductPhotos) {
       const gate = await evaluateProductPhotosPublishGate(ctx, product._id);
       if (gate.ok) {
         approvedAiPhotoIds = gate.approvedAiPhotos.map((photo) => photo._id);
+      } else {
+        // Pending AI slots surface as aiNotApproved from the gate; treat like
+        // generating so runtime errors match enqueue wait-for-generation copy.
+        if (gate.reason === "aiNotApproved") {
+          const aiPhotos = await ctx.db
+            .query("productPhotos")
+            .withIndex("by_product_kind", (q) =>
+              q.eq("productId", product._id).eq("kind", "ai"),
+            )
+            .collect();
+          if (aiPhotos.some((photo) => photo.aiStatus === "pending")) {
+            publishGateReason = "aiGenerating";
+          } else {
+            publishGateReason = gate.reason;
+          }
+        } else {
+          publishGateReason = gate.reason;
+        }
       }
     }
 
@@ -234,6 +270,7 @@ export const jobPayload = internalQuery({
       },
       useProductPhotos,
       approvedAiPhotoIds,
+      publishGateReason,
     };
   },
 });
@@ -250,6 +287,21 @@ export const markJobRunning = internalMutation({
       throw new Error("Listing job not found");
     }
 
+    // Terminal success: retries must not re-run Shopify work or bump attempts.
+    if (job.status === "succeeded") {
+      return { proceed: false as const, reason: "succeeded" as const };
+    }
+
+    // Already running: resume without double-incrementing attempts.
+    if (job.status === "running") {
+      return { proceed: true as const, reason: "already_running" as const };
+    }
+
+    // CAS: only queued / failed may transition to running.
+    if (job.status !== "queued" && job.status !== "failed") {
+      return { proceed: false as const, reason: "skipped" as const };
+    }
+
     const now = Date.now();
 
     await ctx.db.patch(args.jobId, {
@@ -259,6 +311,8 @@ export const markJobRunning = internalMutation({
       triggerRunId: args.triggerRunId,
       updatedAt: now,
     });
+
+    return { proceed: true as const, reason: "started" as const };
   },
 });
 
@@ -299,6 +353,12 @@ export const markJobSucceeded = internalMutation({
     // legacy single-file product fields.
     if (args.publishFileIds !== undefined) {
       await ctx.db.patch(job.productId, {
+        aiImageError: undefined,
+        aiImagePrompt: undefined,
+        aiImageStatus: undefined,
+        aiShopifyFileId: undefined,
+        aiShopifyFileStatus: undefined,
+        aiShopifyFileUrl: undefined,
         archivedAt: shouldAutoArchive ? now : product?.archivedAt,
         lastError: undefined,
         needsPhotoReview: undefined,
@@ -433,14 +493,42 @@ export const markJobFailed = internalMutation({
   },
 });
 
+function publishGateErrorMessage(
+  reason: "missingOriginal" | "aiGenerating" | "aiMissing" | "aiNotApproved",
+  sku: string,
+) {
+  switch (reason) {
+    case "missingOriginal":
+      return `Capture a Shopify-hosted photo before publishing ${sku}.`;
+    case "aiGenerating":
+    case "aiMissing":
+      return `Wait for photo upload/AI generation to finish for ${sku} before publishing.`;
+    case "aiNotApproved":
+      return `Review and approve the AI photo for ${sku} before publishing.`;
+  }
+}
+
 export const processQueuedJob = internalAction({
   args: {
     jobId: v.id("listingJobs"),
   },
   handler: async (ctx, args) => {
-    await ctx.runMutation(listingJobModel.markJobRunning, {
+    // Idempotent entry: load job before marking running so succeeded retries no-op.
+    const existingPayload = await ctx.runQuery(listingJobModel.jobPayload, {
       jobId: args.jobId,
     });
+
+    if (existingPayload?.job?.status === "succeeded") {
+      return;
+    }
+
+    const markResult = (await ctx.runMutation(listingJobModel.markJobRunning, {
+      jobId: args.jobId,
+    })) as { proceed: boolean; reason: string } | null;
+
+    if (!markResult?.proceed) {
+      return;
+    }
 
     try {
       const payload = await ctx.runQuery(listingJobModel.jobPayload, {
@@ -449,6 +537,10 @@ export const processQueuedJob = internalAction({
 
       if (!payload?.job || !payload.product || !payload.connection) {
         throw new Error("Listing job is missing product or Shopify connection data.");
+      }
+
+      if (payload.job.status === "succeeded") {
+        return;
       }
 
       if (payload.job.type !== "createShopifyDraft") {
@@ -461,12 +553,25 @@ export const processQueuedJob = internalAction({
       let publishFileId: string | undefined;
       const approvedAiPhotoIds =
         (payload.approvedAiPhotoIds as Id<"productPhotos">[] | undefined) ?? [];
+      const publishGateReason = payload.publishGateReason as
+        | "missingOriginal"
+        | "aiGenerating"
+        | "aiMissing"
+        | "aiNotApproved"
+        | null
+        | undefined;
 
       // Cheap preflight before any Shopify file promote/upload work.
       if (useProductPhotos) {
+        if (publishGateReason) {
+          throw new Error(
+            publishGateErrorMessage(publishGateReason, payload.product.sku),
+          );
+        }
+
         if (approvedAiPhotoIds.length < 1) {
           throw new Error(
-            "Approve at least one AI photo before publishing.",
+            publishGateErrorMessage("aiNotApproved", payload.product.sku),
           );
         }
       } else {

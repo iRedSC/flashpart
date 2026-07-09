@@ -68,6 +68,11 @@ export function SettingsPage() {
   const [maxProductPhotos, setMaxProductPhotosState] = React.useState(
     settings?.maxProductPhotos ?? 5,
   );
+  const [maxProductPhotosError, setMaxProductPhotosError] = React.useState<
+    string | null
+  >(null);
+  const [isSavingMaxProductPhotos, setIsSavingMaxProductPhotos] =
+    React.useState(false);
   const selectedModel = AI_IMAGE_MODEL_OPTIONS.find(
     (option) => option.id === aiImageModel,
   );
@@ -110,6 +115,7 @@ export function SettingsPage() {
 
   React.useEffect(() => {
     setMaxProductPhotosState(settings?.maxProductPhotos ?? 5);
+    setMaxProductPhotosError(null);
   }, [settings?.maxProductPhotos]);
 
   React.useEffect(() => {
@@ -385,6 +391,7 @@ export function SettingsPage() {
             >
               Max photos per product
               <Input
+                disabled={isSavingMaxProductPhotos}
                 id="max-product-photos"
                 inputMode="numeric"
                 max={20}
@@ -396,25 +403,54 @@ export function SettingsPage() {
                     : 5;
 
                   setMaxProductPhotosState(value);
+                  setMaxProductPhotosError(null);
 
-                  if (value !== (settings?.maxProductPhotos ?? 5)) {
-                    void setMaxProductPhotos(value).catch(() => undefined);
+                  if (value === (settings?.maxProductPhotos ?? 5)) {
+                    return;
                   }
+
+                  setIsSavingMaxProductPhotos(true);
+                  void setMaxProductPhotos(value)
+                    .catch((error) => {
+                      setMaxProductPhotosError(
+                        error instanceof Error
+                          ? error.message
+                          : "Could not save max photos setting.",
+                      );
+                      setMaxProductPhotosState(settings?.maxProductPhotos ?? 5);
+                    })
+                    .finally(() => {
+                      setIsSavingMaxProductPhotos(false);
+                    });
                 }}
                 onChange={(event) => {
-                  const next = Number(event.currentTarget.value);
+                  const raw = event.currentTarget.value;
+                  if (raw === "") {
+                    setMaxProductPhotosState(Number.NaN);
+                    return;
+                  }
+
+                  const next = Number(raw);
+                  if (!Number.isFinite(next)) {
+                    return;
+                  }
+
                   setMaxProductPhotosState(
-                    Number.isFinite(next) ? next : (settings?.maxProductPhotos ?? 5),
+                    Math.min(20, Math.max(1, Math.round(next))),
                   );
+                  setMaxProductPhotosError(null);
                 }}
                 type="number"
-                value={maxProductPhotos}
+                value={Number.isFinite(maxProductPhotos) ? maxProductPhotos : ""}
               />
             </label>
             <p className="text-sm text-slate-500">
               Limits how many original photos can be attached to a single
               product (1–20).
             </p>
+            {maxProductPhotosError ? (
+              <p className="text-sm text-red-600">{maxProductPhotosError}</p>
+            ) : null}
           </div>
         </CardContent>
       </Card>

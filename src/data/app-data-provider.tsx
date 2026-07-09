@@ -227,11 +227,36 @@ function updateProductFields(
   return patchProducts(products, [id], patch);
 }
 
-function completedForGroups(product: Product) {
-  return isGroupCaptureComplete(product);
+type ProductPhotoRow = {
+  _id: string;
+  kind: "original" | "ai";
+  approvedAt?: number;
+  aiStatus?: "pending" | "generating" | "ready" | "failed";
+};
+
+function findProductIdForPhoto(
+  photosByProductId: Record<string, ProductPhotoRow[]> | undefined,
+  photoId: string,
+): Id<"products"> | undefined {
+  if (!photosByProductId) {
+    return undefined;
+  }
+
+  for (const [productId, photos] of Object.entries(photosByProductId)) {
+    if (photos.some((photo) => photo._id === photoId)) {
+      return productId as Id<"products">;
+    }
+  }
+
+  return undefined;
 }
 
-function recomputeGroupCounts(groups: Group[], products: Product[]) {
+function recomputeGroupCounts(
+  groups: Group[],
+  products: Product[],
+  photosByProductId?: Record<string, ProductPhotoRow[]>,
+  maxProductPhotos?: number,
+) {
   return groups.map((group) => {
     const allGroupProducts = products.filter(
       (product) => product.groupId === group._id,
@@ -244,7 +269,18 @@ function recomputeGroupCounts(groups: Group[], products: Product[]) {
       ...group,
       productCount: activeProducts.length,
       archivedCount: allGroupProducts.length - activeProducts.length,
-      completedCount: activeProducts.filter(completedForGroups).length,
+      completedCount: activeProducts.filter((product) =>
+        photosByProductId
+          ? isGroupCaptureComplete(
+              product,
+              photosByProductId[product._id] ?? [],
+              maxProductPhotos,
+            )
+          : // Without a photo batch, do not inflate completedCount from phase alone
+            // after the first multi-photo capture (phase may already be captured).
+            Boolean(product.shopifyFileId) &&
+            (product.phase === "captured" || product.phase === "published"),
+      ).length,
     };
   });
 }
@@ -254,8 +290,14 @@ function applyGroupArchiveSideEffects(
   products: Product[],
   settings: Settings | null,
   now: number,
+  photosByProductId?: Record<string, ProductPhotoRow[]>,
 ) {
-  const withCounts = recomputeGroupCounts(groups, products);
+  const withCounts = recomputeGroupCounts(
+    groups,
+    products,
+    photosByProductId,
+    settings?.maxProductPhotos,
+  );
 
   if (settings?.autoArchiveCompleteGroups !== true) {
     return withCounts;
@@ -282,8 +324,15 @@ function applyGroupUnarchiveSideEffects(
   groups: Group[],
   products: Product[],
   now: number,
+  photosByProductId?: Record<string, ProductPhotoRow[]>,
+  maxProductPhotos?: number,
 ) {
-  const withCounts = recomputeGroupCounts(groups, products);
+  const withCounts = recomputeGroupCounts(
+    groups,
+    products,
+    photosByProductId,
+    maxProductPhotos,
+  );
   const activeGroupIds = new Set(
     products
       .filter((product) => product.archivedAt === undefined && product.groupId)
@@ -313,6 +362,35 @@ export function AppDataProvider({
   const listingJobs = useQuery(convexApi.listingJobs.list, queryArgs);
   const settings = useQuery(convexApi.settings.get, queryArgs);
   const shopifyConnection = useQuery(convexApi.shopify.currentConnection, queryArgs);
+  const activeProductIds = React.useMemo(
+    () =>
+      (products ?? [])
+        .filter((product) => product.archivedAt === undefined)
+        .map((product) => product._id),
+    [products],
+  );
+  const photosByProductIdQuery = useQuery(
+    convexApi.productPhotos.listForProducts,
+    activeProductIds.length > 0
+      ? {
+          productIds: activeProductIds,
+          sessionToken: session.sessionToken,
+        }
+      : "skip",
+  );
+  const photosByProductId = React.useMemo(() => {
+    if (photosByProductIdQuery === undefined) {
+      return undefined;
+    }
+
+    const map: Record<string, ProductPhotoRow[]> = {};
+
+    for (const [productId, photos] of Object.entries(photosByProductIdQuery)) {
+      map[productId] = photos as ProductPhotoRow[];
+    }
+
+    return map;
+  }, [photosByProductIdQuery]);
   const updateProductMutation = useMutation(convexApi.products.update);
   const createProductMutation = useMutation(convexApi.products.create);
   const importProductsMutation = useMutation(convexApi.products.importProducts);
@@ -419,12 +497,18 @@ export function AppDataProvider({
       (state, operation) => operation.apply(state),
       baseData,
     );
+    const maxProductPhotos = patched.settings?.maxProductPhotos;
 
     return {
       ...patched,
-      groups: recomputeGroupCounts(patched.groups, patched.products),
+      groups: recomputeGroupCounts(
+        patched.groups,
+        patched.products,
+        photosByProductId,
+        maxProductPhotos,
+      ),
     };
-  }, [baseData, optimisticOperations]);
+  }, [baseData, optimisticOperations, photosByProductId]);
   const pendingProductIds = React.useMemo(() => {
     const ids = new Set<Id<"products">>();
 
@@ -650,6 +734,7 @@ export function AppDataProvider({
                 products,
                 state.settings,
                 now,
+                photosByProductId,
               ),
             };
           },
@@ -684,6 +769,8 @@ export function AppDataProvider({
                 state.groups,
                 products,
                 now,
+                photosByProductId,
+                state.settings?.maxProductPhotos,
               ),
             };
           },
@@ -1220,14 +1307,34 @@ export function AppDataProvider({
           label: "Recording capture",
           productIds: [args.productId],
         }),
-      submitCapture: (args) =>
-        runOptimistic({
+      submitCapture: (args) => {
+        // Skip-without-photo (legacy max===1): record capture only — never mark
+        // phase captured or schedule AI. Multi-photo skip should not call this.
+        if (!args.file) {
+          return runOptimistic({
+            apply: (state) => state,
+            commit: async () => {
+              const captureId = await recordConvexCaptureMutation({
+                groupId: args.groupId,
+                productId: args.productId,
+                sessionToken: session.sessionToken,
+              });
+              return { captureId };
+            },
+            label: "Recording capture",
+            productIds: [args.productId],
+          });
+        }
+
+        const file = args.file;
+
+        return runOptimistic({
           apply: (state) => ({
             ...state,
             products: updateProductFields(state.products, args.productId, {
               lastError: undefined,
               needsPhotoReview: undefined,
-              pendingOperation: args.file ? "aiImageGenerating" : undefined,
+              pendingOperation: "aiImageGenerating",
               phase: "captured",
             }),
           }),
@@ -1237,22 +1344,18 @@ export function AppDataProvider({
               productId: args.productId,
               sessionToken: session.sessionToken,
             });
-
-            let photoId: Id<"productPhotos"> | undefined;
-
-            if (args.file) {
-              photoId = await reserveUploadAndFinalizePhoto({
-                captureId,
-                file: args.file,
-                productId: args.productId,
-              });
-            }
+            const photoId = await reserveUploadAndFinalizePhoto({
+              captureId,
+              file,
+              productId: args.productId,
+            });
 
             return { captureId, photoId };
           },
-          label: args.file ? "Uploading capture photo" : "Recording capture",
+          label: "Uploading capture photo",
           productIds: [args.productId],
-        }),
+        });
+      },
       addProductPhoto: (args) => {
         const product = optimisticData.products.find(
           (entry) => entry._id === args.productId,
@@ -1357,9 +1460,10 @@ export function AppDataProvider({
           productIds: [args.productId],
         });
       },
-      deleteProductPhoto: (photoId, options) =>
-        // Light optimistic: no photo list in context; product flags refresh via query.
-        runOptimistic({
+      deleteProductPhoto: (photoId, options) => {
+        const productId = findProductIdForPhoto(photosByProductId, photoId);
+
+        return runOptimistic({
           apply: (state) => state,
           commit: async () => {
             await deleteProductPhotoAction({
@@ -1370,10 +1474,13 @@ export function AppDataProvider({
             return null;
           },
           label: "Deleting product photo",
-        }),
-      approveAiPhoto: (photoId) =>
-        // Light optimistic: photo rows live in per-product queries, not context.
-        runOptimistic({
+          productIds: productId ? [productId] : undefined,
+        });
+      },
+      approveAiPhoto: (photoId) => {
+        const productId = findProductIdForPhoto(photosByProductId, photoId);
+
+        return runOptimistic({
           apply: (state) => state,
           commit: async () => {
             await approveAiPhotoMutation({
@@ -1383,9 +1490,16 @@ export function AppDataProvider({
             return null;
           },
           label: "Approving AI photo",
-        }),
-      regenerateAiImageForPhoto: ({ originalPhotoId, prompt }) =>
-        runOptimistic({
+          productIds: productId ? [productId] : undefined,
+        });
+      },
+      regenerateAiImageForPhoto: ({ originalPhotoId, prompt }) => {
+        const productId = findProductIdForPhoto(
+          photosByProductId,
+          originalPhotoId,
+        );
+
+        return runOptimistic({
           apply: (state) => state,
           commit: async () => {
             await regenerateAiImageForPhotoMutation({
@@ -1396,7 +1510,9 @@ export function AppDataProvider({
             return null;
           },
           label: "Regenerating AI photo",
-        }),
+          productIds: productId ? [productId] : undefined,
+        });
+      },
       regenerateAiImage: ({ productId, prompt }) =>
         runOptimistic({
           apply: (state) => ({
@@ -1490,6 +1606,7 @@ export function AppDataProvider({
       setShopifyProductTypeMutation,
       setShopifyDefaultTagsMutation,
       disconnectShopifyMutation,
+      photosByProductId,
       settings,
       shopifyConnection,
       updateProductMutation,

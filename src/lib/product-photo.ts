@@ -71,22 +71,14 @@ export function buildPhotoPairs(photos: ProductPhoto[]): ProductPhotoPair[] {
       (ai) =>
         !usedAiIds.has(ai._id) && ai.sourcePhotoId === original._id,
     );
-    const bySortOrder =
-      bySource ??
-      ais.find(
-        (ai) =>
-          !usedAiIds.has(ai._id) &&
-          ai.sourcePhotoId == null &&
-          ai.sortOrder === original.sortOrder,
-      );
 
-    if (bySortOrder) {
-      usedAiIds.add(bySortOrder._id);
+    if (bySource) {
+      usedAiIds.add(bySource._id);
     }
 
     return {
       original,
-      ai: bySortOrder ?? null,
+      ai: bySource ?? null,
       sortOrder: original.sortOrder,
     };
   });
@@ -96,8 +88,8 @@ export function getProductThumbnailUrl(
   product: ProductPhotoFields,
   photos?: ProductPhoto[] | null,
 ) {
-  // undefined = batch still loading — do not flash legacy Shopify URLs.
-  if (photos === undefined) {
+  // undefined/null = batch still loading — do not flash legacy Shopify URLs.
+  if (photos == null) {
     return null;
   }
 
@@ -129,12 +121,19 @@ export function isAiImageGenerating(
 ) {
   if (photos != null && photos.length > 0) {
     // Per-row AI status only — product pendingOperation would spin all thumbs.
-    return listAis(photos).some((photo) => photo.aiStatus === "generating");
+    // Align with dialog: pending / uploading / generating all count as in-flight.
+    return listAis(photos).some(
+      (photo) =>
+        photo.aiStatus === "generating" ||
+        photo.aiStatus === "pending" ||
+        photo.status === "uploading",
+    );
   }
 
   // No photo rows yet (loading or legacy): fall back to product fields.
   return (
     product.aiImageStatus === "generating" ||
+    product.aiImageStatus === "pending" ||
     product.pendingOperation === "aiImageGenerating"
   );
 }
@@ -291,16 +290,26 @@ export function canPublishProduct(
   },
   photos?: ProductPhoto[] | null,
 ) {
-  if (photos?.length) {
+  // undefined/null = batch still loading — do not treat as publishable yet.
+  if (photos == null) {
+    return false;
+  }
+
+  if (photos.length > 0) {
     const pairs = buildPhotoPairs(photos);
-    // Match listingJobs gate: every original → paired AI with ready + approvedAt.
+    // Match listingJobs gate: every original → paired AI with ready + approvedAt,
+    // and not terminally failed on promote/status.
     const everyOriginalHasApprovedReadyAi =
       pairs.length >= 1 &&
       pairs.every(
         (pair) =>
           pair.ai != null &&
           pair.ai.aiStatus === "ready" &&
-          pair.ai.approvedAt != null,
+          pair.ai.approvedAt != null &&
+          pair.ai.status !== "failed" &&
+          pair.ai.shopifyFileStatus !== "failed" &&
+          pair.original.status !== "failed" &&
+          pair.original.shopifyFileStatus !== "failed",
       );
 
     return (
@@ -310,6 +319,7 @@ export function canPublishProduct(
     );
   }
 
+  // photos === [] — legacy product-level fields.
   return (
     product.phase === "captured" &&
     Boolean(product.shopifyFileId) &&

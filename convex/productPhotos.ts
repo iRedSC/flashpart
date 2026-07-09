@@ -9,6 +9,8 @@ import {
   query,
 } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
+import { maybeUnarchiveGroupForActiveProduct } from "./groups";
+import { productErrorFields } from "./productState";
 import { photoKind, shopifyFileStatus } from "./schema";
 import {
   getSettingsDocument,
@@ -55,19 +57,50 @@ export async function getAiPhotos(ctx: DbCtx, productId: Id<"products">) {
   return photos.sort(comparePhotoOrder);
 }
 
+/**
+ * Prefer a single AI row per original. Duplicates are rare (race / bad data);
+ * never throw — pick a stable non-failed row, else the newest.
+ */
 export async function getAiForOriginal(
   ctx: DbCtx,
   originalPhotoId: Id<"productPhotos">,
 ) {
-  return await ctx.db
+  const matches = await ctx.db
     .query("productPhotos")
     .withIndex("by_source", (q) => q.eq("sourcePhotoId", originalPhotoId))
-    .unique();
+    .collect();
+
+  if (matches.length === 0) {
+    return null;
+  }
+
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  const byNewest = [...matches].sort((left, right) => {
+    if (left.updatedAt !== right.updatedAt) {
+      return right.updatedAt - left.updatedAt;
+    }
+    return right.createdAt - left.createdAt;
+  });
+
+  const nonFailed = byNewest.find(
+    (photo) =>
+      photo.aiStatus !== "failed" && photo.status !== "failed",
+  );
+
+  return nonFailed ?? byNewest[0];
+}
+
+/** Originals that count toward max capacity (exclude empty abandoned upload slots). */
+function isCommittedOriginal(photo: Doc<"productPhotos">) {
+  return photo.status !== "uploading" || photo.storageId != null;
 }
 
 export async function countOriginals(ctx: DbCtx, productId: Id<"products">) {
   const originals = await getOriginalPhotos(ctx, productId);
-  return originals.length;
+  return originals.filter(isCommittedOriginal).length;
 }
 
 export async function productHasPhotoRows(
@@ -109,6 +142,19 @@ export async function evaluateProductPhotosPublishGate(
   const approvedAiPhotos: Doc<"productPhotos">[] = [];
 
   for (const original of originals) {
+    // Empty reserved slots are not publishable (capacity ignores them; gate does not).
+    if (original.status === "uploading" && original.storageId == null) {
+      return { ok: false, reason: "missingOriginal" };
+    }
+
+    if (
+      original.status === "failed" ||
+      original.shopifyFileStatus === "failed"
+    ) {
+      // Map terminal failures to existing reason (listingJobs treats as needs-review).
+      return { ok: false, reason: "aiNotApproved" };
+    }
+
     const aiPhoto = await getAiForOriginal(ctx, original._id);
 
     if (!aiPhoto) {
@@ -117,6 +163,16 @@ export async function evaluateProductPhotosPublishGate(
 
     if (aiPhoto.aiStatus === "generating") {
       return { ok: false, reason: "aiGenerating" };
+    }
+
+    // Promote / AI failures: reject even if approvedAt + ready were set earlier.
+    // Prefer existing reason union (do not add "aiFailed" — listingJobs switch).
+    if (
+      aiPhoto.aiStatus === "failed" ||
+      aiPhoto.status === "failed" ||
+      aiPhoto.shopifyFileStatus === "failed"
+    ) {
+      return { ok: false, reason: "aiNotApproved" };
     }
 
     if (aiPhoto.aiStatus !== "ready" || aiPhoto.approvedAt === undefined) {
@@ -145,6 +201,7 @@ async function listPhotosForProduct(ctx: DbCtx, productId: Id<"products">) {
  * Keep product-level list badges in sync with productPhotos rows.
  * When no photo rows remain, clears multi-photo-derived badges and re-derives
  * from legacy shopifyFile* / aiShopifyFile* when those are still present.
+ * When rows exist, badges come only from productPhotos (ignore legacy denorm).
  * Does not write shopifyFile* / aiShopifyFile* denorm for the multi-photo path.
  */
 export async function syncProductPhotoFlags(
@@ -209,11 +266,32 @@ export async function syncProductPhotoFlags(
 
   const originals = await getOriginalPhotos(ctx, productId);
   const aiPhotos = await getAiPhotos(ctx, productId);
-  const aiBySource = new Map(
-    aiPhotos
-      .filter((photo) => photo.sourcePhotoId !== undefined)
-      .map((photo) => [photo.sourcePhotoId!, photo]),
-  );
+  // Prefer non-failed / newest when duplicate sourcePhotoId rows exist.
+  const aiBySource = new Map<Id<"productPhotos">, Doc<"productPhotos">>();
+  for (const photo of aiPhotos) {
+    if (photo.sourcePhotoId === undefined) {
+      continue;
+    }
+    const existing = aiBySource.get(photo.sourcePhotoId);
+    if (!existing) {
+      aiBySource.set(photo.sourcePhotoId, photo);
+      continue;
+    }
+    const existingFailed =
+      existing.aiStatus === "failed" || existing.status === "failed";
+    const photoFailed =
+      photo.aiStatus === "failed" || photo.status === "failed";
+    if (existingFailed && !photoFailed) {
+      aiBySource.set(photo.sourcePhotoId, photo);
+    } else if (
+      existingFailed === photoFailed &&
+      (photo.updatedAt > existing.updatedAt ||
+        (photo.updatedAt === existing.updatedAt &&
+          photo.createdAt > existing.createdAt))
+    ) {
+      aiBySource.set(photo.sourcePhotoId, photo);
+    }
+  }
 
   const anyGenerating = aiPhotos.some(
     (photo) => photo.aiStatus === "generating",
@@ -221,10 +299,16 @@ export async function syncProductPhotoFlags(
   const anyReadyUnapproved = aiPhotos.some(
     (photo) => photo.aiStatus === "ready" && photo.approvedAt === undefined,
   );
-  const anyFailed = aiPhotos.some((photo) => photo.aiStatus === "failed");
+  // Include promote failures (status / shopifyFileStatus) so badges cannot stay ready.
+  const anyFailed = aiPhotos.some(
+    (photo) =>
+      photo.aiStatus === "failed" ||
+      photo.status === "failed" ||
+      photo.shopifyFileStatus === "failed",
+  );
   const anyPending = aiPhotos.some((photo) => photo.aiStatus === "pending");
   // Product badge is "complete" only when every original has an approved ready AI.
-  // Pending reserved slots / missing AIs must not leave a stale "ready".
+  // Pending reserved slots / missing AIs / failed promote must not leave a stale "ready".
   const allOriginalsHaveApprovedReadyAi =
     originals.length > 0 &&
     originals.every((original) => {
@@ -232,6 +316,8 @@ export async function syncProductPhotoFlags(
       return (
         ai != null &&
         ai.aiStatus === "ready" &&
+        ai.status !== "failed" &&
+        ai.shopifyFileStatus !== "failed" &&
         ai.approvedAt !== undefined
       );
     });
@@ -521,6 +607,26 @@ export async function applyMarkAiFailed(
     updatedAt: now,
   });
 
+  const product = await ctx.db.get(aiPhoto.productId);
+
+  if (product) {
+    // Mirror legacy photoAi.markFailed so list/archive surfaces the failure.
+    await ctx.db.patch(aiPhoto.productId, {
+      aiImageError: args.error,
+      aiImageStatus: "failed",
+      ...productErrorFields(
+        {
+          at: now,
+          code: "aiImageGeneration",
+          message: args.error,
+          operation: "aiImageGenerating",
+        },
+        now,
+      ),
+    });
+    await maybeUnarchiveGroupForActiveProduct(ctx, product.groupId, now);
+  }
+
   await syncProductPhotoFlags(ctx, aiPhoto.productId);
 
   return aiPhoto._id;
@@ -643,14 +749,25 @@ export async function applyMarkPromoteFailed(
   }
 
   const now = Date.now();
-  await ctx.db.patch(args.photoId, {
+  const promoteError =
+    "Shopify file promote failed. Retry publish after fixing the upload.";
+
+  const patch: Partial<Doc<"productPhotos">> = {
     status: "failed",
     shopifyFileId: args.shopifyFileId ?? photo.shopifyFileId,
     shopifyFileStatus: args.shopifyFileStatus ?? "failed",
     url: args.shopifyFileUrl ?? photo.url,
     updatedAt: now,
-  });
+  };
+
+  if (photo.kind === "ai") {
+    patch.aiStatus = "failed";
+    patch.aiError = promoteError;
+  }
+
+  await ctx.db.patch(args.photoId, patch);
   await ctx.db.patch(photo.productId, { updatedAt: now });
+  await syncProductPhotoFlags(ctx, photo.productId);
 }
 
 export async function applyClearStorageId(
@@ -808,13 +925,22 @@ async function insertReservedOriginalPair(
     throw new ConvexError("Product not found.");
   }
 
+  if (product.phase === "published" || product.shopifyProductId) {
+    throw new ConvexError(
+      "Cannot add photos to a product that is already published to Shopify.",
+    );
+  }
+
   const settings = await getSettingsDocument(ctx);
   const maxPhotos = resolveMaxProductPhotos(settings);
   // TOCTOU best-effort: re-check count immediately before insert (Convex
   // mutations are serial per-doc OCC; abandoned uploading slots are GC'd).
+  // Empty uploading slots (no storageId) do not count toward max — GC is the
+  // safety net if they linger.
   const originals = await getOriginalPhotos(ctx, args.productId);
+  const committedCount = originals.filter(isCommittedOriginal).length;
 
-  if (originals.length >= maxPhotos) {
+  if (committedCount >= maxPhotos) {
     throw new ConvexError(
       `This product already has the maximum of ${maxPhotos} photos.`,
     );
@@ -826,6 +952,7 @@ async function insertReservedOriginalPair(
   );
   const sortOrder = maxSortOrder + 1;
   const now = Date.now();
+  const isFirstMultiPhotoRows = originals.length === 0;
 
   const originalPhotoId = await ctx.db.insert("productPhotos", {
     productId: args.productId,
@@ -857,6 +984,20 @@ async function insertReservedOriginalPair(
 
   if (args.captureId) {
     productPatch.captureId = args.captureId;
+  }
+
+  // Hybrid legacy → multi-photo: clear legacy AI denorm so dual-read badges
+  // cannot stay "ready" from aiShopifyFile* while productPhotos drive state.
+  // Leave legacy shopifyFile* alone (original capture may still be referenced
+  // until rows fully replace the legacy path); sync ignores them when rows exist.
+  if (
+    isFirstMultiPhotoRows &&
+    (product.aiShopifyFileId || product.aiImageStatus)
+  ) {
+    productPatch.aiShopifyFileId = undefined;
+    productPatch.aiShopifyFileStatus = undefined;
+    productPatch.aiShopifyFileUrl = undefined;
+    productPatch.aiImageError = undefined;
   }
 
   await ctx.db.patch(args.productId, productPatch);

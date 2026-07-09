@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import { mutation } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
+import { productHasPhotoRows } from "./productPhotos";
 import { resolveAiImageSettings } from "./settings";
 import { shopifyFileStatus } from "./schema";
 
@@ -24,6 +25,14 @@ export const record = mutation({
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
+
+    // Multi-photo products must not mix in the legacy Shopify capture path.
+    if (await productHasPhotoRows(ctx, args.productId)) {
+      throw new Error(
+        "This product already has Convex photo rows. Use the multi-photo capture flow instead of the legacy Shopify capture path.",
+      );
+    }
+
     const now = Date.now();
     const existingProduct = await ctx.db.get(args.productId);
     const previousAiShopifyFileId = existingProduct?.aiShopifyFileId;
@@ -102,10 +111,12 @@ export const recordConvexCapture = mutation({
       updatedAt: now,
     });
 
+    // Do not set phase "captured" here — that would mark the product captured
+    // before any original photo rows exist (skip-without-photo bug).
+    // syncProductPhotoFlags sets phase once originals are present.
     await ctx.db.patch(args.productId, {
       captureId,
       lastError: undefined,
-      phase: "captured",
       updatedAt: now,
     });
 

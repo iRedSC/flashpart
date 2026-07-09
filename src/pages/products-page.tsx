@@ -309,11 +309,16 @@ function productNeedsPhotoReview(
   product: Product,
   photos?: ProductPhoto[] | null,
 ) {
+  // undefined/null = batch still loading — keep product flag until photos resolve.
+  if (photos == null) {
+    return product.needsPhotoReview === true;
+  }
+
   if (product.needsPhotoReview) {
     return true;
   }
 
-  if (!photos?.length) {
+  if (photos.length === 0) {
     return false;
   }
 

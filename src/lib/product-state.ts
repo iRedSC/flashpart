@@ -73,17 +73,16 @@ export function isPendingCapture(
   photos?: ProductPhotoCaptureFields[] | null,
   maxProductPhotos?: number,
 ): boolean {
+  // Published products are out of the capture queue (new slots are blocked).
+  if (product.phase === "published") {
+    return false;
+  }
+
   if (photos != null) {
     if (maxProductPhotos != null) {
-      const originalCount = countOriginalPhotos(photos);
-      if (originalCount > 0) {
-        return originalCount < maxProductPhotos;
-      }
-
-      // No originals: skip-without-photo / legacy — phase + shopifyFileId.
-      return (
-        product.phase === "imported" && !hasCapturedPhoto(product, photos)
-      );
+      // Under a photo cap, stay pending until originals reach max — including
+      // zero-photo session skips (do not treat phase===captured as done).
+      return countOriginalPhotos(photos) < maxProductPhotos;
     }
 
     return !hasCapturedPhoto(product, photos);
@@ -98,52 +97,25 @@ export function isGroupCaptureComplete(
   photos?: ProductPhotoCaptureFields[] | null,
   maxProductPhotos?: number,
 ): boolean {
+  if (product.phase === "published") {
+    return true;
+  }
+
   if (photos != null && maxProductPhotos != null) {
     const originalCount = countOriginalPhotos(photos);
-    if (originalCount > 0) {
-      return originalCount >= maxProductPhotos;
+    // Never complete with zero photos when multi-photo caps are in play.
+    if (originalCount === 0) {
+      return false;
     }
 
-    return (
-      product.phase === "captured" ||
-      product.phase === "published" ||
-      Boolean(product.shopifyFileId)
-    );
+    return originalCount >= maxProductPhotos;
   }
 
-  return product.phase === "captured" || product.phase === "published";
-}
-
-export function isPublishable(
-  product: ProductStateFields,
-  photos?: ProductPhotoCaptureFields[] | null,
-): boolean {
-  if (photos?.length) {
-    const originals = photos.filter((photo) => photo.kind === "original");
-    const ais = photos.filter((photo) => photo.kind === "ai");
-    const hasGeneratingAi = ais.some(
-      (photo) => photo.aiStatus === "generating",
-    );
-    const allAisApproved =
-      ais.length >= 1 && ais.every((photo) => photo.approvedAt != null);
-
-    return (
-      product.phase === "captured" &&
-      originals.length >= 1 &&
-      allAisApproved &&
-      !hasGeneratingAi &&
-      !product.pendingOperation
-    );
+  if (photos != null) {
+    return hasCapturedPhoto(product, photos);
   }
 
-  return (
-    product.phase === "captured" &&
-    Boolean(product.shopifyFileId) &&
-    product.aiImageStatus === "ready" &&
-    Boolean(product.aiShopifyFileId) &&
-    !product.needsPhotoReview &&
-    !product.pendingOperation
-  );
+  return product.phase === "captured";
 }
 
 export function hasActiveError(product: { lastError?: LastError }): boolean {
