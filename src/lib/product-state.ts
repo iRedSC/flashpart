@@ -75,15 +75,16 @@ export function isPublishable(
   if (photos?.length) {
     const originals = photos.filter((photo) => photo.kind === "original");
     const ais = photos.filter((photo) => photo.kind === "ai");
-    const hasApprovedAi = ais.some((photo) => photo.approvedAt != null);
     const hasGeneratingAi = ais.some(
       (photo) => photo.aiStatus === "generating",
     );
+    const allAisApproved =
+      ais.length >= 1 && ais.every((photo) => photo.approvedAt != null);
 
     return (
       product.phase === "captured" &&
       originals.length >= 1 &&
-      hasApprovedAi &&
+      allAisApproved &&
       !hasGeneratingAi &&
       !product.pendingOperation
     );

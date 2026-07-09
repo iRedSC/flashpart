@@ -82,6 +82,49 @@ export async function productHasPhotoRows(
   return photo !== null;
 }
 
+/**
+ * Publish readiness for products that already have productPhotos rows.
+ * Requires ≥1 original, ≥1 AI, every AI approved (no generating / failed / ready-unapproved).
+ */
+export async function evaluateProductPhotosPublishGate(
+  ctx: DbCtx,
+  productId: Id<"products">,
+): Promise<
+  | { ok: true; approvedAiPhotos: Doc<"productPhotos">[] }
+  | {
+      ok: false;
+      reason:
+        | "missingOriginal"
+        | "aiGenerating"
+        | "aiMissing"
+        | "aiNotApproved";
+    }
+> {
+  const originals = await getOriginalPhotos(ctx, productId);
+  const aiPhotos = await getAiPhotos(ctx, productId);
+
+  if (originals.length < 1) {
+    return { ok: false, reason: "missingOriginal" };
+  }
+
+  if (aiPhotos.some((photo) => photo.aiStatus === "generating")) {
+    return { ok: false, reason: "aiGenerating" };
+  }
+
+  if (aiPhotos.length < 1) {
+    return { ok: false, reason: "aiMissing" };
+  }
+
+  if (aiPhotos.some((photo) => photo.approvedAt === undefined)) {
+    return { ok: false, reason: "aiNotApproved" };
+  }
+
+  return {
+    ok: true,
+    approvedAiPhotos: aiPhotos,
+  };
+}
+
 async function listPhotosForProduct(ctx: DbCtx, productId: Id<"products">) {
   const photos = await ctx.db
     .query("productPhotos")

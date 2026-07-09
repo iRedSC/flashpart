@@ -273,15 +273,17 @@ export function canPublishProduct(
   if (photos?.length) {
     const originals = listOriginals(photos);
     const ais = listAis(photos);
-    const hasApprovedAi = ais.some((photo) => photo.approvedAt != null);
     const hasGeneratingAi = ais.some(
       (photo) => photo.aiStatus === "generating",
     );
+    // Match listingJobs gate: every AI row must be approved (delete unwanted pairs).
+    const allAisApproved =
+      ais.length >= 1 && ais.every((photo) => photo.approvedAt != null);
 
     return (
       product.phase === "captured" &&
       originals.length >= 1 &&
-      hasApprovedAi &&
+      allAisApproved &&
       !hasGeneratingAi &&
       !product.pendingOperation
     );

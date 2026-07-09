@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
+import type { Id } from "./_generated/dataModel";
 import {
   internalAction,
   internalMutation,
@@ -23,6 +24,10 @@ import {
   maybeUnarchiveGroupForActiveProduct,
 } from "./groups";
 import { productErrorFields } from "./productState";
+import {
+  evaluateProductPhotosPublishGate,
+  productHasPhotoRows,
+} from "./productPhotos";
 import { getSettingsDocument } from "./settings";
 import { mergeTagLists } from "./tags";
 
@@ -41,6 +46,11 @@ const listingJobModel = {
     "listingJobs.js:processQueuedJob",
   ) as any,
 };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const promotePhotoInternal = makeFunctionReference(
+  "shopify.js:promotePhotoInternal",
+) as any;
 
 export const list = query({
   args: { sessionToken: v.string() },
@@ -80,6 +90,27 @@ export const enqueueCreateDrafts = mutation({
       const product = await ctx.db.get(productId);
 
       if (!product || product.shopifyProductId) {
+        continue;
+      }
+
+      if (await productHasPhotoRows(ctx, productId)) {
+        const gate = await evaluateProductPhotosPublishGate(ctx, productId);
+
+        if (!gate.ok) {
+          if (gate.reason === "missingOriginal") {
+            missingCaptureProducts.push(product);
+          } else if (
+            gate.reason === "aiGenerating" ||
+            gate.reason === "aiMissing"
+          ) {
+            aiNotReadyProducts.push(product);
+          } else {
+            needsReviewProducts.push(product);
+          }
+          continue;
+        }
+
+        products.push(product);
         continue;
       }
 
@@ -179,6 +210,18 @@ export const jobPayload = internalQuery({
         .withIndex("by_key", (q) => q.eq("key", "singleton"))
         .unique()) ?? null;
 
+    const useProductPhotos = product
+      ? await productHasPhotoRows(ctx, product._id)
+      : false;
+    let approvedAiPhotoIds: Id<"productPhotos">[] = [];
+
+    if (product && useProductPhotos) {
+      const gate = await evaluateProductPhotosPublishGate(ctx, product._id);
+      if (gate.ok) {
+        approvedAiPhotoIds = gate.approvedAiPhotos.map((photo) => photo._id);
+      }
+    }
+
     return {
       connection,
       job,
@@ -189,6 +232,8 @@ export const jobPayload = internalQuery({
         shopifyProductType: settings?.shopifyProductType ?? "Part",
         shopifyPublishTarget: settings?.shopifyPublishTarget ?? "draft",
       },
+      useProductPhotos,
+      approvedAiPhotoIds,
     };
   },
 });
@@ -222,6 +267,7 @@ export const markJobSucceeded = internalMutation({
     jobId: v.id("listingJobs"),
     originalShopifyFileId: v.optional(v.string()),
     publishFileId: v.optional(v.string()),
+    publishFileIds: v.optional(v.array(v.string())),
     result: v.any(),
     shopifyProductHandle: v.string(),
     shopifyProductId: v.string(),
@@ -245,12 +291,35 @@ export const markJobSucceeded = internalMutation({
       updatedAt: now,
     });
 
+    const settings = await getSettingsDocument(ctx);
+    const shouldAutoArchive = settings?.autoArchiveComplete === true;
+
+    // Multi-photo path: attach promoted AI file IDs in result only; keep product
+    // photo rows / original Convex storage; clear review flag without rewriting
+    // legacy single-file product fields.
+    if (args.publishFileIds !== undefined) {
+      await ctx.db.patch(job.productId, {
+        archivedAt: shouldAutoArchive ? now : product?.archivedAt,
+        lastError: undefined,
+        needsPhotoReview: undefined,
+        pendingOperation: undefined,
+        phase: "published",
+        shopifyProductHandle: args.shopifyProductHandle,
+        shopifyProductId: args.shopifyProductId,
+        shopifyStatus: args.shopifyStatus,
+        shopifyVariantId: args.shopifyVariantId,
+        updatedAt: now,
+      });
+
+      if (shouldAutoArchive) {
+        await maybeAutoArchiveGroup(ctx, product?.groupId, now);
+      }
+      return;
+    }
+
     const publishedFileId = args.publishFileId ?? product?.aiShopifyFileId;
     const publishedFileUrl = product?.aiShopifyFileUrl;
     const publishedFileStatus = product?.aiShopifyFileStatus;
-
-    const settings = await getSettingsDocument(ctx);
-    const shouldAutoArchive = settings?.autoArchiveComplete === true;
 
     await ctx.db.patch(job.productId, {
       aiImageError: undefined,
@@ -386,15 +455,45 @@ export const processQueuedJob = internalAction({
         throw new Error(`Unsupported listing job type: ${payload.job.type}.`);
       }
 
-      if (!payload.product.aiShopifyFileId) {
-        throw new Error("Generate an AI photo before publishing.");
-      }
+      const useProductPhotos = payload.useProductPhotos === true;
+      let publishFileIds: string[] | undefined;
+      let originalShopifyFileId: string | undefined;
+      let publishFileId: string | undefined;
 
-      const originalShopifyFileId = payload.product.shopifyFileId;
-      const publishFileId = payload.product.aiShopifyFileId;
+      if (useProductPhotos) {
+        const approvedAiPhotoIds =
+          (payload.approvedAiPhotoIds as Id<"productPhotos">[] | undefined) ??
+          [];
 
-      if (!originalShopifyFileId) {
-        throw new Error("Capture a Shopify-hosted photo before publishing.");
+        if (approvedAiPhotoIds.length < 1) {
+          throw new Error(
+            "Approve at least one AI photo before publishing.",
+          );
+        }
+
+        publishFileIds = [];
+        for (const photoId of approvedAiPhotoIds) {
+          const promoted = (await ctx.runAction(promotePhotoInternal, {
+            photoId,
+          })) as { shopifyFileId: string };
+
+          if (!promoted?.shopifyFileId) {
+            throw new Error("Failed to promote an AI photo to Shopify.");
+          }
+
+          publishFileIds.push(promoted.shopifyFileId);
+        }
+      } else {
+        if (!payload.product.aiShopifyFileId) {
+          throw new Error("Generate an AI photo before publishing.");
+        }
+
+        originalShopifyFileId = payload.product.shopifyFileId;
+        publishFileId = payload.product.aiShopifyFileId;
+
+        if (!originalShopifyFileId) {
+          throw new Error("Capture a Shopify-hosted photo before publishing.");
+        }
       }
 
       const handle = skuToShopifyHandle(payload.product.sku);
@@ -468,13 +567,39 @@ export const processQueuedJob = internalAction({
         mode = "created";
       }
 
+      if (useProductPhotos && publishFileIds) {
+        for (const fileId of publishFileIds) {
+          await addFileReferenceToProduct(payload.connection, {
+            fileId,
+            productId: shopifyProductId,
+          });
+        }
+
+        await ctx.runMutation(listingJobModel.markJobSucceeded, {
+          jobId: args.jobId,
+          publishFileIds,
+          result: {
+            barcode: payload.product.sku,
+            handle,
+            mode,
+            publishFileIds,
+            publishTarget,
+          },
+          shopifyProductHandle: handle,
+          shopifyProductId,
+          shopifyStatus,
+          shopifyVariantId,
+        });
+        return;
+      }
+
       await addFileReferenceToProduct(payload.connection, {
-        fileId: publishFileId,
+        fileId: publishFileId!,
         productId: shopifyProductId,
       });
 
       if (originalShopifyFileId !== publishFileId) {
-        await deleteShopifyFiles(payload.connection, [originalShopifyFileId]);
+        await deleteShopifyFiles(payload.connection, [originalShopifyFileId!]);
       }
 
       await ctx.runMutation(listingJobModel.markJobSucceeded, {
