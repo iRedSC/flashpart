@@ -33,6 +33,7 @@ export function SettingsPage() {
     setAutoArchiveComplete,
     setAutoArchiveCompleteGroups,
     setDuplicatePolicy,
+    setMaxProductPhotos,
     setShopifyDefaultTags,
     setShopifyProductType,
     setShopifyPublishTarget,
@@ -64,6 +65,14 @@ export function SettingsPage() {
       (settings?.aiImageEditStrength as AiImageEditStrength | undefined) ??
         DEFAULT_AI_IMAGE_EDIT_STRENGTH,
     );
+  const [maxProductPhotos, setMaxProductPhotosState] = React.useState(
+    settings?.maxProductPhotos ?? 5,
+  );
+  const [maxProductPhotosError, setMaxProductPhotosError] = React.useState<
+    string | null
+  >(null);
+  const [isSavingMaxProductPhotos, setIsSavingMaxProductPhotos] =
+    React.useState(false);
   const selectedModel = AI_IMAGE_MODEL_OPTIONS.find(
     (option) => option.id === aiImageModel,
   );
@@ -103,6 +112,11 @@ export function SettingsPage() {
         DEFAULT_AI_IMAGE_EDIT_STRENGTH,
     );
   }, [settings?.aiImageEditStrength]);
+
+  React.useEffect(() => {
+    setMaxProductPhotosState(settings?.maxProductPhotos ?? 5);
+    setMaxProductPhotosError(null);
+  }, [settings?.maxProductPhotos]);
 
   React.useEffect(() => {
     setShopDomain(shopifyConnection?.shopDomain ?? "");
@@ -369,6 +383,74 @@ export function SettingsPage() {
               Used for new captures and retakes. Per-product prompt edits in the
               photo dialog are kept until the photo is retaken.
             </p>
+          </div>
+          <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
+            <label
+              className="grid gap-2 text-sm font-medium"
+              htmlFor="max-product-photos"
+            >
+              Max photos per product
+              <Input
+                disabled={isSavingMaxProductPhotos}
+                id="max-product-photos"
+                inputMode="numeric"
+                max={20}
+                min={1}
+                onBlur={() => {
+                  const parsed = Number(maxProductPhotos);
+                  const value = Number.isFinite(parsed)
+                    ? Math.min(20, Math.max(1, Math.round(parsed)))
+                    : 5;
+
+                  setMaxProductPhotosState(value);
+                  setMaxProductPhotosError(null);
+
+                  if (value === (settings?.maxProductPhotos ?? 5)) {
+                    return;
+                  }
+
+                  setIsSavingMaxProductPhotos(true);
+                  void setMaxProductPhotos(value)
+                    .catch((error) => {
+                      setMaxProductPhotosError(
+                        error instanceof Error
+                          ? error.message
+                          : "Could not save max photos setting.",
+                      );
+                      setMaxProductPhotosState(settings?.maxProductPhotos ?? 5);
+                    })
+                    .finally(() => {
+                      setIsSavingMaxProductPhotos(false);
+                    });
+                }}
+                onChange={(event) => {
+                  const raw = event.currentTarget.value;
+                  if (raw === "") {
+                    setMaxProductPhotosState(Number.NaN);
+                    return;
+                  }
+
+                  const next = Number(raw);
+                  if (!Number.isFinite(next)) {
+                    return;
+                  }
+
+                  setMaxProductPhotosState(
+                    Math.min(20, Math.max(1, Math.round(next))),
+                  );
+                  setMaxProductPhotosError(null);
+                }}
+                type="number"
+                value={Number.isFinite(maxProductPhotos) ? maxProductPhotos : ""}
+              />
+            </label>
+            <p className="text-sm text-slate-500">
+              Limits how many original photos can be attached to a single
+              product (1–20).
+            </p>
+            {maxProductPhotosError ? (
+              <p className="text-sm text-red-600">{maxProductPhotosError}</p>
+            ) : null}
           </div>
         </CardContent>
       </Card>

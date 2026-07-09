@@ -268,6 +268,10 @@ export async function uploadImageBufferToShopify(
     filename: string;
     mimeType: string;
   },
+  options?: {
+    /** Called immediately after Shopify fileCreate so callers can persist the id before polling. */
+    onFileCreated?: (file: ShopifyFile) => Promise<void>;
+  },
 ) {
   const target = await createStagedImageUpload(connection, {
     fileSize: input.data.byteLength,
@@ -300,9 +304,58 @@ export async function uploadImageBufferToShopify(
     originalSource: target.resourceUrl,
   });
 
-  for (let attempt = 0; attempt < 4 && file.status !== "ready"; attempt += 1) {
+  if (options?.onFileCreated) {
+    await options.onFileCreated(file);
+  }
+
+  for (
+    let attempt = 0;
+    attempt < 8 && (file.status !== "ready" || !file.url);
+    attempt += 1
+  ) {
+    if (file.status === "failed") {
+      throw new ConvexError("Shopify image processing failed.");
+    }
+
     await wait(750);
     file = await getShopifyFile(connection, file.id);
+  }
+
+  if (file.status !== "ready" || !file.url) {
+    throw new ConvexError(
+      "Shopify image was not ready with a fetchable URL in time.",
+    );
+  }
+
+  return file;
+}
+
+export async function pollShopifyFileUntilReady(
+  connection: ShopifyConnection,
+  fileId: string,
+  options?: { maxAttempts?: number; delayMs?: number },
+) {
+  const maxAttempts = options?.maxAttempts ?? 8;
+  const delayMs = options?.delayMs ?? 750;
+  let file = await getShopifyFile(connection, fileId);
+
+  for (
+    let attempt = 0;
+    attempt < maxAttempts && (file.status !== "ready" || !file.url);
+    attempt += 1
+  ) {
+    if (file.status === "failed") {
+      throw new ConvexError("Shopify image processing failed.");
+    }
+
+    await wait(delayMs);
+    file = await getShopifyFile(connection, fileId);
+  }
+
+  if (file.status !== "ready" || !file.url) {
+    throw new ConvexError(
+      "Shopify image was not ready with a fetchable URL in time.",
+    );
   }
 
   return file;
@@ -662,6 +715,43 @@ export async function addFileReferenceToProduct(
         {
           id: input.fileId,
           referencesToAdd: [input.productId],
+        },
+      ],
+    },
+  );
+}
+
+/** Detach a Files-library image from a product media gallery (does not delete the file). */
+export async function removeFileReferenceFromProduct(
+  connection: ShopifyConnection,
+  input: {
+    fileId: string;
+    productId: string;
+  },
+) {
+  await shopifyGraphql<{
+    fileUpdate: {
+      files: Array<{ id: string }>;
+    };
+  }>(
+    connection,
+    `mutation fileUpdate($files: [FileUpdateInput!]!) {
+      fileUpdate(files: $files) {
+        files {
+          id
+        }
+        userErrors {
+          field
+          message
+          code
+        }
+      }
+    }`,
+    {
+      files: [
+        {
+          id: input.fileId,
+          referencesToRemove: [input.productId],
         },
       ],
     },

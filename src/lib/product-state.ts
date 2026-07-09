@@ -29,6 +29,15 @@ export type ProductStateFields = {
   aiShopifyFileId?: string;
 };
 
+/** Minimal photo shape for dual-read helpers (avoids importing product-photo). */
+export type ProductPhotoCaptureFields = {
+  kind: "original" | "ai";
+  status?: "uploading" | "ready" | "failed" | "promoted";
+  storageId?: string;
+  approvedAt?: number;
+  aiStatus?: "pending" | "generating" | "ready" | "failed";
+};
+
 export type GroupProductProgress = {
   pending: number;
   captured: number;
@@ -37,23 +46,95 @@ export type GroupProductProgress = {
   total: number;
 };
 
-export function isPendingCapture(product: { phase: ProductPhase }): boolean {
+/** Empty reserved upload slots do not count as captured photos. */
+function isCommittedOriginalPhoto(photo: ProductPhotoCaptureFields) {
+  return (
+    photo.kind === "original" &&
+    !(photo.status === "uploading" && photo.storageId == null)
+  );
+}
+
+export function countOriginalPhotos(
+  photos?: ProductPhotoCaptureFields[] | null,
+): number {
+  if (photos == null) {
+    return 0;
+  }
+
+  return photos.filter(isCommittedOriginalPhoto).length;
+}
+
+export function hasCapturedPhoto(
+  product: { shopifyFileId?: string },
+  photos?: ProductPhotoCaptureFields[] | null,
+): boolean {
+  const hasOriginal = countOriginalPhotos(photos) > 0;
+  return hasOriginal || Boolean(product.shopifyFileId);
+}
+
+/**
+ * Pending capture for queue / re-entry.
+ * With photo rows + maxProductPhotos: still pending while originalCount < max.
+ * With photo rows but no max: any original (or legacy shopifyFileId) completes.
+ * Without photo rows: phase === "imported".
+ */
+export function isPendingCapture(
+  product: { phase: ProductPhase; shopifyFileId?: string },
+  photos?: ProductPhotoCaptureFields[] | null,
+  maxProductPhotos?: number,
+): boolean {
+  // Published products are out of the capture queue (new slots are blocked).
+  if (product.phase === "published") {
+    return false;
+  }
+
+  if (photos != null) {
+    if (maxProductPhotos != null) {
+      const originalCount = countOriginalPhotos(photos);
+      // max=1 Skip permanently sets phase captured with zero photos.
+      if (
+        originalCount === 0 &&
+        product.phase === "captured" &&
+        maxProductPhotos === 1
+      ) {
+        return false;
+      }
+      // Under a photo cap, stay pending until originals reach max — including
+      // zero-photo session skips for max > 1.
+      return originalCount < maxProductPhotos;
+    }
+
+    return !hasCapturedPhoto(product, photos);
+  }
+
   return product.phase === "imported";
 }
 
-export function isGroupCaptureComplete(product: { phase: ProductPhase }): boolean {
-  return product.phase === "captured" || product.phase === "published";
-}
+/** Capture progress complete: at max originals, or legacy captured/published. */
+export function isGroupCaptureComplete(
+  product: { phase: ProductPhase; shopifyFileId?: string },
+  photos?: ProductPhotoCaptureFields[] | null,
+  maxProductPhotos?: number,
+): boolean {
+  if (product.phase === "published") {
+    return true;
+  }
 
-export function isPublishable(product: ProductStateFields): boolean {
-  return (
-    product.phase === "captured" &&
-    Boolean(product.shopifyFileId) &&
-    product.aiImageStatus === "ready" &&
-    Boolean(product.aiShopifyFileId) &&
-    !product.needsPhotoReview &&
-    !product.pendingOperation
-  );
+  if (photos != null && maxProductPhotos != null) {
+    const originalCount = countOriginalPhotos(photos);
+    // max=1 Skip: phase captured with zero photos counts as complete.
+    if (originalCount === 0) {
+      return product.phase === "captured" && maxProductPhotos === 1;
+    }
+
+    return originalCount >= maxProductPhotos;
+  }
+
+  if (photos != null) {
+    return hasCapturedPhoto(product, photos);
+  }
+
+  return product.phase === "captured";
 }
 
 export function hasActiveError(product: { lastError?: LastError }): boolean {
@@ -84,20 +165,42 @@ export function compareProductDisplayOrder<
 
 export function nextUncapturedGroupProduct<
   T extends {
+    _id: string;
     phase: ProductPhase;
     groupId?: string;
     archivedAt?: number;
     sortOrder?: number;
     createdAt: number;
+    shopifyFileId?: string;
   },
->(products: T[], groupId: string): T | null {
+>(
+  products: T[],
+  groupId: string,
+  photosByProductId?: Record<string, ProductPhotoCaptureFields[]>,
+  maxProductPhotos?: number,
+  excludeProductIds?: Iterable<string>,
+): T | null {
+  const excludeSet =
+    excludeProductIds == null ? null : new Set(excludeProductIds);
+
   return (
     products
       .filter(
-        (product) => product.groupId === groupId && !isArchived(product),
+        (product) =>
+          product.groupId === groupId &&
+          !isArchived(product) &&
+          !excludeSet?.has(product._id),
       )
       .sort(compareProductDisplayOrder)
-      .find(isPendingCapture) ?? null
+      .find((product) =>
+        photosByProductId
+          ? isPendingCapture(
+              product,
+              photosByProductId[product._id] ?? [],
+              maxProductPhotos,
+            )
+          : isPendingCapture(product),
+      ) ?? null
   );
 }
 
@@ -108,15 +211,37 @@ export function nextUncapturedSelectionProduct<
     archivedAt?: number;
     sortOrder?: number;
     createdAt: number;
+    shopifyFileId?: string;
   },
->(products: T[], productIds: string[]): T | null {
+>(
+  products: T[],
+  productIds: string[],
+  photosByProductId?: Record<string, ProductPhotoCaptureFields[]>,
+  maxProductPhotos?: number,
+  excludeProductIds?: Iterable<string>,
+): T | null {
   const idSet = new Set(productIds);
+  const excludeSet =
+    excludeProductIds == null ? null : new Set(excludeProductIds);
 
   return (
     products
-      .filter((product) => idSet.has(product._id) && !isArchived(product))
+      .filter(
+        (product) =>
+          idSet.has(product._id) &&
+          !isArchived(product) &&
+          !excludeSet?.has(product._id),
+      )
       .sort(compareProductDisplayOrder)
-      .find(isPendingCapture) ?? null
+      .find((product) =>
+        photosByProductId
+          ? isPendingCapture(
+              product,
+              photosByProductId[product._id] ?? [],
+              maxProductPhotos,
+            )
+          : isPendingCapture(product),
+      ) ?? null
   );
 }
 
@@ -125,13 +250,27 @@ export function selectionCaptureProgress<
     _id: string;
     phase: ProductPhase;
     archivedAt?: number;
+    shopifyFileId?: string;
   },
->(products: T[], productIds: string[]) {
+>(
+  products: T[],
+  productIds: string[],
+  photosByProductId?: Record<string, ProductPhotoCaptureFields[]>,
+  maxProductPhotos?: number,
+) {
   const idSet = new Set(productIds);
   const selectionProducts = products.filter(
     (product) => idSet.has(product._id) && !isArchived(product),
   );
-  const completedCount = selectionProducts.filter(isGroupCaptureComplete).length;
+  const completedCount = selectionProducts.filter((product) =>
+    photosByProductId
+      ? isGroupCaptureComplete(
+          product,
+          photosByProductId[product._id] ?? [],
+          maxProductPhotos,
+        )
+      : isGroupCaptureComplete(product),
+  ).length;
 
   return {
     completedCount,

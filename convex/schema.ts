@@ -31,6 +31,15 @@ export const shopifyStatus = v.union(
   v.literal("published"),
 );
 
+export const photoKind = v.union(v.literal("original"), v.literal("ai"));
+
+export const productPhotoStatus = v.union(
+  v.literal("uploading"),
+  v.literal("ready"),
+  v.literal("failed"),
+  v.literal("promoted"),
+);
+
 export default defineSchema({
   users: defineTable({
     email: v.string(),
@@ -92,6 +101,7 @@ export default defineSchema({
     aiImageEditStrength: v.optional(aiImageEditStrength),
     aiImageModel: v.optional(aiImageModel),
     duplicatePolicy,
+    maxProductPhotos: v.optional(v.number()),
     shopifyPublishTarget: v.optional(shopifyPublishTarget),
     shopifyConnectionStatus: v.optional(
       v.union(
@@ -204,6 +214,33 @@ export default defineSchema({
   })
     .index("by_product", ["productId"])
     .index("by_group", ["groupId"]),
+
+  productPhotos: defineTable({
+    productId: v.id("products"),
+    kind: photoKind,
+    storageId: v.optional(v.id("_storage")),
+    url: v.optional(v.string()),
+    shopifyFileId: v.optional(v.string()),
+    shopifyFileStatus: v.optional(shopifyFileStatus),
+    shopifyFileDeletedAt: v.optional(v.number()),
+    status: productPhotoStatus,
+    sortOrder: v.number(),
+    sourcePhotoId: v.optional(v.id("productPhotos")),
+    approvedAt: v.optional(v.number()),
+    aiStatus: v.optional(aiImageStatus),
+    /** Monotonic token; stale processProductPhoto jobs no-op on mismatch. */
+    aiGeneration: v.optional(v.number()),
+    aiPrompt: v.optional(v.string()),
+    aiError: v.optional(v.string()),
+    captureId: v.optional(v.id("captures")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_product", ["productId"])
+    .index("by_product_kind", ["productId", "kind"])
+    .index("by_source", ["sourcePhotoId"])
+    .index("by_status", ["status"])
+    .index("by_storage", ["storageId"]),
 
   listingJobs: defineTable({
     productId: v.id("products"),

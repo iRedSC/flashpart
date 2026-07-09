@@ -46,6 +46,9 @@ export const convexApi = {
   },
   captures: {
     record: deployedFunction<typeof api.captures.record>("captures.js:record"),
+    recordConvexCapture: deployedFunction<
+      typeof api.captures.recordConvexCapture
+    >("captures.js:recordConvexCapture"),
   },
   groups: {
     list: deployedFunction<typeof api.groups.list>("groups.js:list"),
@@ -69,11 +72,57 @@ export const convexApi = {
     >("listingJobs.js:enqueueCreateDrafts"),
   },
   photoAi: {
+    approveAiPhoto: deployedFunction<typeof api.photoAi.approveAiPhoto>(
+      "photoAi.js:approveAiPhoto",
+    ),
     approvePhoto: deployedFunction<typeof api.photoAi.approvePhoto>(
       "photoAi.js:approvePhoto",
     ),
     regenerate: deployedFunction<typeof api.photoAi.regenerate>(
       "photoAi.js:regenerate",
+    ),
+    regenerateForPhoto: deployedFunction<typeof api.photoAi.regenerateForPhoto>(
+      "photoAi.js:regenerateForPhoto",
+    ),
+  },
+  photoGc: {
+    runPhotoStorageGc: deployedFunction<typeof api.photoGc.runPhotoStorageGc>(
+      "photoGc.js:runPhotoStorageGc",
+    ),
+  },
+  productPhotos: {
+    listByProduct: deployedFunction<typeof api.productPhotos.listByProduct>(
+      "productPhotos.js:listByProduct",
+    ),
+    listByProductKind: deployedFunction<
+      typeof api.productPhotos.listByProductKind
+    >("productPhotos.js:listByProductKind"),
+    listForProducts: deployedFunction<typeof api.productPhotos.listForProducts>(
+      "productPhotos.js:listForProducts",
+    ),
+    generateUploadUrl: deployedFunction<
+      typeof api.productPhotos.generateUploadUrl
+    >("productPhotos.js:generateUploadUrl"),
+    deleteUploadedStorage: deployedFunction<
+      typeof api.productPhotos.deleteUploadedStorage
+    >("productPhotos.js:deleteUploadedStorage"),
+    createOriginalFromUpload: deployedFunction<
+      typeof api.productPhotos.createOriginalFromUpload
+    >("productPhotos.js:createOriginalFromUpload"),
+    reserveOriginalSlot: deployedFunction<
+      typeof api.productPhotos.reserveOriginalSlot
+    >("productPhotos.js:reserveOriginalSlot"),
+    finalizeOriginalUpload: deployedFunction<
+      typeof api.productPhotos.finalizeOriginalUpload
+    >("productPhotos.js:finalizeOriginalUpload"),
+    replaceOriginalFromUpload: deployedFunction<
+      typeof api.productPhotos.replaceOriginalFromUpload
+    >("productPhotos.js:replaceOriginalFromUpload"),
+    setSortOrder: deployedFunction<typeof api.productPhotos.setSortOrder>(
+      "productPhotos.js:setSortOrder",
+    ),
+    deletePhoto: deployedFunction<typeof api.productPhotos.deletePhoto>(
+      "productPhotos.js:deletePhoto",
     ),
   },
   products: {
@@ -125,6 +174,9 @@ export const convexApi = {
     setAiImageEditStrength: deployedFunction<
       typeof api.settings.setAiImageEditStrength
     >("settings.js:setAiImageEditStrength"),
+    setMaxProductPhotos: deployedFunction<
+      typeof api.settings.setMaxProductPhotos
+    >("settings.js:setMaxProductPhotos"),
   },
   shopify: {
     currentConnection: deployedFunction<typeof api.shopify.currentConnection>(
@@ -141,6 +193,12 @@ export const convexApi = {
     ),
     finalizeFileUpload: deployedFunction<typeof api.shopify.finalizeFileUpload>(
       "shopify.js:finalizeFileUpload",
+    ),
+    promotePhotoToShopify: deployedFunction<
+      typeof api.shopify.promotePhotoToShopify
+    >("shopify.js:promotePhotoToShopify"),
+    deleteProductPhoto: deployedFunction<typeof api.shopify.deleteProductPhoto>(
+      "shopify.js:deleteProductPhoto",
     ),
     deleteProductFile: deployedFunction<typeof api.shopify.deleteProductFile>(
       "shopify.js:deleteProductFile",

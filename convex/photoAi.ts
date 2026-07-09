@@ -6,6 +6,7 @@ import {
   internalQuery,
   mutation,
 } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { requireSessionUser } from "./authUtils";
 import {
   buildAiGenerationRequest,
@@ -15,6 +16,12 @@ import {
   isAiImageModel,
 } from "./photoAiConstants";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
+import {
+  applyApproveAiPhoto,
+  applyMarkAiGenerating,
+  getAiForOriginal,
+  productHasPhotoRows,
+} from "./productPhotos";
 import { productErrorFields } from "./productState";
 import { resolveAiImageSettings } from "./settings";
 import {
@@ -36,9 +43,25 @@ const photoAiModel = {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+const productPhotosModel = {
+  markAiGeneratingInternal: makeFunctionReference(
+    "productPhotos.js:markAiGeneratingInternal",
+  ) as any,
+  markAiReadyInternal: makeFunctionReference(
+    "productPhotos.js:markAiReadyInternal",
+  ) as any,
+  markAiFailedInternal: makeFunctionReference(
+    "productPhotos.js:markAiFailedInternal",
+  ) as any,
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const shopifyModel = {
   firstActiveConnection: makeFunctionReference(
     "shopifyModel.js:firstActiveConnection",
+  ) as any,
+  detachAndDeleteShopifyFiles: makeFunctionReference(
+    "shopify.js:detachAndDeleteShopifyFiles",
   ) as any,
 };
 
@@ -56,6 +79,72 @@ type GeminiResponse = {
   }>;
   error?: { message?: string };
 };
+
+type ShopifyConnection = {
+  accessToken: string;
+  shopDomain: string;
+};
+
+/** Delete Shopify Files; treat already-gone as success (same as deleteProductPhoto). */
+async function deleteShopifyFilesBestEffort(
+  connection: ShopifyConnection,
+  fileIds: string[],
+) {
+  const unique = [...new Set(fileIds.filter(Boolean))];
+  if (unique.length === 0) {
+    return;
+  }
+
+  try {
+    await deleteShopifyFiles(connection, unique);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const alreadyGone =
+      /not found|does not exist|FILE_DOES_NOT_EXIST|already deleted/i.test(
+        message,
+      );
+    if (!alreadyGone) {
+      // Best-effort cleanup: do not fail AI generation on Shopify delete errors.
+      console.error("Failed to delete previous Shopify files:", message);
+    }
+  }
+}
+
+/**
+ * Detach Files from a published product gallery (when known), then delete.
+ * Falls back to bare fileDelete when there is no Shopify product id yet.
+ */
+async function detachAndDeleteShopifyFilesBestEffort(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { runAction: (...args: any[]) => Promise<unknown> },
+  connection: ShopifyConnection,
+  fileIds: string[],
+  shopifyProductId?: string | null,
+) {
+  const unique = [...new Set(fileIds.filter(Boolean))];
+  if (unique.length === 0) {
+    return;
+  }
+
+  if (shopifyProductId) {
+    try {
+      await ctx.runAction(shopifyModel.detachAndDeleteShopifyFiles, {
+        fileIds: unique,
+        shopifyProductId,
+      });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        "Failed to detach/delete previous Shopify files:",
+        message,
+      );
+      // Fall through to bare delete as a second best-effort.
+    }
+  }
+
+  await deleteShopifyFilesBestEffort(connection, unique);
+}
 
 function assertGeminiEnv() {
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
@@ -174,11 +263,12 @@ async function generateEditedImage(input: {
 export const processingPayload = internalQuery({
   args: {
     productId: v.id("products"),
+    originalPhotoId: v.optional(v.id("productPhotos")),
   },
   handler: async (ctx, args) => {
     const product = await ctx.db.get(args.productId);
 
-    if (!product?.shopifyFileUrl || !product.shopifyFileId) {
+    if (!product) {
       return null;
     }
 
@@ -188,7 +278,46 @@ export const processingPayload = internalQuery({
       .unique();
     const aiSettings = resolveAiImageSettings(settings);
 
+    if (args.originalPhotoId) {
+      const original = await ctx.db.get(args.originalPhotoId);
+
+      if (
+        !original ||
+        original.productId !== args.productId ||
+        original.kind !== "original"
+      ) {
+        return null;
+      }
+
+      if (!original.storageId && !original.url) {
+        return null;
+      }
+
+      const existingAi = await getAiForOriginal(ctx, args.originalPhotoId!);
+
+      return {
+        mode: "convex" as const,
+        aiImageEditStrength: aiSettings.aiImageEditStrength,
+        aiImageModel: aiSettings.aiImageModel,
+        aiImagePrompt:
+          existingAi?.aiPrompt ??
+          product.aiImagePrompt ??
+          aiSettings.aiImageDefaultPrompt,
+        originalPhotoId: original._id,
+        originalStorageId: original.storageId,
+        originalUrl: original.url,
+        productId: product._id,
+        shopifyProductId: product.shopifyProductId,
+        sku: product.sku,
+      };
+    }
+
+    if (!product.shopifyFileUrl || !product.shopifyFileId) {
+      return null;
+    }
+
     return {
+      mode: "shopify" as const,
       aiImageEditStrength: aiSettings.aiImageEditStrength,
       aiImageModel: aiSettings.aiImageModel,
       aiImagePrompt:
@@ -196,6 +325,7 @@ export const processingPayload = internalQuery({
       aiShopifyFileId: product.aiShopifyFileId,
       productId: product._id,
       shopifyFileUrl: product.shopifyFileUrl,
+      shopifyProductId: product.shopifyProductId,
       sku: product.sku,
     };
   },
@@ -276,8 +406,38 @@ export const scheduleProcessing = internalMutation({
   args: {
     productId: v.id("products"),
     resetPrompt: v.optional(v.boolean()),
+    originalPhotoId: v.optional(v.id("productPhotos")),
   },
   handler: async (ctx, args) => {
+    if (args.originalPhotoId) {
+      const original = await ctx.db.get(args.originalPhotoId);
+
+      if (
+        !original ||
+        original.productId !== args.productId ||
+        original.kind !== "original"
+      ) {
+        return;
+      }
+
+      const { aiGeneration, previousShopifyFileIds } =
+        await applyMarkAiGenerating(ctx, {
+          productId: args.productId,
+          originalPhotoId: args.originalPhotoId,
+        });
+
+      await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
+        productId: args.productId,
+        originalPhotoId: args.originalPhotoId,
+        aiGeneration,
+        previousShopifyFileIds:
+          previousShopifyFileIds.length > 0
+            ? previousShopifyFileIds
+            : undefined,
+      });
+      return;
+    }
+
     const product = await ctx.db.get(args.productId);
 
     if (!product?.shopifyFileId || !product.shopifyFileUrl) {
@@ -318,9 +478,135 @@ export const scheduleProcessing = internalMutation({
 export const processProductPhoto = internalAction({
   args: {
     previousAiShopifyFileId: v.optional(v.string()),
+    /** Cleared Shopify file ids from regen/replace (multi-photo path). */
+    previousShopifyFileIds: v.optional(v.array(v.string())),
     productId: v.id("products"),
+    originalPhotoId: v.optional(v.id("productPhotos")),
+    /** Required for multi-photo path when caller already bumped via applyMarkAiGenerating. */
+    aiGeneration: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    if (args.originalPhotoId) {
+      let aiGeneration = args.aiGeneration;
+      let previousShopifyFileIds = args.previousShopifyFileIds ?? [];
+
+      if (aiGeneration === undefined) {
+        const marked = await ctx.runMutation(
+          productPhotosModel.markAiGeneratingInternal,
+          {
+            productId: args.productId,
+            originalPhotoId: args.originalPhotoId,
+          },
+        );
+        aiGeneration = marked.aiGeneration as number;
+        const fromMark = (marked.previousShopifyFileIds ?? []) as string[];
+        if (fromMark.length > 0) {
+          previousShopifyFileIds = [
+            ...previousShopifyFileIds,
+            ...fromMark,
+          ];
+        }
+      }
+
+      try {
+        const payload = await ctx.runQuery(photoAiModel.processingPayload, {
+          productId: args.productId,
+          originalPhotoId: args.originalPhotoId,
+        });
+
+        if (!payload || payload.mode !== "convex") {
+          throw new ConvexError("Original product photo is missing image data.");
+        }
+
+        if (previousShopifyFileIds.length > 0) {
+          const connection = await ctx.runQuery(
+            shopifyModel.firstActiveConnection,
+            {},
+          );
+          if (connection) {
+            // Prefer detach+delete when product is already on Shopify so
+            // gallery refs are cleared before fileDelete (regen-after-publish).
+            await detachAndDeleteShopifyFilesBestEffort(
+              ctx,
+              connection,
+              previousShopifyFileIds,
+              payload.shopifyProductId,
+            );
+          }
+        }
+
+        let originalData: ArrayBuffer;
+        let originalMimeType = "image/jpeg";
+
+        if (payload.originalStorageId) {
+          const blob = await ctx.storage.get(
+            payload.originalStorageId as Id<"_storage">,
+          );
+
+          if (!blob) {
+            throw new ConvexError("Could not load the original product photo.");
+          }
+
+          originalMimeType = blob.type || "image/jpeg";
+          originalData = await blob.arrayBuffer();
+        } else if (payload.originalUrl) {
+          const originalResponse = await fetch(payload.originalUrl);
+
+          if (!originalResponse.ok) {
+            throw new ConvexError("Could not download the original product photo.");
+          }
+
+          originalMimeType =
+            originalResponse.headers.get("content-type") ?? "image/jpeg";
+          originalData = await originalResponse.arrayBuffer();
+        } else {
+          throw new ConvexError("Original product photo is missing image data.");
+        }
+
+        const generated = await generateEditedImage({
+          editStrength: payload.aiImageEditStrength,
+          imageData: originalData,
+          mimeType: originalMimeType,
+          model: payload.aiImageModel,
+          prompt: payload.aiImagePrompt,
+        });
+        const storageId = await ctx.storage.store(
+          new Blob([new Uint8Array(generated.data)], {
+            type: generated.mimeType,
+          }),
+        );
+        const url = await ctx.storage.getUrl(storageId);
+
+        try {
+          await ctx.runMutation(productPhotosModel.markAiReadyInternal, {
+            originalPhotoId: args.originalPhotoId,
+            storageId,
+            url: url ?? undefined,
+            aiGeneration,
+          });
+        } catch (markError) {
+          // Row missing or mark failed after store: drop the new blob.
+          try {
+            await ctx.storage.delete(storageId);
+          } catch {
+            // Storage may already be gone.
+          }
+          throw markError;
+        }
+      } catch (error) {
+        await ctx.runMutation(productPhotosModel.markAiFailedInternal, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "AI photo generation failed.",
+          originalPhotoId: args.originalPhotoId,
+          aiGeneration,
+        });
+      }
+
+      return;
+    }
+
     await ctx.runMutation(photoAiModel.markGenerating, {
       productId: args.productId,
     });
@@ -333,7 +619,7 @@ export const processProductPhoto = internalAction({
         ctx.runQuery(shopifyModel.firstActiveConnection, {}),
       ]);
 
-      if (!payload) {
+      if (!payload || payload.mode !== "shopify") {
         throw new ConvexError("Product is missing an original Shopify photo.");
       }
 
@@ -342,8 +628,11 @@ export const processProductPhoto = internalAction({
       }
 
       if (args.previousAiShopifyFileId) {
-        await deleteShopifyFiles(connection, [args.previousAiShopifyFileId]).catch(
-          () => undefined,
+        await detachAndDeleteShopifyFilesBestEffort(
+          ctx,
+          connection,
+          [args.previousAiShopifyFileId],
+          payload.shopifyProductId,
         );
       }
 
@@ -394,18 +683,74 @@ export const regenerate = mutation({
     productId: v.id("products"),
     prompt: v.string(),
     sessionToken: v.string(),
+    originalPhotoId: v.optional(v.id("productPhotos")),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
     const product = await ctx.db.get(args.productId);
     const prompt = args.prompt.trim();
 
-    if (!product?.shopifyFileId || !product.shopifyFileUrl) {
-      throw new ConvexError("Capture a product photo before regenerating.");
+    if (!product) {
+      throw new ConvexError("Product not found.");
     }
 
     if (!prompt) {
       throw new ConvexError("Enter a prompt before regenerating.");
+    }
+
+    if (args.originalPhotoId) {
+      const original = await ctx.db.get(args.originalPhotoId);
+
+      if (
+        !original ||
+        original.productId !== args.productId ||
+        original.kind !== "original"
+      ) {
+        throw new ConvexError("Original photo not found.");
+      }
+
+      if (!original.storageId && !original.url) {
+        throw new ConvexError("Capture a product photo before regenerating.");
+      }
+
+      const now = Date.now();
+      // Clears shopifyFile* so promote cannot reuse a stale Shopify file after regen.
+      const { aiGeneration, previousShopifyFileIds } =
+        await applyMarkAiGenerating(ctx, {
+          productId: args.productId,
+          originalPhotoId: args.originalPhotoId,
+          prompt,
+        });
+
+      await ctx.db.patch(args.productId, {
+        aiImagePrompt: prompt,
+        updatedAt: now,
+      });
+      await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
+        productId: args.productId,
+        originalPhotoId: args.originalPhotoId,
+        aiGeneration,
+        previousShopifyFileIds:
+          previousShopifyFileIds.length > 0
+            ? previousShopifyFileIds
+            : undefined,
+      });
+      return;
+    }
+
+    const photoRows = await ctx.db
+      .query("productPhotos")
+      .withIndex("by_product", (q) => q.eq("productId", args.productId))
+      .collect();
+
+    if (photoRows.length > 0) {
+      throw new ConvexError(
+        "Specify originalPhotoId to regenerate AI for a multi-photo product.",
+      );
+    }
+
+    if (!product.shopifyFileId || !product.shopifyFileUrl) {
+      throw new ConvexError("Capture a product photo before regenerating.");
     }
 
     const now = Date.now();
@@ -427,6 +772,73 @@ export const regenerate = mutation({
   },
 });
 
+export const regenerateForPhoto = mutation({
+  args: {
+    sessionToken: v.string(),
+    originalPhotoId: v.id("productPhotos"),
+    prompt: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const original = await ctx.db.get(args.originalPhotoId);
+
+    if (!original || original.kind !== "original") {
+      throw new ConvexError("Original photo not found.");
+    }
+
+    if (!original.storageId && !original.url) {
+      throw new ConvexError("Capture a product photo before regenerating.");
+    }
+
+    const product = await ctx.db.get(original.productId);
+
+    if (!product) {
+      throw new ConvexError("Product not found.");
+    }
+
+    const settings = await ctx.db
+      .query("appSettings")
+      .withIndex("by_key", (q) => q.eq("key", "singleton"))
+      .unique();
+    const defaultPrompt = resolveAiImageSettings(settings).aiImageDefaultPrompt;
+    const prompt = args.prompt?.trim() || product.aiImagePrompt || defaultPrompt;
+    const now = Date.now();
+
+    // Clears shopifyFile* so promote cannot reuse a stale Shopify file after regen.
+    const { aiGeneration, previousShopifyFileIds } =
+      await applyMarkAiGenerating(ctx, {
+        productId: original.productId,
+        originalPhotoId: args.originalPhotoId,
+        prompt,
+      });
+
+    await ctx.db.patch(original.productId, {
+      aiImagePrompt: prompt,
+      updatedAt: now,
+    });
+    await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
+      productId: original.productId,
+      originalPhotoId: args.originalPhotoId,
+      aiGeneration,
+      previousShopifyFileIds:
+        previousShopifyFileIds.length > 0
+          ? previousShopifyFileIds
+          : undefined,
+    });
+  },
+});
+
+export const approveAiPhoto = mutation({
+  args: {
+    sessionToken: v.string(),
+    photoId: v.id("productPhotos"),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    await applyApproveAiPhoto(ctx, args.photoId);
+  },
+});
+
 export const approvePhoto = mutation({
   args: {
     productId: v.id("products"),
@@ -438,6 +850,13 @@ export const approvePhoto = mutation({
 
     if (!product) {
       throw new ConvexError("Product not found.");
+    }
+
+    // Multi-photo products must approve per AI row via approveAiPhoto.
+    if (await productHasPhotoRows(ctx, args.productId)) {
+      throw new ConvexError(
+        "Use approveAiPhoto for multi-photo products.",
+      );
     }
 
     if (product.aiImageStatus !== "ready") {

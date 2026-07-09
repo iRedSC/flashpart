@@ -1,8 +1,12 @@
 import { Archive, ArchiveRestore, FolderPlus, Send, Trash2 } from "lucide-react";
 import {
+  canPublishProduct,
+  listOriginals,
+  type ProductPhoto,
+} from "../lib/product-photo";
+import {
   canArchive,
   isArchived,
-  isPublishable,
   type LastError,
 } from "../lib/product-state";
 import { DropdownMenuItem } from "./ui/dropdown-menu";
@@ -25,33 +29,47 @@ export function ProductRowActionItems({
   onAddToGroup,
   onArchive,
   onDelete,
+  onDeletePhotos,
   onDeleteShopifyFile,
+  onOpenPhoto,
   onPublish,
   onUnarchive,
+  photos,
   product,
 }: {
   onAddToGroup: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  /** Multi-photo products: delete via deleteProductPhoto or open the photo dialog. */
+  onDeletePhotos?: () => void;
   onDeleteShopifyFile: () => void;
+  onOpenPhoto?: () => void;
   onPublish: () => void;
   onUnarchive: () => void;
+  photos?: ProductPhoto[] | null;
   product: Product;
 }) {
   const archived = isArchived(product);
   const archiveAllowed = canArchive(product);
-  const canPublish = isPublishable({
-    aiImageStatus: product.aiImageStatus,
-    aiShopifyFileId: product.aiShopifyFileId ?? undefined,
-    needsPhotoReview: product.needsPhotoReview,
-    pendingOperation: product.pendingOperation as
-      | "captureProcessing"
-      | "aiImageGenerating"
-      | "publishing"
-      | undefined,
-    phase: product.phase,
-    shopifyFileId: product.shopifyFileId ?? undefined,
-  });
+  const photosLoading = photos === undefined;
+  const canPublish =
+    !photosLoading &&
+    canPublishProduct(
+      {
+        aiImageStatus: product.aiImageStatus,
+        aiShopifyFileId: product.aiShopifyFileId ?? undefined,
+        needsPhotoReview: product.needsPhotoReview,
+        pendingOperation: product.pendingOperation ?? undefined,
+        phase: product.phase,
+        shopifyFileId: product.shopifyFileId ?? undefined,
+      },
+      photos,
+    );
+  const hasPhotoRows = (photos?.length ?? 0) > 0;
+  const originalCount = hasPhotoRows ? listOriginals(photos ?? []).length : 0;
+  // Only treat as legacy once photos have resolved to an empty list.
+  const isLegacyOnly =
+    !photosLoading && !hasPhotoRows && Boolean(product.shopifyFileId);
 
   return (
     <>
@@ -59,7 +77,10 @@ export function ProductRowActionItems({
         <FolderPlus />
         Add to group
       </DropdownMenuItem>
-      <DropdownMenuItem disabled={!canPublish || archived} onSelect={onPublish}>
+      <DropdownMenuItem
+        disabled={!canPublish || archived || photosLoading}
+        onSelect={onPublish}
+      >
         <Send />
         Publish
       </DropdownMenuItem>
@@ -82,7 +103,22 @@ export function ProductRowActionItems({
           Archive
         </DropdownMenuItem>
       )}
-      {product.shopifyFileId ? (
+      {hasPhotoRows ? (
+        <DropdownMenuItem
+          onSelect={() => {
+            if (onDeletePhotos) {
+              onDeletePhotos();
+              return;
+            }
+
+            onOpenPhoto?.();
+          }}
+        >
+          <Trash2 />
+          {originalCount > 1 ? "Delete photos…" : "Delete photo…"}
+        </DropdownMenuItem>
+      ) : null}
+      {isLegacyOnly ? (
         <DropdownMenuItem onSelect={onDeleteShopifyFile}>
           <Trash2 />
           Delete Shopify photo

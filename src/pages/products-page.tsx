@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useQuery } from "convex/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   DndContext,
@@ -80,6 +81,13 @@ import { ProductPhotoDialog } from "../components/product-photo-dialog";
 import { ProductThumbnail } from "../components/product-thumbnail";
 import { useAppData } from "../data/app-data-provider";
 import { createCaptureSelection } from "../lib/capture-selection";
+import { convexApi } from "../lib/convex-api";
+import {
+  canPublishProduct,
+  listOriginals,
+  needsAiPhotoApproval,
+  type ProductPhoto,
+} from "../lib/product-photo";
 import { canArchive, isArchived, isGroupArchived } from "../lib/product-state";
 import { cn } from "../lib/utils";
 import { normalizeTagString } from "../lib/tags";
@@ -296,6 +304,27 @@ function ShopifyListingIcon({
   );
 }
 
+
+function productNeedsPhotoReview(
+  product: Product,
+  photos?: ProductPhoto[] | null,
+) {
+  // undefined/null = batch still loading — keep product flag until photos resolve.
+  if (photos == null) {
+    return product.needsPhotoReview === true;
+  }
+
+  if (product.needsPhotoReview) {
+    return true;
+  }
+
+  if (photos.length === 0) {
+    return false;
+  }
+
+  return photos.some(needsAiPhotoApproval);
+}
+
 function MobileProductCard({
   dragActive,
   groupLabel,
@@ -305,10 +334,12 @@ function MobileProductCard({
   onAddToGroup,
   onArchive,
   onDelete,
+  onDeletePhotos,
   onDeleteShopifyFile,
   onOpenPhoto,
   onPublish,
   onUnarchive,
+  photos,
   row,
   shiftY,
   virtualRow,
@@ -321,16 +352,19 @@ function MobileProductCard({
   onAddToGroup: (product: Product) => void;
   onArchive: (product: Product) => void;
   onDelete: (product: Product) => void;
+  onDeletePhotos: (product: Product) => void;
   onDeleteShopifyFile: (product: Product) => void;
   onOpenPhoto: (product: Product) => void;
   onPublish: (product: Product) => void;
   onUnarchive: (product: Product) => void;
+  photos?: ProductPhoto[] | null;
   row: Row<Product>;
   shiftY: number;
   virtualRow: VirtualItem;
 }) {
   const product = row.original;
   const { attributes, listeners, setNodeRef } = useDraggable({ id: row.id });
+  const photoCount = photos ? listOriginals(photos).length : undefined;
 
   return (
     <div
@@ -369,6 +403,8 @@ function MobileProductCard({
           <ProductThumbnail
             className="h-[52px] w-[52px]"
             onClick={() => onOpenPhoto(product)}
+            photoCount={photoCount}
+            photos={photos}
             product={product}
           />
           <div className="min-w-0 flex-1 self-center pr-1">
@@ -395,7 +431,7 @@ function MobileProductCard({
             <ShopifyListingIcon shopifyProductId={product.shopifyProductId} />
             <ProductStatusIcons
               lastError={product.lastError}
-              needsPhotoReview={product.needsPhotoReview}
+              needsPhotoReview={productNeedsPhotoReview(product, photos)}
               pendingOperation={product.pendingOperation}
               phase={product.phase}
               saving={isPending}
@@ -421,9 +457,12 @@ function MobileProductCard({
                   onAddToGroup={() => onAddToGroup(product)}
                   onArchive={() => onArchive(product)}
                   onDelete={() => onDelete(product)}
+                  onDeletePhotos={() => onDeletePhotos(product)}
                   onDeleteShopifyFile={() => onDeleteShopifyFile(product)}
+                  onOpenPhoto={() => onOpenPhoto(product)}
                   onPublish={() => onPublish(product)}
                   onUnarchive={() => onUnarchive(product)}
+                  photos={photos}
                   product={product}
                 />
               </DropdownMenuContent>
@@ -439,14 +478,15 @@ function MobileProductCard({
     </div>
   );
 }
-function parseCsvLine(line: string) {
-  const values: string[] = [];
+function parseCsvRows(text: string) {
+  const rows: string[][] = [];
+  let values: string[] = [];
   let current = "";
   let inQuotes = false;
 
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const nextChar = line[index + 1];
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
 
     if (char === '"' && inQuotes && nextChar === '"') {
       current += '"';
@@ -456,13 +496,30 @@ function parseCsvLine(line: string) {
     } else if (char === "," && !inQuotes) {
       values.push(current.trim());
       current = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        index += 1;
+      }
+      values.push(current.trim());
+      if (values.some((value) => value.length > 0)) {
+        rows.push(values);
+      }
+      values = [];
+      current = "";
+    } else if (char === "\r" && nextChar === "\n") {
+      current += "\n";
+      index += 1;
     } else {
       current += char;
     }
   }
 
   values.push(current.trim());
-  return values;
+  if (values.some((value) => value.length > 0)) {
+    rows.push(values);
+  }
+
+  return rows;
 }
 
 function normalizeCsvHeader(value: string) {
@@ -498,12 +555,7 @@ const CSV_VENDOR_HEADERS = [
 const CSV_TAGS_HEADERS = ["tags", "tag"];
 
 function parseProductCsv(text: string) {
-  const rows = text
-    .replace(/^\uFEFF/, "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map(parseCsvLine);
+  const rows = parseCsvRows(text.replace(/^\uFEFF/, ""));
 
   if (rows.length === 0) {
     return {
@@ -594,6 +646,7 @@ export function ProductsPage() {
     assignProductsToGroup,
     createGroup,
     createProduct,
+    deleteProductPhoto,
     deleteProducts,
     deleteShopifyFile,
     archiveProducts,
@@ -604,6 +657,7 @@ export function ProductsPage() {
     importProducts,
     publishProducts,
     reorderProducts,
+    session,
     unarchiveProducts,
     updateProduct,
   } = useAppData();
@@ -634,6 +688,32 @@ export function ProductsPage() {
 
     return byView.filter((product) => product.groupId === groupFilter);
   }, [groupFilter, products, viewFilter]);
+  const filteredProductIds = React.useMemo(
+    () => filteredProducts.map((product) => product._id),
+    [filteredProducts],
+  );
+  const photosByProductIdQuery = useQuery(
+    convexApi.productPhotos.listForProducts,
+    filteredProductIds.length > 0
+      ? {
+          productIds: filteredProductIds,
+          sessionToken: session.sessionToken,
+        }
+      : "skip",
+  );
+  const photosByProductId = React.useMemo(() => {
+    const map: Record<string, ProductPhoto[]> = {};
+
+    if (!photosByProductIdQuery) {
+      return map;
+    }
+
+    for (const [productId, photos] of Object.entries(photosByProductIdQuery)) {
+      map[productId] = photos as ProductPhoto[];
+    }
+
+    return map;
+  }, [photosByProductIdQuery]);
   const [activeDragProductId, setActiveDragProductId] =
     React.useState<Id<"products"> | null>(null);
   const [projectedIndex, setProjectedIndex] = React.useState<number | null>(
@@ -737,30 +817,37 @@ export function ProductsPage() {
       }),
       columnHelper.accessor("name", {
         header: "Name",
-        cell: ({ row }) => (
-          <div className="flex min-w-0 w-full items-center gap-2.5">
-            <ProductThumbnail
-              className="h-10 w-10"
-              onClick={() => setPhotoProductId(row.original._id)}
-              product={row.original}
-            />
-            <Input
-              aria-label={`Name for ${row.original.sku}`}
-              className={cn(desktopTableInputClass, "min-w-0 flex-1")}
-              defaultValue={row.original.name}
-              title={row.original.name}
-              variant="ghost"
-              onBlur={(event) => {
-                if (event.currentTarget.value !== row.original.name) {
-                  void updateProduct({
-                    id: row.original._id,
-                    name: event.currentTarget.value,
-                  }).catch(() => undefined);
-                }
-              }}
-            />
-          </div>
-        ),
+        cell: ({ row }) => {
+          const photos = photosByProductId[row.original._id];
+          const photoCount = photos ? listOriginals(photos).length : undefined;
+
+          return (
+            <div className="flex min-w-0 w-full items-center gap-2.5">
+              <ProductThumbnail
+                className="h-10 w-10"
+                onClick={() => setPhotoProductId(row.original._id)}
+                photoCount={photoCount}
+                photos={photos}
+                product={row.original}
+              />
+              <Input
+                aria-label={`Name for ${row.original.sku}`}
+                className={cn(desktopTableInputClass, "min-w-0 flex-1")}
+                defaultValue={row.original.name}
+                title={row.original.name}
+                variant="ghost"
+                onBlur={(event) => {
+                  if (event.currentTarget.value !== row.original.name) {
+                    void updateProduct({
+                      id: row.original._id,
+                      name: event.currentTarget.value,
+                    }).catch(() => undefined);
+                  }
+                }}
+              />
+            </div>
+          );
+        },
       }),
       columnHelper.display({
         id: "description",
@@ -880,7 +967,10 @@ export function ProductsPage() {
         cell: ({ row }) => (
           <ProductStatusIcons
             lastError={row.original.lastError}
-            needsPhotoReview={row.original.needsPhotoReview}
+            needsPhotoReview={productNeedsPhotoReview(
+              row.original,
+              photosByProductId[row.original._id],
+            )}
             pendingOperation={row.original.pendingOperation}
             phase={row.original.phase}
             saving={isProductPending(row.original._id)}
@@ -940,7 +1030,13 @@ export function ProductsPage() {
         },
       }),
     ],
-    [activeDescriptionId, groupById, isProductPending, updateProduct],
+    [
+      activeDescriptionId,
+      groupById,
+      isProductPending,
+      photosByProductId,
+      updateProduct,
+    ],
   );
   const table = useReactTable({
     columns,
@@ -1004,6 +1100,25 @@ export function ProductsPage() {
   const selectedAreArchived = selectedRows.some((row) =>
     isArchived(row.original),
   );
+  const photosBatchLoading =
+    filteredProductIds.length > 0 && photosByProductIdQuery === undefined;
+  const selectedCanPublish =
+    !photosBatchLoading &&
+    hasSelection &&
+    viewFilter !== VIEW_ARCHIVED &&
+    selectedRows.every((row) =>
+      canPublishProduct(
+        {
+          aiImageStatus: row.original.aiImageStatus,
+          aiShopifyFileId: row.original.aiShopifyFileId ?? undefined,
+          needsPhotoReview: row.original.needsPhotoReview,
+          pendingOperation: row.original.pendingOperation ?? undefined,
+          phase: row.original.phase,
+          shopifyFileId: row.original.shopifyFileId ?? undefined,
+        },
+        photosByProductId[row.original._id],
+      ),
+    );
   const activeDragIndex = activeDragProductId
     ? visibleIds.indexOf(activeDragProductId)
     : -1;
@@ -1285,6 +1400,38 @@ export function ProductsPage() {
     ).catch(() => undefined);
   }
 
+  function handleDeletePhotosForProduct(product: Product) {
+    const photos = photosByProductId[product._id] ?? [];
+    const originals = listOriginals(photos);
+
+    if (originals.length === 0) {
+      setPhotoProductId(product._id);
+      return;
+    }
+
+    if (originals.length > 1) {
+      // Multi-photo: open the dialog so the user can pick which pair to remove.
+      setPhotoProductId(product._id);
+      return;
+    }
+
+    const original = originals[0];
+    const confirmed =
+      product.shopifyStatus === "published"
+        ? window.confirm(
+            "This product is published. Delete its photo anyway?",
+          )
+        : window.confirm("Delete this product photo?");
+
+    if (!confirmed) {
+      return;
+    }
+
+    void deleteProductPhoto(original._id as Id<"productPhotos">, {
+      confirmPublishedDelete: product.shopifyStatus === "published",
+    }).catch(() => undefined);
+  }
+
   function resetImportDialog() {
     setImportMode("ignore");
     setImportSkuPrefix("");
@@ -1529,7 +1676,7 @@ export function ProductsPage() {
               Capture photos
             </DropdownMenuItem>
             <DropdownMenuItem
-              disabled={!hasSelection || viewFilter === VIEW_ARCHIVED}
+              disabled={!selectedCanPublish}
               onSelect={() =>
                 void handlePublishSelected().catch(() => undefined)
               }
@@ -1879,6 +2026,9 @@ export function ProductsPage() {
       <ProductPhotoDialog
         onClose={() => setPhotoProductId(null)}
         onOpenProduct={setPhotoProductId}
+        photosByProductId={
+          photosByProductIdQuery === undefined ? undefined : photosByProductId
+        }
         product={photoProduct}
       />
 
@@ -1943,6 +2093,7 @@ export function ProductsPage() {
                   onDelete={(target) =>
                     void handleDeleteProducts([target._id]).catch(() => undefined)
                   }
+                  onDeletePhotos={handleDeletePhotosForProduct}
                   onDeleteShopifyFile={handleDeleteShopifyFileForProduct}
                   onOpenPhoto={(target) => setPhotoProductId(target._id)}
                   onPublish={(target) =>
@@ -1953,6 +2104,7 @@ export function ProductsPage() {
                       () => undefined,
                     )
                   }
+                  photos={photosByProductId[product._id]}
                   row={row}
                   shiftY={getDropShift({
                     activeIndex: activeDragIndex,
@@ -1978,6 +2130,13 @@ export function ProductsPage() {
               <div className="flex items-stretch gap-3.5">
                 <ProductThumbnail
                   className="h-[52px] w-[52px]"
+                  photoCount={
+                    photosByProductId[activeDragProduct._id]
+                      ? listOriginals(photosByProductId[activeDragProduct._id])
+                          .length
+                      : undefined
+                  }
+                  photos={photosByProductId[activeDragProduct._id]}
                   product={activeDragProduct}
                 />
                 <div className="min-w-0 flex-1 self-center pr-1">
@@ -2002,7 +2161,10 @@ export function ProductsPage() {
                   />
                   <ProductStatusIcons
                     lastError={activeDragProduct.lastError}
-                    needsPhotoReview={activeDragProduct.needsPhotoReview}
+                    needsPhotoReview={productNeedsPhotoReview(
+                      activeDragProduct,
+                      photosByProductId[activeDragProduct._id],
+                    )}
                     pendingOperation={activeDragProduct.pendingOperation}
                     phase={activeDragProduct.phase}
                     saving={isProductPending(activeDragProduct._id)}
@@ -2202,9 +2364,13 @@ export function ProductsPage() {
                   () => undefined,
                 )
               }
+              onDeletePhotos={() =>
+                handleDeletePhotosForProduct(desktopRowMenu.product)
+              }
               onDeleteShopifyFile={() =>
                 handleDeleteShopifyFileForProduct(desktopRowMenu.product)
               }
+              onOpenPhoto={() => setPhotoProductId(desktopRowMenu.product._id)}
               onPublish={() =>
                 void publishProducts([desktopRowMenu.product._id]).catch(
                   () => undefined,
@@ -2215,6 +2381,7 @@ export function ProductsPage() {
                   desktopRowMenu.product._id,
                 ]).catch(() => undefined)
               }
+              photos={photosByProductId[desktopRowMenu.product._id]}
               product={desktopRowMenu.product}
             />
           ) : null}

@@ -26,11 +26,8 @@ type Settings = Omit<
   shopifyPublishTarget: ShopifyPublishTarget;
 };
 type ShopifyConnection = FunctionReturnType<typeof convexApi.shopify.currentConnection>;
-type ShopifyFileUpload = {
-  shopifyFileId: string;
-  shopifyFileStatus: "uploaded" | "processing" | "ready" | "failed";
-  shopifyFileUrl?: string;
-  shopifyStagedResourceUrl: string;
+type ConvexCaptureUpload = {
+  storageId: Id<"_storage">;
 };
 
 type ImportedProduct = {
@@ -139,6 +136,9 @@ type AppDataContextValue = {
   setAiImageEditStrength: (
     aiImageEditStrength: AiImageEditStrength,
   ) => Promise<{ aiImageEditStrength: AiImageEditStrength } | null>;
+  setMaxProductPhotos: (
+    maxProductPhotos: number,
+  ) => Promise<{ maxProductPhotos: number } | null>;
   disconnectShopify: () => Promise<null>;
   deleteShopifyFile: (
     productId: Id<"products">,
@@ -155,20 +155,44 @@ type AppDataContextValue = {
   deleteGroup: (
     groupId: Id<"groups">,
   ) => Promise<{ deleted: boolean; ungrouped: number } | null>;
-  uploadCaptureImage: (file: File) => Promise<ShopifyFileUpload>;
+  /** Uploads a capture image to Convex storage (not Shopify). */
+  uploadCaptureImage: (file: File) => Promise<ConvexCaptureUpload>;
+  /** Alias of uploadCaptureImage for multi-photo flows. */
+  uploadProductPhoto: (file: File) => Promise<ConvexCaptureUpload>;
   recordCapture: (args: {
     productId: Id<"products">;
     groupId: Id<"groups">;
-    shopifyFileId?: string;
-    shopifyFileStatus?: ShopifyFileUpload["shopifyFileStatus"];
-    shopifyFileUrl?: string;
-    shopifyStagedResourceUrl?: string;
+    /** When set, links the uploaded Convex blob as a productPhotos original. */
+    storageId?: Id<"_storage">;
   }) => Promise<Id<"captures">>;
   submitCapture: (args: {
     productId: Id<"products">;
     groupId: Id<"groups">;
     file?: File;
-  }) => Promise<Id<"captures">>;
+  }) => Promise<{ captureId: Id<"captures">; photoId?: Id<"productPhotos"> }>;
+  /** Upload + createOriginal for an additional product photo (reuses submitCapture pieces). */
+  addProductPhoto: (args: {
+    productId: Id<"products">;
+    groupId: Id<"groups">;
+    file: File;
+  }) => Promise<{ captureId: Id<"captures">; photoId: Id<"productPhotos"> }>;
+  /** Upload + replace an existing original in-place (same slot); resets paired AI. */
+  replaceProductPhoto: (args: {
+    photoId: Id<"productPhotos">;
+    productId: Id<"products">;
+    groupId: Id<"groups">;
+    file: File;
+  }) => Promise<{ captureId: Id<"captures">; photoId: Id<"productPhotos"> }>;
+  /** Deletes a productPhotos row (and AI child), including Shopify files when promoted. */
+  deleteProductPhoto: (
+    photoId: Id<"productPhotos">,
+    options?: { confirmPublishedDelete?: boolean },
+  ) => Promise<null>;
+  approveAiPhoto: (photoId: Id<"productPhotos">) => Promise<null>;
+  regenerateAiImageForPhoto: (args: {
+    originalPhotoId: Id<"productPhotos">;
+    prompt?: string;
+  }) => Promise<null>;
   regenerateAiImage: (args: {
     productId: Id<"products">;
     prompt: string;
@@ -203,11 +227,36 @@ function updateProductFields(
   return patchProducts(products, [id], patch);
 }
 
-function completedForGroups(product: Product) {
-  return isGroupCaptureComplete(product);
+type ProductPhotoRow = {
+  _id: string;
+  kind: "original" | "ai";
+  approvedAt?: number;
+  aiStatus?: "pending" | "generating" | "ready" | "failed";
+};
+
+function findProductIdForPhoto(
+  photosByProductId: Record<string, ProductPhotoRow[]> | undefined,
+  photoId: string,
+): Id<"products"> | undefined {
+  if (!photosByProductId) {
+    return undefined;
+  }
+
+  for (const [productId, photos] of Object.entries(photosByProductId)) {
+    if (photos.some((photo) => photo._id === photoId)) {
+      return productId as Id<"products">;
+    }
+  }
+
+  return undefined;
 }
 
-function recomputeGroupCounts(groups: Group[], products: Product[]) {
+function recomputeGroupCounts(
+  groups: Group[],
+  products: Product[],
+  photosByProductId?: Record<string, ProductPhotoRow[]>,
+  maxProductPhotos?: number,
+) {
   return groups.map((group) => {
     const allGroupProducts = products.filter(
       (product) => product.groupId === group._id,
@@ -220,7 +269,18 @@ function recomputeGroupCounts(groups: Group[], products: Product[]) {
       ...group,
       productCount: activeProducts.length,
       archivedCount: allGroupProducts.length - activeProducts.length,
-      completedCount: activeProducts.filter(completedForGroups).length,
+      completedCount: activeProducts.filter((product) =>
+        photosByProductId
+          ? isGroupCaptureComplete(
+              product,
+              photosByProductId[product._id] ?? [],
+              maxProductPhotos,
+            )
+          : // Without a photo batch, do not inflate completedCount from phase alone
+            // after the first multi-photo capture (phase may already be captured).
+            Boolean(product.shopifyFileId) &&
+            (product.phase === "captured" || product.phase === "published"),
+      ).length,
     };
   });
 }
@@ -230,8 +290,14 @@ function applyGroupArchiveSideEffects(
   products: Product[],
   settings: Settings | null,
   now: number,
+  photosByProductId?: Record<string, ProductPhotoRow[]>,
 ) {
-  const withCounts = recomputeGroupCounts(groups, products);
+  const withCounts = recomputeGroupCounts(
+    groups,
+    products,
+    photosByProductId,
+    settings?.maxProductPhotos,
+  );
 
   if (settings?.autoArchiveCompleteGroups !== true) {
     return withCounts;
@@ -258,8 +324,15 @@ function applyGroupUnarchiveSideEffects(
   groups: Group[],
   products: Product[],
   now: number,
+  photosByProductId?: Record<string, ProductPhotoRow[]>,
+  maxProductPhotos?: number,
 ) {
-  const withCounts = recomputeGroupCounts(groups, products);
+  const withCounts = recomputeGroupCounts(
+    groups,
+    products,
+    photosByProductId,
+    maxProductPhotos,
+  );
   const activeGroupIds = new Set(
     products
       .filter((product) => product.archivedAt === undefined && product.groupId)
@@ -289,6 +362,35 @@ export function AppDataProvider({
   const listingJobs = useQuery(convexApi.listingJobs.list, queryArgs);
   const settings = useQuery(convexApi.settings.get, queryArgs);
   const shopifyConnection = useQuery(convexApi.shopify.currentConnection, queryArgs);
+  const activeProductIds = React.useMemo(
+    () =>
+      (products ?? [])
+        .filter((product) => product.archivedAt === undefined)
+        .map((product) => product._id),
+    [products],
+  );
+  const photosByProductIdQuery = useQuery(
+    convexApi.productPhotos.listForProducts,
+    activeProductIds.length > 0
+      ? {
+          productIds: activeProductIds,
+          sessionToken: session.sessionToken,
+        }
+      : "skip",
+  );
+  const photosByProductId = React.useMemo(() => {
+    if (photosByProductIdQuery === undefined) {
+      return undefined;
+    }
+
+    const map: Record<string, ProductPhotoRow[]> = {};
+
+    for (const [productId, photos] of Object.entries(photosByProductIdQuery)) {
+      map[productId] = photos as ProductPhotoRow[];
+    }
+
+    return map;
+  }, [photosByProductIdQuery]);
   const updateProductMutation = useMutation(convexApi.products.update);
   const createProductMutation = useMutation(convexApi.products.create);
   const importProductsMutation = useMutation(convexApi.products.importProducts);
@@ -327,18 +429,42 @@ export function AppDataProvider({
   const setAiImageEditStrengthMutation = useMutation(
     convexApi.settings.setAiImageEditStrength,
   );
+  const setMaxProductPhotosMutation = useMutation(
+    convexApi.settings.setMaxProductPhotos,
+  );
   const disconnectShopifyMutation = useMutation(convexApi.shopify.disconnect);
-  const prepareFileUploadAction = useAction(convexApi.shopify.prepareFileUpload);
-  const finalizeFileUploadAction = useAction(convexApi.shopify.finalizeFileUpload);
   const deleteProductFileAction = useAction(convexApi.shopify.deleteProductFile);
+  const deleteProductPhotoAction = useAction(convexApi.shopify.deleteProductPhoto);
   const createGroupMutation = useMutation(convexApi.groups.create);
   const assignFirstUngroupedMutation = useMutation(
     convexApi.groups.assignFirstUngrouped,
   );
   const deleteGroupMutation = useMutation(convexApi.groups.remove);
-  const recordCaptureMutation = useMutation(convexApi.captures.record);
+  const recordConvexCaptureMutation = useMutation(
+    convexApi.captures.recordConvexCapture,
+  );
+  const generateUploadUrlMutation = useMutation(
+    convexApi.productPhotos.generateUploadUrl,
+  );
+  const reserveOriginalSlotMutation = useMutation(
+    convexApi.productPhotos.reserveOriginalSlot,
+  );
+  const finalizeOriginalUploadMutation = useMutation(
+    convexApi.productPhotos.finalizeOriginalUpload,
+  );
+  const deletePhotoMutation = useMutation(convexApi.productPhotos.deletePhoto);
+  const replaceOriginalFromUploadMutation = useMutation(
+    convexApi.productPhotos.replaceOriginalFromUpload,
+  );
+  const deleteUploadedStorageMutation = useMutation(
+    convexApi.productPhotos.deleteUploadedStorage,
+  );
   const regenerateAiImageMutation = useMutation(convexApi.photoAi.regenerate);
+  const regenerateAiImageForPhotoMutation = useMutation(
+    convexApi.photoAi.regenerateForPhoto,
+  );
   const approvePhotoMutation = useMutation(convexApi.photoAi.approvePhoto);
+  const approveAiPhotoMutation = useMutation(convexApi.photoAi.approveAiPhoto);
   const operationIdRef = React.useRef(0);
   const hasInitializedFailedJobTrackingRef = React.useRef(false);
   const seenFailedListingJobIdsRef = React.useRef<Set<string>>(new Set());
@@ -358,6 +484,7 @@ export function AppDataProvider({
             autoArchiveComplete: settings.autoArchiveComplete ?? false,
             autoArchiveCompleteGroups:
               settings.autoArchiveCompleteGroups ?? false,
+            maxProductPhotos: settings.maxProductPhotos ?? 5,
             shopifyPublishTarget: settings.shopifyPublishTarget ?? "draft",
           } satisfies Settings)
         : null,
@@ -370,12 +497,18 @@ export function AppDataProvider({
       (state, operation) => operation.apply(state),
       baseData,
     );
+    const maxProductPhotos = patched.settings?.maxProductPhotos;
 
     return {
       ...patched,
-      groups: recomputeGroupCounts(patched.groups, patched.products),
+      groups: recomputeGroupCounts(
+        patched.groups,
+        patched.products,
+        photosByProductId,
+        maxProductPhotos,
+      ),
     };
-  }, [baseData, optimisticOperations]);
+  }, [baseData, optimisticOperations, photosByProductId]);
   const pendingProductIds = React.useMemo(() => {
     const ids = new Set<Id<"products">>();
 
@@ -418,45 +551,77 @@ export function AppDataProvider({
     }
   }, [listingJobs]);
   const uploadCaptureFile = React.useCallback(
-    async (file: File): Promise<ShopifyFileUpload> => {
-      const target = await prepareFileUploadAction({
-        fileSize: file.size,
-        filename: file.name || "capture.jpg",
-        mimeType: file.type || "image/jpeg",
+    async (file: File): Promise<ConvexCaptureUpload> => {
+      const uploadUrl = await generateUploadUrlMutation({
         sessionToken: session.sessionToken,
       });
 
-      const body = new FormData();
-
-      for (const parameter of target.parameters) {
-        body.append(parameter.name, parameter.value);
-      }
-
-      body.append("file", file);
-
-      const response = await fetch(target.url, {
+      const response = await fetch(uploadUrl, {
         method: "POST",
-        body,
+        headers: {
+          "Content-Type": file.type || "image/jpeg",
+        },
+        body: file,
       });
 
       if (!response.ok) {
-        throw new Error("Shopify photo upload failed. Check your connection and retry.");
+        throw new Error("Photo upload failed. Check your connection and retry.");
       }
 
-      const fileRecord = await finalizeFileUploadAction({
-        alt: file.name || "Product photo",
-        originalSource: target.resourceUrl,
+      const result = (await response.json()) as { storageId?: string };
+
+      if (!result.storageId) {
+        throw new Error("Photo upload failed. Missing storage id.");
+      }
+
+      return {
+        storageId: result.storageId as Id<"_storage">,
+      };
+    },
+    [generateUploadUrlMutation, session.sessionToken],
+  );
+  /** Reserve slot first so UI sees uploading rows, then upload + finalize. */
+  const reserveUploadAndFinalizePhoto = React.useCallback(
+    async (args: {
+      productId: Id<"products">;
+      captureId?: Id<"captures">;
+      file: File;
+    }) => {
+      const reserved = await reserveOriginalSlotMutation({
+        captureId: args.captureId,
+        productId: args.productId,
         sessionToken: session.sessionToken,
       });
 
-      return {
-        shopifyFileId: fileRecord.id,
-        shopifyFileStatus: fileRecord.status,
-        shopifyFileUrl: fileRecord.url,
-        shopifyStagedResourceUrl: target.resourceUrl,
-      };
+      try {
+        const uploaded = await uploadCaptureFile(args.file);
+        await finalizeOriginalUploadMutation({
+          captureId: args.captureId,
+          originalPhotoId: reserved.originalPhotoId,
+          sessionToken: session.sessionToken,
+          storageId: uploaded.storageId,
+        });
+        return reserved.originalPhotoId;
+      } catch (error) {
+        // Drop reserved Convex-only rows (no Shopify files yet).
+        try {
+          await deletePhotoMutation({
+            photoId: reserved.originalPhotoId,
+            sessionToken: session.sessionToken,
+          });
+        } catch {
+          // Best-effort cleanup; surface the original upload error.
+        }
+        throw error;
+      }
     },
-    [finalizeFileUploadAction, prepareFileUploadAction, session.sessionToken],
+    [
+      deletePhotoMutation,
+      finalizeOriginalUploadMutation,
+      reserveOriginalSlotMutation,
+      session.sessionToken,
+      uploadCaptureFile,
+    ],
   );
   const runOptimistic = React.useCallback(
     async <T,>({
@@ -569,6 +734,7 @@ export function AppDataProvider({
                 products,
                 state.settings,
                 now,
+                photosByProductId,
               ),
             };
           },
@@ -603,6 +769,8 @@ export function AppDataProvider({
                 state.groups,
                 products,
                 now,
+                photosByProductId,
+                state.settings?.maxProductPhotos,
               ),
             };
           },
@@ -902,6 +1070,25 @@ export function AppDataProvider({
             }),
           label: "Saving AI edit strength",
         }),
+      setMaxProductPhotos: (maxProductPhotos) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  maxProductPhotos,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setMaxProductPhotosMutation({
+              maxProductPhotos,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving max product photos",
+        }),
       disconnectShopify: () =>
         runOptimistic({
           apply: (state) => ({
@@ -1066,54 +1253,273 @@ export function AppDataProvider({
         });
       },
       uploadCaptureImage: uploadCaptureFile,
+      uploadProductPhoto: uploadCaptureFile,
       recordCapture: (args) =>
         runOptimistic({
           apply: (state) => ({
             ...state,
             products: updateProductFields(state.products, args.productId, {
-              aiImageStatus: args.shopifyFileId ? "generating" : undefined,
-              aiShopifyFileUrl: undefined,
               lastError: undefined,
               needsPhotoReview: undefined,
-              pendingOperation: args.shopifyFileId
+              // B2 will schedule AI per original; leave generating pending when a photo was uploaded.
+              pendingOperation: args.storageId
                 ? "aiImageGenerating"
                 : undefined,
               phase: "captured",
             }),
           }),
-          commit: () =>
-            recordCaptureMutation({ ...args, sessionToken: session.sessionToken }),
+          commit: async () => {
+            const captureId = await recordConvexCaptureMutation({
+              groupId: args.groupId,
+              productId: args.productId,
+              sessionToken: session.sessionToken,
+            });
+
+            if (args.storageId) {
+              // Legacy path: storage already uploaded before recordCapture.
+              const reserved = await reserveOriginalSlotMutation({
+                captureId,
+                productId: args.productId,
+                sessionToken: session.sessionToken,
+              });
+              try {
+                await finalizeOriginalUploadMutation({
+                  captureId,
+                  originalPhotoId: reserved.originalPhotoId,
+                  sessionToken: session.sessionToken,
+                  storageId: args.storageId,
+                });
+              } catch (error) {
+                try {
+                  await deletePhotoMutation({
+                    photoId: reserved.originalPhotoId,
+                    sessionToken: session.sessionToken,
+                  });
+                } catch {
+                  // Best-effort cleanup; surface the finalize error.
+                }
+                throw error;
+              }
+            }
+
+            return captureId;
+          },
           label: "Recording capture",
           productIds: [args.productId],
         }),
-      submitCapture: (args) =>
-        runOptimistic({
+      submitCapture: (args) => {
+        // Skip-without-photo (max===1): permanently complete without a photo.
+        // Multi-photo skip uses session-only Next product and must not call this.
+        if (!args.file) {
+          return runOptimistic({
+            apply: (state) => ({
+              ...state,
+              products: updateProductFields(state.products, args.productId, {
+                lastError: undefined,
+                phase: "captured",
+              }),
+            }),
+            commit: async () => {
+              const captureId = await recordConvexCaptureMutation({
+                completeWithoutPhoto: true,
+                groupId: args.groupId,
+                productId: args.productId,
+                sessionToken: session.sessionToken,
+              });
+              return { captureId };
+            },
+            label: "Recording capture",
+            productIds: [args.productId],
+          });
+        }
+
+        const file = args.file;
+
+        return runOptimistic({
           apply: (state) => ({
             ...state,
             products: updateProductFields(state.products, args.productId, {
-              aiImageStatus: args.file ? "generating" : undefined,
-              aiShopifyFileUrl: undefined,
               lastError: undefined,
               needsPhotoReview: undefined,
-              pendingOperation: args.file ? "aiImageGenerating" : undefined,
+              pendingOperation: "aiImageGenerating",
               phase: "captured",
             }),
           }),
           commit: async () => {
-            const shopifyFile = args.file
-              ? await uploadCaptureFile(args.file)
-              : undefined;
-
-            return recordCaptureMutation({
+            const captureId = await recordConvexCaptureMutation({
               groupId: args.groupId,
               productId: args.productId,
               sessionToken: session.sessionToken,
-              ...shopifyFile,
             });
+            const photoId = await reserveUploadAndFinalizePhoto({
+              captureId,
+              file,
+              productId: args.productId,
+            });
+
+            return { captureId, photoId };
           },
-          label: args.file ? "Uploading capture photo" : "Recording capture",
+          label: "Uploading capture photo",
           productIds: [args.productId],
-        }),
+        });
+      },
+      addProductPhoto: (args) => {
+        const product = optimisticData.products.find(
+          (entry) => entry._id === args.productId,
+        );
+
+        if (!product?.groupId) {
+          throw new Error(
+            "This product is not in a group. Assign it to a group before adding photos.",
+          );
+        }
+
+        if (product.groupId !== args.groupId) {
+          throw new Error(
+            "groupId does not match the product's assigned group.",
+          );
+        }
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: updateProductFields(state.products, args.productId, {
+              lastError: undefined,
+              needsPhotoReview: undefined,
+              pendingOperation: "aiImageGenerating",
+              phase: "captured",
+            }),
+          }),
+          commit: async () => {
+            const captureId = await recordConvexCaptureMutation({
+              groupId: args.groupId,
+              productId: args.productId,
+              sessionToken: session.sessionToken,
+            });
+            const photoId = await reserveUploadAndFinalizePhoto({
+              captureId,
+              file: args.file,
+              productId: args.productId,
+            });
+
+            return { captureId, photoId };
+          },
+          label: "Adding product photo",
+          productIds: [args.productId],
+        });
+      },
+      replaceProductPhoto: (args) => {
+        const product = optimisticData.products.find(
+          (entry) => entry._id === args.productId,
+        );
+
+        if (!product?.groupId) {
+          throw new Error(
+            "This product is not in a group. Assign it to a group before replacing photos.",
+          );
+        }
+
+        if (product.groupId !== args.groupId) {
+          throw new Error(
+            "groupId does not match the product's assigned group.",
+          );
+        }
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: updateProductFields(state.products, args.productId, {
+              lastError: undefined,
+              needsPhotoReview: undefined,
+              pendingOperation: "aiImageGenerating",
+              phase: "captured",
+            }),
+          }),
+          commit: async () => {
+            const uploaded = await uploadCaptureFile(args.file);
+            try {
+              const captureId = await recordConvexCaptureMutation({
+                groupId: args.groupId,
+                productId: args.productId,
+                sessionToken: session.sessionToken,
+              });
+              const photoId = await replaceOriginalFromUploadMutation({
+                captureId,
+                photoId: args.photoId,
+                sessionToken: session.sessionToken,
+                storageId: uploaded.storageId,
+              });
+
+              return { captureId, photoId };
+            } catch (error) {
+              try {
+                await deleteUploadedStorageMutation({
+                  sessionToken: session.sessionToken,
+                  storageId: uploaded.storageId,
+                });
+              } catch {
+                // Best-effort cleanup; surface the original replace error.
+              }
+              throw error;
+            }
+          },
+          label: "Replacing product photo",
+          productIds: [args.productId],
+        });
+      },
+      deleteProductPhoto: (photoId, options) => {
+        const productId = findProductIdForPhoto(photosByProductId, photoId);
+
+        return runOptimistic({
+          apply: (state) => state,
+          commit: async () => {
+            await deleteProductPhotoAction({
+              confirmPublishedDelete: options?.confirmPublishedDelete,
+              photoId,
+              sessionToken: session.sessionToken,
+            });
+            return null;
+          },
+          label: "Deleting product photo",
+          productIds: productId ? [productId] : undefined,
+        });
+      },
+      approveAiPhoto: (photoId) => {
+        const productId = findProductIdForPhoto(photosByProductId, photoId);
+
+        return runOptimistic({
+          apply: (state) => state,
+          commit: async () => {
+            await approveAiPhotoMutation({
+              photoId,
+              sessionToken: session.sessionToken,
+            });
+            return null;
+          },
+          label: "Approving AI photo",
+          productIds: productId ? [productId] : undefined,
+        });
+      },
+      regenerateAiImageForPhoto: ({ originalPhotoId, prompt }) => {
+        const productId = findProductIdForPhoto(
+          photosByProductId,
+          originalPhotoId,
+        );
+
+        return runOptimistic({
+          apply: (state) => state,
+          commit: async () => {
+            await regenerateAiImageForPhotoMutation({
+              originalPhotoId,
+              prompt,
+              sessionToken: session.sessionToken,
+            });
+            return null;
+          },
+          label: "Regenerating AI photo",
+          productIds: productId ? [productId] : undefined,
+        });
+      },
       regenerateAiImage: ({ productId, prompt }) =>
         runOptimistic({
           apply: (state) => ({
@@ -1164,7 +1570,7 @@ export function AppDataProvider({
       unarchiveProductsMutation,
       deleteProductsMutation,
       deleteProductFileAction,
-      finalizeFileUploadAction,
+      deleteProductPhotoAction,
       importProductsMutation,
       groups,
       listingJobs,
@@ -1176,12 +1582,20 @@ export function AppDataProvider({
       optimisticData.shopifyConnection,
       optimisticOperations,
       pendingProductIds,
-      prepareFileUploadAction,
       products,
       publishProductsMutation,
       queryArgs,
+      approveAiPhotoMutation,
       approvePhotoMutation,
-      recordCaptureMutation,
+      deletePhotoMutation,
+      deleteUploadedStorageMutation,
+      finalizeOriginalUploadMutation,
+      generateUploadUrlMutation,
+      recordConvexCaptureMutation,
+      reserveOriginalSlotMutation,
+      reserveUploadAndFinalizePhoto,
+      replaceOriginalFromUploadMutation,
+      regenerateAiImageForPhotoMutation,
       regenerateAiImageMutation,
       reorderProductsMutation,
       runOptimistic,
@@ -1191,6 +1605,7 @@ export function AppDataProvider({
       setAiImageDefaultPromptMutation,
       setAiImageEditStrengthMutation,
       setAiImageModelMutation,
+      setMaxProductPhotosMutation,
       setDuplicatePolicyMutation,
       setAutoArchiveCompleteMutation,
       setAutoArchiveCompleteGroupsMutation,
@@ -1198,6 +1613,7 @@ export function AppDataProvider({
       setShopifyProductTypeMutation,
       setShopifyDefaultTagsMutation,
       disconnectShopifyMutation,
+      photosByProductId,
       settings,
       shopifyConnection,
       updateProductMutation,
