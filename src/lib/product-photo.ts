@@ -297,8 +297,9 @@ export function canPublishProduct(
 
   if (photos.length > 0) {
     const pairs = buildPhotoPairs(photos);
-    // Match listingJobs gate: every original → paired AI with ready + approvedAt,
-    // and not terminally failed on promote/status.
+    // Match listingJobs gate: every original → paired AI with ready + approvedAt.
+    // Shopify promote failures (shopifyFileStatus) are retryable and must not
+    // block Publish — only AI/status generation failures do.
     const everyOriginalHasApprovedReadyAi =
       pairs.length >= 1 &&
       pairs.every(
@@ -307,9 +308,7 @@ export function canPublishProduct(
           pair.ai.aiStatus === "ready" &&
           pair.ai.approvedAt != null &&
           pair.ai.status !== "failed" &&
-          pair.ai.shopifyFileStatus !== "failed" &&
-          pair.original.status !== "failed" &&
-          pair.original.shopifyFileStatus !== "failed",
+          pair.original.status !== "failed",
       );
 
     return (

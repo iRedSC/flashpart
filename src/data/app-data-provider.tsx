@@ -1308,13 +1308,20 @@ export function AppDataProvider({
           productIds: [args.productId],
         }),
       submitCapture: (args) => {
-        // Skip-without-photo (legacy max===1): record capture only — never mark
-        // phase captured or schedule AI. Multi-photo skip should not call this.
+        // Skip-without-photo (max===1): permanently complete without a photo.
+        // Multi-photo skip uses session-only Next product and must not call this.
         if (!args.file) {
           return runOptimistic({
-            apply: (state) => state,
+            apply: (state) => ({
+              ...state,
+              products: updateProductFields(state.products, args.productId, {
+                lastError: undefined,
+                phase: "captured",
+              }),
+            }),
             commit: async () => {
               const captureId = await recordConvexCaptureMutation({
+                completeWithoutPhoto: true,
                 groupId: args.groupId,
                 productId: args.productId,
                 sessionToken: session.sessionToken,

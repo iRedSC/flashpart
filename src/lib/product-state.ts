@@ -80,9 +80,18 @@ export function isPendingCapture(
 
   if (photos != null) {
     if (maxProductPhotos != null) {
+      const originalCount = countOriginalPhotos(photos);
+      // max=1 Skip permanently sets phase captured with zero photos.
+      if (
+        originalCount === 0 &&
+        product.phase === "captured" &&
+        maxProductPhotos === 1
+      ) {
+        return false;
+      }
       // Under a photo cap, stay pending until originals reach max — including
-      // zero-photo session skips (do not treat phase===captured as done).
-      return countOriginalPhotos(photos) < maxProductPhotos;
+      // zero-photo session skips for max > 1.
+      return originalCount < maxProductPhotos;
     }
 
     return !hasCapturedPhoto(product, photos);
@@ -103,9 +112,9 @@ export function isGroupCaptureComplete(
 
   if (photos != null && maxProductPhotos != null) {
     const originalCount = countOriginalPhotos(photos);
-    // Never complete with zero photos when multi-photo caps are in play.
+    // max=1 Skip: phase captured with zero photos counts as complete.
     if (originalCount === 0) {
-      return false;
+      return product.phase === "captured" && maxProductPhotos === 1;
     }
 
     return originalCount >= maxProductPhotos;

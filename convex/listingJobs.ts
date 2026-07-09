@@ -174,6 +174,20 @@ export const enqueueCreateDrafts = mutation({
     let queued = 0;
 
     for (const product of products) {
+      // Skip if a createShopifyDraft job is already queued/running for this product.
+      const existingJobs = await ctx.db
+        .query("listingJobs")
+        .withIndex("by_product", (q) => q.eq("productId", product._id))
+        .collect();
+      const hasInFlight = existingJobs.some(
+        (job) =>
+          job.type === "createShopifyDraft" &&
+          (job.status === "queued" || job.status === "running"),
+      );
+      if (hasInFlight) {
+        continue;
+      }
+
       const jobId = await ctx.db.insert("listingJobs", {
         productId: product._id,
         userId,
@@ -292,9 +306,10 @@ export const markJobRunning = internalMutation({
       return { proceed: false as const, reason: "succeeded" as const };
     }
 
-    // Already running: resume without double-incrementing attempts.
+    // Already running: do not re-enter — overlapping processQueuedJob would
+    // double-promote and can create duplicate Shopify products/files.
     if (job.status === "running") {
-      return { proceed: true as const, reason: "already_running" as const };
+      return { proceed: false as const, reason: "already_running" as const };
     }
 
     // CAS: only queued / failed may transition to running.

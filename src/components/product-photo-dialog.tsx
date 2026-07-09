@@ -781,6 +781,7 @@ export function ProductPhotoDialog({
               );
 
         if (wrapLocalIndex >= 0) {
+          setPromptDirty(false);
           setPairIndex(wrapLocalIndex);
           setActiveView("ai");
           return;

@@ -389,7 +389,7 @@ export function CapturePage() {
           groupId: captureGroupId,
           productId: capturedProductId,
         });
-        // Queue advance via skippedProductIds (backend no longer marks captured).
+        // Queue advance via skippedProductIds; backend also marks phase captured.
         setSkippedProductIds((prev) => {
           const withCurrent = prev.includes(capturedProductId)
             ? prev

@@ -93,6 +93,8 @@ export const recordConvexCapture = mutation({
     sessionToken: v.string(),
     productId: v.id("products"),
     groupId: v.id("groups"),
+    /** max=1 Skip: permanently leave the capture queue without a photo. */
+    completeWithoutPhoto: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
@@ -100,6 +102,15 @@ export const recordConvexCapture = mutation({
 
     if (!product) {
       throw new Error("Product not found");
+    }
+
+    if (
+      args.completeWithoutPhoto &&
+      (await productHasPhotoRows(ctx, args.productId))
+    ) {
+      throw new Error(
+        "This product already has photos; skip-without-photo is only for empty products.",
+      );
     }
 
     const now = Date.now();
@@ -111,12 +122,14 @@ export const recordConvexCapture = mutation({
       updatedAt: now,
     });
 
-    // Do not set phase "captured" here — that would mark the product captured
-    // before any original photo rows exist (skip-without-photo bug).
-    // syncProductPhotoFlags sets phase once originals are present.
+    // Default: do not set phase "captured" — that would mark the product
+    // captured before any original photo rows exist. syncProductPhotoFlags
+    // sets phase once originals are present.
+    // completeWithoutPhoto (max=1 Skip): restore permanent queue completion.
     await ctx.db.patch(args.productId, {
       captureId,
       lastError: undefined,
+      ...(args.completeWithoutPhoto ? { phase: "captured" as const } : {}),
       updatedAt: now,
     });
 

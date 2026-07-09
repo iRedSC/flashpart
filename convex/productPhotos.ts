@@ -93,14 +93,10 @@ export async function getAiForOriginal(
   return nonFailed ?? byNewest[0];
 }
 
-/** Originals that count toward max capacity (exclude empty abandoned upload slots). */
-function isCommittedOriginal(photo: Doc<"productPhotos">) {
-  return photo.status !== "uploading" || photo.storageId != null;
-}
-
+/** Originals that count toward max capacity (includes reserved uploading slots). */
 export async function countOriginals(ctx: DbCtx, productId: Id<"products">) {
   const originals = await getOriginalPhotos(ctx, productId);
-  return originals.filter(isCommittedOriginal).length;
+  return originals.length;
 }
 
 export async function productHasPhotoRows(
@@ -165,13 +161,10 @@ export async function evaluateProductPhotosPublishGate(
       return { ok: false, reason: "aiGenerating" };
     }
 
-    // Promote / AI failures: reject even if approvedAt + ready were set earlier.
-    // Prefer existing reason union (do not add "aiFailed" — listingJobs switch).
-    if (
-      aiPhoto.aiStatus === "failed" ||
-      aiPhoto.status === "failed" ||
-      aiPhoto.shopifyFileStatus === "failed"
-    ) {
+    // AI generation failures block publish. Shopify promote failures are
+    // retryable (storage kept; listing job re-uploads) so do not gate on
+    // shopifyFileStatus === "failed" alone.
+    if (aiPhoto.aiStatus === "failed" || aiPhoto.status === "failed") {
       return { ok: false, reason: "aiNotApproved" };
     }
 
@@ -299,16 +292,14 @@ export async function syncProductPhotoFlags(
   const anyReadyUnapproved = aiPhotos.some(
     (photo) => photo.aiStatus === "ready" && photo.approvedAt === undefined,
   );
-  // Include promote failures (status / shopifyFileStatus) so badges cannot stay ready.
+  // AI generation failures only — Shopify promote failures stay retryable.
   const anyFailed = aiPhotos.some(
-    (photo) =>
-      photo.aiStatus === "failed" ||
-      photo.status === "failed" ||
-      photo.shopifyFileStatus === "failed",
+    (photo) => photo.aiStatus === "failed" || photo.status === "failed",
   );
   const anyPending = aiPhotos.some((photo) => photo.aiStatus === "pending");
   // Product badge is "complete" only when every original has an approved ready AI.
-  // Pending reserved slots / missing AIs / failed promote must not leave a stale "ready".
+  // Pending reserved slots / missing AIs must not leave a stale "ready".
+  // Failed Shopify promote (shopifyFileStatus) does not block the ready badge.
   const allOriginalsHaveApprovedReadyAi =
     originals.length > 0 &&
     originals.every((original) => {
@@ -317,7 +308,6 @@ export async function syncProductPhotoFlags(
         ai != null &&
         ai.aiStatus === "ready" &&
         ai.status !== "failed" &&
-        ai.shopifyFileStatus !== "failed" &&
         ai.approvedAt !== undefined
       );
     });
@@ -732,7 +722,11 @@ export async function applyMarkPromoted(
   await ctx.db.patch(photo.productId, { updatedAt: now });
 }
 
-/** Terminal Shopify promote failure: keep Convex storage for retry; do not mark promoted. */
+/**
+ * Terminal Shopify promote failure: keep Convex storage + AI readiness for retry.
+ * Only stamp shopifyFileStatus failed — do not flip aiStatus/status to failed
+ * (that permanently blocks republish until regen).
+ */
 export async function applyMarkPromoteFailed(
   ctx: MutationCtx,
   args: {
@@ -753,7 +747,6 @@ export async function applyMarkPromoteFailed(
     "Shopify file promote failed. Retry publish after fixing the upload.";
 
   const patch: Partial<Doc<"productPhotos">> = {
-    status: "failed",
     shopifyFileId: args.shopifyFileId ?? photo.shopifyFileId,
     shopifyFileStatus: args.shopifyFileStatus ?? "failed",
     url: args.shopifyFileUrl ?? photo.url,
@@ -761,8 +754,17 @@ export async function applyMarkPromoteFailed(
   };
 
   if (photo.kind === "ai") {
-    patch.aiStatus = "failed";
-    patch.aiError = promoteError;
+    // Keep aiStatus/status ready when generation succeeded so publish can retry.
+    if (photo.aiStatus === "ready") {
+      patch.status = "ready";
+      patch.aiError = promoteError;
+    } else {
+      patch.status = "failed";
+      patch.aiStatus = "failed";
+      patch.aiError = promoteError;
+    }
+  } else {
+    patch.status = "failed";
   }
 
   await ctx.db.patch(args.photoId, patch);
@@ -773,6 +775,10 @@ export async function applyMarkPromoteFailed(
 export async function applyClearStorageId(
   ctx: MutationCtx,
   photoId: Id<"productPhotos">,
+  options?: {
+    expectedStorageId?: Id<"_storage">;
+    expectedAiGeneration?: number;
+  },
 ) {
   const photo = await ctx.db.get(photoId);
 
@@ -784,9 +790,25 @@ export async function applyClearStorageId(
     return;
   }
 
-  const now = Date.now();
+  // Stale promote must not delete a blob attached after regen.
+  if (
+    options?.expectedStorageId !== undefined &&
+    photo.storageId !== options.expectedStorageId
+  ) {
+    return;
+  }
 
-  await deleteStorageBlob(ctx, photo.storageId);
+  if (
+    options?.expectedAiGeneration !== undefined &&
+    (photo.aiGeneration ?? 0) !== options.expectedAiGeneration
+  ) {
+    return;
+  }
+
+  const now = Date.now();
+  const storageId = photo.storageId;
+
+  await deleteStorageBlob(ctx, storageId);
   await ctx.db.patch(photoId, {
     storageId: undefined,
     updatedAt: now,
@@ -933,14 +955,11 @@ async function insertReservedOriginalPair(
 
   const settings = await getSettingsDocument(ctx);
   const maxPhotos = resolveMaxProductPhotos(settings);
-  // TOCTOU best-effort: re-check count immediately before insert (Convex
-  // mutations are serial per-doc OCC; abandoned uploading slots are GC'd).
-  // Empty uploading slots (no storageId) do not count toward max — GC is the
-  // safety net if they linger.
+  // Count reserved uploading slots toward max so concurrent reserves cannot
+  // overshoot. Abandoned empty slots are GC'd after ABANDONED_UPLOAD_TTL_MS.
   const originals = await getOriginalPhotos(ctx, args.productId);
-  const committedCount = originals.filter(isCommittedOriginal).length;
 
-  if (committedCount >= maxPhotos) {
+  if (originals.length >= maxPhotos) {
     throw new ConvexError(
       `This product already has the maximum of ${maxPhotos} photos.`,
     );
@@ -1454,8 +1473,13 @@ export const markPromoteFailedInternal = internalMutation({
 export const clearStorageIdInternal = internalMutation({
   args: {
     photoId: v.id("productPhotos"),
+    expectedStorageId: v.optional(v.id("_storage")),
+    expectedAiGeneration: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await applyClearStorageId(ctx, args.photoId);
+    await applyClearStorageId(ctx, args.photoId, {
+      expectedStorageId: args.expectedStorageId,
+      expectedAiGeneration: args.expectedAiGeneration,
+    });
   },
 });

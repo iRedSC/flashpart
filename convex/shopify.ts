@@ -352,9 +352,12 @@ async function finishPromoteFromShopifyFile(
     markAsPromoted: true,
   });
 
+  // Only clear the storage blob this promote started with — never a regen's.
   if (photo.storageId) {
     await ctx.runMutation(productPhotosModel.clearStorageIdInternal, {
       photoId,
+      expectedStorageId: photo.storageId,
+      expectedAiGeneration: options.expectedAiGeneration,
     });
   }
 
@@ -521,6 +524,8 @@ async function promotePhotoWithConnection(
   await assertStillEligibleForMarkPromoted(ctx, photoId, markOptions);
 
   // Promote success clears this photo's storage; GC sweep is an orphan safety net.
+  // Guard clear with the storage/generation this promote started with so a
+  // concurrent regen cannot lose its new blob.
   await ctx.runMutation(productPhotosModel.markPromotedInternal, {
     photoId,
     shopifyFileId: file.id,
@@ -532,6 +537,8 @@ async function promotePhotoWithConnection(
   });
   await ctx.runMutation(productPhotosModel.clearStorageIdInternal, {
     photoId,
+    expectedStorageId: storageId,
+    expectedAiGeneration,
   });
 
   await schedulePromotedStorageGc(ctx);
