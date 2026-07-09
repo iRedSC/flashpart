@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import { useAppData } from "../data/app-data-provider";
+import { zoomPermissionConstraint } from "../lib/camera-zoom";
 import { canvasToFile, cropImageFileToSquare } from "../lib/capture-image";
 import {
   getCaptureSelection,
@@ -27,7 +28,9 @@ import {
   selectionCaptureProgress,
 } from "../lib/product-state";
 import { triggerHaptic } from "../lib/haptics";
+import { useCameraTrackZoom } from "../lib/use-camera-track-zoom";
 import { useIsMobile } from "../lib/use-is-mobile";
+import { ALLOW_CAMERA_PINCH_ATTR } from "../lib/use-prevent-pinch-zoom";
 import { cn } from "../lib/utils";
 import type { Id } from "../../convex/_generated/dataModel";
 
@@ -42,6 +45,9 @@ export function CapturePage() {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = React.useRef<MediaStream | null>(null);
+  const [cameraStream, setCameraStream] = React.useState<MediaStream | null>(
+    null,
+  );
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [isCameraReady, setIsCameraReady] = React.useState(false);
   const [cameraError, setCameraError] = React.useState<string | null>(null);
@@ -50,6 +56,7 @@ export function CapturePage() {
     () => (selectedFile ? URL.createObjectURL(selectedFile) : null),
     [selectedFile],
   );
+  const { zoom, canZoom, cameraPlaneRef } = useCameraTrackZoom(cameraStream);
 
   React.useEffect(() => {
     return () => {
@@ -62,6 +69,7 @@ export function CapturePage() {
   const stopCamera = React.useCallback(() => {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
+    setCameraStream(null);
     setIsCameraReady(false);
 
     if (videoRef.current) {
@@ -111,15 +119,35 @@ export function CapturePage() {
       setIsCameraReady(false);
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            aspectRatio: { ideal: 1 },
-            facingMode: { ideal: "environment" },
-            height: { ideal: 1600 },
-            width: { ideal: 1600 },
-          },
-        });
+        const baseVideoConstraints = {
+          aspectRatio: { ideal: 1 },
+          facingMode: { ideal: "environment" },
+          height: { ideal: 1600 },
+          width: { ideal: 1600 },
+        };
+        const zoomConstraint = zoomPermissionConstraint();
+
+        let stream: MediaStream;
+
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              ...baseVideoConstraints,
+              ...(zoomConstraint ?? {}),
+            },
+          });
+        } catch (error) {
+          // Retry without zoom if the UA rejects the PTZ permission constraint.
+          if (!zoomConstraint) {
+            throw error;
+          }
+
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: baseVideoConstraints,
+          });
+        }
 
         if (isCancelled) {
           stream.getTracks().forEach((track) => track.stop());
@@ -127,6 +155,7 @@ export function CapturePage() {
         }
 
         cameraStreamRef.current = stream;
+        setCameraStream(stream);
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -407,19 +436,36 @@ export function CapturePage() {
               </button>
             ) : (
               <>
-                <video
-                  aria-label="Camera preview"
-                  autoPlay
-                  className="absolute inset-0 h-full w-full object-cover"
-                  muted
-                  onCanPlay={() => setIsCameraReady(true)}
-                  playsInline
-                  ref={videoRef}
-                />
+                <div
+                  ref={cameraPlaneRef}
+                  {...(canZoom
+                    ? { [ALLOW_CAMERA_PINCH_ATTR]: "" }
+                    : undefined)}
+                  className={cn("absolute inset-0", canZoom && "touch-none")}
+                >
+                  <video
+                    aria-label={
+                      canZoom
+                        ? "Camera preview. Pinch to zoom."
+                        : "Camera preview"
+                    }
+                    autoPlay
+                    className="absolute inset-0 h-full w-full object-cover"
+                    muted
+                    onCanPlay={() => setIsCameraReady(true)}
+                    playsInline
+                    ref={videoRef}
+                  />
+                </div>
                 <div className="pointer-events-none absolute inset-0 border-[3px] border-white/70" />
                 {!isCameraReady ? (
-                  <span className="absolute inset-0 flex items-center justify-center text-sm font-medium text-white">
+                  <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm font-medium text-white">
                     Starting camera...
+                  </span>
+                ) : null}
+                {canZoom && isCameraReady ? (
+                  <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-semibold tabular-nums text-white backdrop-blur">
+                    {zoom.toFixed(1)}x
                   </span>
                 ) : null}
                 <Button
