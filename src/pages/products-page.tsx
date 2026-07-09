@@ -472,14 +472,15 @@ function MobileProductCard({
     </div>
   );
 }
-function parseCsvLine(line: string) {
-  const values: string[] = [];
+function parseCsvRows(text: string) {
+  const rows: string[][] = [];
+  let values: string[] = [];
   let current = "";
   let inQuotes = false;
 
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const nextChar = line[index + 1];
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
 
     if (char === '"' && inQuotes && nextChar === '"') {
       current += '"';
@@ -489,22 +490,34 @@ function parseCsvLine(line: string) {
     } else if (char === "," && !inQuotes) {
       values.push(current.trim());
       current = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        index += 1;
+      }
+      values.push(current.trim());
+      if (values.some((value) => value.length > 0)) {
+        rows.push(values);
+      }
+      values = [];
+      current = "";
+    } else if (char === "\r" && nextChar === "\n") {
+      current += "\n";
+      index += 1;
     } else {
       current += char;
     }
   }
 
   values.push(current.trim());
-  return values;
+  if (values.some((value) => value.length > 0)) {
+    rows.push(values);
+  }
+
+  return rows;
 }
 
 function parseProductCsv(text: string) {
-  const rows = text
-    .replace(/^\uFEFF/, "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map(parseCsvLine);
+  const rows = parseCsvRows(text.replace(/^\uFEFF/, ""));
 
   if (rows.length === 0) {
     return {
