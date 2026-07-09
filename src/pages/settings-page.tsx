@@ -144,7 +144,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain md:overflow-visible">
+    <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] md:overflow-visible">
       <div>
         <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
           Settings

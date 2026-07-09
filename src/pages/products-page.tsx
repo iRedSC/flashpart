@@ -1803,7 +1803,7 @@ export function ProductsPage() {
         sensors={dndSensors}
       >
         <div
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain md:hidden"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] md:hidden"
           ref={cardListRef}
         >
           {!isLoading && rows.length === 0 ? (
@@ -1952,7 +1952,7 @@ export function ProductsPage() {
           <div className="relative left-1/2 flex min-h-0 w-[100vw] max-w-[100vw] flex-1 -translate-x-1/2 flex-col">
             <div className="mx-auto flex min-h-0 w-full max-w-[min(100vw,90rem)] flex-1 flex-col px-4 md:px-6">
               <div
-                className="min-h-0 flex-1 basis-0 overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm"
+                className="min-h-0 flex-1 basis-0 overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm [scrollbar-gutter:stable]"
                 ref={parentRef}
               >
                 <table
