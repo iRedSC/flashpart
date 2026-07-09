@@ -32,6 +32,8 @@ export type ProductStateFields = {
 /** Minimal photo shape for dual-read helpers (avoids importing product-photo). */
 export type ProductPhotoCaptureFields = {
   kind: "original" | "ai";
+  status?: "uploading" | "ready" | "failed" | "promoted";
+  storageId?: string;
   approvedAt?: number;
   aiStatus?: "pending" | "generating" | "ready" | "failed";
 };
@@ -44,6 +46,14 @@ export type GroupProductProgress = {
   total: number;
 };
 
+/** Empty reserved upload slots do not count as captured photos. */
+function isCommittedOriginalPhoto(photo: ProductPhotoCaptureFields) {
+  return (
+    photo.kind === "original" &&
+    !(photo.status === "uploading" && photo.storageId == null)
+  );
+}
+
 export function countOriginalPhotos(
   photos?: ProductPhotoCaptureFields[] | null,
 ): number {
@@ -51,7 +61,7 @@ export function countOriginalPhotos(
     return 0;
   }
 
-  return photos.filter((photo) => photo.kind === "original").length;
+  return photos.filter(isCommittedOriginalPhoto).length;
 }
 
 export function hasCapturedPhoto(

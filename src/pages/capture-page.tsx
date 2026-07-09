@@ -218,10 +218,18 @@ export function CapturePage() {
   );
   // undefined = still loading (do not treat as 0 originals / not-at-max).
   const photosLoading = currentProductId != null && productPhotos === undefined;
-  const queryOriginalCount =
+  // Capacity includes reserved uploading slots (matches backend max enforcement).
+  const querySlotCount =
     productPhotos?.filter((photo) => photo.kind === "original").length ?? 0;
+  // Progress / hold count excludes empty reserved slots (not yet captured).
+  const queryOriginalCount =
+    productPhotos?.filter(
+      (photo) =>
+        photo.kind === "original" &&
+        !(photo.status === "uploading" && photo.storageId == null),
+    ).length ?? 0;
   const originalCount = Math.max(queryOriginalCount, localOriginalCount);
-  const atMaxPhotos = !photosLoading && originalCount >= maxProductPhotos;
+  const atMaxPhotos = !photosLoading && querySlotCount >= maxProductPhotos;
   const saveReachesMax = originalCount + 1 >= maxProductPhotos;
 
   React.useEffect(() => {
