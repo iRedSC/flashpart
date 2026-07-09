@@ -6,12 +6,22 @@ const MOBILE_VIEWPORT =
 const DEFAULT_VIEWPORT =
   "width=device-width, initial-scale=1.0, viewport-fit=cover";
 
+/** Marks an element whose multi-touch gestures should not be blocked globally. */
+export const ALLOW_CAMERA_PINCH_ATTR = "data-allow-camera-pinch";
+
 function preventGesture(event: Event) {
   event.preventDefault();
 }
 
+function isInsideAllowedCameraPinchTarget(target: EventTarget | null) {
+  return (
+    target instanceof Element &&
+    target.closest(`[${ALLOW_CAMERA_PINCH_ATTR}]`) !== null
+  );
+}
+
 function preventMultiTouchMove(event: TouchEvent) {
-  if (event.touches.length > 1) {
+  if (event.touches.length > 1 && !isInsideAllowedCameraPinchTarget(event.target)) {
     event.preventDefault();
   }
 }
@@ -19,6 +29,9 @@ function preventMultiTouchMove(event: TouchEvent) {
 /**
  * Locks pinch/double-tap zoom while the mobile layout is active so the UI
  * feels closer to a native app than a zoomable mobile web page.
+ *
+ * Multi-touch moves inside `[data-allow-camera-pinch]` are left alone so the
+ * capture screen can drive native MediaStreamTrack zoom.
  */
 export function usePreventPinchZoom(enabled: boolean) {
   React.useEffect(() => {
