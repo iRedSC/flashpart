@@ -157,6 +157,8 @@ type AppDataContextValue = {
   ) => Promise<{ deleted: boolean; ungrouped: number } | null>;
   /** Uploads a capture image to Convex storage (not Shopify). */
   uploadCaptureImage: (file: File) => Promise<ConvexCaptureUpload>;
+  /** Alias of uploadCaptureImage for multi-photo flows. */
+  uploadProductPhoto: (file: File) => Promise<ConvexCaptureUpload>;
   recordCapture: (args: {
     productId: Id<"products">;
     groupId: Id<"groups">;
@@ -168,6 +170,22 @@ type AppDataContextValue = {
     groupId: Id<"groups">;
     file?: File;
   }) => Promise<{ captureId: Id<"captures">; photoId?: Id<"productPhotos"> }>;
+  /** Upload + createOriginal for an additional product photo (reuses submitCapture pieces). */
+  addProductPhoto: (args: {
+    productId: Id<"products">;
+    groupId: Id<"groups">;
+    file: File;
+  }) => Promise<{ captureId: Id<"captures">; photoId: Id<"productPhotos"> }>;
+  /** Deletes a productPhotos row (and AI child), including Shopify files when promoted. */
+  deleteProductPhoto: (
+    photoId: Id<"productPhotos">,
+    options?: { confirmPublishedDelete?: boolean },
+  ) => Promise<null>;
+  approveAiPhoto: (photoId: Id<"productPhotos">) => Promise<null>;
+  regenerateAiImageForPhoto: (args: {
+    originalPhotoId: Id<"productPhotos">;
+    prompt?: string;
+  }) => Promise<null>;
   regenerateAiImage: (args: {
     productId: Id<"products">;
     prompt: string;
@@ -331,6 +349,7 @@ export function AppDataProvider({
   );
   const disconnectShopifyMutation = useMutation(convexApi.shopify.disconnect);
   const deleteProductFileAction = useAction(convexApi.shopify.deleteProductFile);
+  const deleteProductPhotoAction = useAction(convexApi.shopify.deleteProductPhoto);
   const createGroupMutation = useMutation(convexApi.groups.create);
   const assignFirstUngroupedMutation = useMutation(
     convexApi.groups.assignFirstUngrouped,
@@ -346,7 +365,11 @@ export function AppDataProvider({
     convexApi.productPhotos.createOriginalFromUpload,
   );
   const regenerateAiImageMutation = useMutation(convexApi.photoAi.regenerate);
+  const regenerateAiImageForPhotoMutation = useMutation(
+    convexApi.photoAi.regenerateForPhoto,
+  );
   const approvePhotoMutation = useMutation(convexApi.photoAi.approvePhoto);
+  const approveAiPhotoMutation = useMutation(convexApi.photoAi.approveAiPhoto);
   const operationIdRef = React.useRef(0);
   const hasInitializedFailedJobTrackingRef = React.useRef(false);
   const seenFailedListingJobIdsRef = React.useRef<Set<string>>(new Set());
@@ -1083,6 +1106,7 @@ export function AppDataProvider({
         });
       },
       uploadCaptureImage: uploadCaptureFile,
+      uploadProductPhoto: uploadCaptureFile,
       recordCapture: (args) =>
         runOptimistic({
           apply: (state) => ({
@@ -1156,6 +1180,93 @@ export function AppDataProvider({
           label: args.file ? "Uploading capture photo" : "Recording capture",
           productIds: [args.productId],
         }),
+      addProductPhoto: (args) => {
+        const product = optimisticData.products.find(
+          (entry) => entry._id === args.productId,
+        );
+
+        if (!product?.groupId) {
+          throw new Error(
+            "This product is not in a group. Assign it to a group before adding photos.",
+          );
+        }
+
+        if (product.groupId !== args.groupId) {
+          throw new Error(
+            "groupId does not match the product's assigned group.",
+          );
+        }
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: updateProductFields(state.products, args.productId, {
+              lastError: undefined,
+              needsPhotoReview: undefined,
+              pendingOperation: "aiImageGenerating",
+              phase: "captured",
+            }),
+          }),
+          commit: async () => {
+            const uploaded = await uploadCaptureFile(args.file);
+            const captureId = await recordConvexCaptureMutation({
+              groupId: args.groupId,
+              productId: args.productId,
+              sessionToken: session.sessionToken,
+            });
+            const photoId = await createOriginalFromUploadMutation({
+              captureId,
+              productId: args.productId,
+              sessionToken: session.sessionToken,
+              storageId: uploaded.storageId,
+            });
+
+            return { captureId, photoId };
+          },
+          label: "Adding product photo",
+          productIds: [args.productId],
+        });
+      },
+      deleteProductPhoto: (photoId, options) =>
+        // Light optimistic: no photo list in context; product flags refresh via query.
+        runOptimistic({
+          apply: (state) => state,
+          commit: async () => {
+            await deleteProductPhotoAction({
+              confirmPublishedDelete: options?.confirmPublishedDelete,
+              photoId,
+              sessionToken: session.sessionToken,
+            });
+            return null;
+          },
+          label: "Deleting product photo",
+        }),
+      approveAiPhoto: (photoId) =>
+        // Light optimistic: photo rows live in per-product queries, not context.
+        runOptimistic({
+          apply: (state) => state,
+          commit: async () => {
+            await approveAiPhotoMutation({
+              photoId,
+              sessionToken: session.sessionToken,
+            });
+            return null;
+          },
+          label: "Approving AI photo",
+        }),
+      regenerateAiImageForPhoto: ({ originalPhotoId, prompt }) =>
+        runOptimistic({
+          apply: (state) => state,
+          commit: async () => {
+            await regenerateAiImageForPhotoMutation({
+              originalPhotoId,
+              prompt,
+              sessionToken: session.sessionToken,
+            });
+            return null;
+          },
+          label: "Regenerating AI photo",
+        }),
       regenerateAiImage: ({ productId, prompt }) =>
         runOptimistic({
           apply: (state) => ({
@@ -1206,6 +1317,7 @@ export function AppDataProvider({
       unarchiveProductsMutation,
       deleteProductsMutation,
       deleteProductFileAction,
+      deleteProductPhotoAction,
       importProductsMutation,
       groups,
       listingJobs,
@@ -1220,10 +1332,12 @@ export function AppDataProvider({
       products,
       publishProductsMutation,
       queryArgs,
+      approveAiPhotoMutation,
       approvePhotoMutation,
       createOriginalFromUploadMutation,
       generateUploadUrlMutation,
       recordConvexCaptureMutation,
+      regenerateAiImageForPhotoMutation,
       regenerateAiImageMutation,
       reorderProductsMutation,
       runOptimistic,

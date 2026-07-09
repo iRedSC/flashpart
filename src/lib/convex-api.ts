@@ -92,6 +92,9 @@ export const convexApi = {
     listByProductKind: deployedFunction<
       typeof api.productPhotos.listByProductKind
     >("productPhotos.js:listByProductKind"),
+    listForProducts: deployedFunction<typeof api.productPhotos.listForProducts>(
+      "productPhotos.js:listForProducts",
+    ),
     generateUploadUrl: deployedFunction<
       typeof api.productPhotos.generateUploadUrl
     >("productPhotos.js:generateUploadUrl"),
@@ -191,6 +194,12 @@ export const convexApi = {
     ),
     finalizeFileUpload: deployedFunction<typeof api.shopify.finalizeFileUpload>(
       "shopify.js:finalizeFileUpload",
+    ),
+    promotePhotoToShopify: deployedFunction<
+      typeof api.shopify.promotePhotoToShopify
+    >("shopify.js:promotePhotoToShopify"),
+    deleteProductPhoto: deployedFunction<typeof api.shopify.deleteProductPhoto>(
+      "shopify.js:deleteProductPhoto",
     ),
     deleteProductFile: deployedFunction<typeof api.shopify.deleteProductFile>(
       "shopify.js:deleteProductFile",

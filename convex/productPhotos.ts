@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import {
   internalMutation,
+  internalQuery,
   mutation,
   query,
 } from "./_generated/server";
@@ -328,6 +329,101 @@ export async function applyApproveAiPhoto(
   });
 }
 
+export async function applyMarkPromoted(
+  ctx: MutationCtx,
+  args: {
+    photoId: Id<"productPhotos">;
+    shopifyFileId: string;
+    shopifyFileStatus:
+      | "uploaded"
+      | "processing"
+      | "ready"
+      | "failed";
+    shopifyFileUrl?: string;
+    keepStorageId?: boolean;
+  },
+) {
+  const photo = await ctx.db.get(args.photoId);
+
+  if (!photo) {
+    throw new ConvexError("Photo not found.");
+  }
+
+  const now = Date.now();
+  const patch: Partial<Doc<"productPhotos">> = {
+    shopifyFileDeletedAt: undefined,
+    shopifyFileId: args.shopifyFileId,
+    shopifyFileStatus: args.shopifyFileStatus,
+    status: "promoted",
+    updatedAt: now,
+    url: args.shopifyFileUrl ?? photo.url,
+  };
+
+  if (args.keepStorageId === false && photo.storageId) {
+    await deleteStorageBlob(ctx, photo.storageId);
+    patch.storageId = undefined;
+  }
+
+  await ctx.db.patch(args.photoId, patch);
+  await ctx.db.patch(photo.productId, { updatedAt: now });
+}
+
+export async function applyClearStorageId(
+  ctx: MutationCtx,
+  photoId: Id<"productPhotos">,
+) {
+  const photo = await ctx.db.get(photoId);
+
+  if (!photo) {
+    throw new ConvexError("Photo not found.");
+  }
+
+  if (!photo.storageId) {
+    return;
+  }
+
+  const now = Date.now();
+
+  await deleteStorageBlob(ctx, photo.storageId);
+  await ctx.db.patch(photoId, {
+    storageId: undefined,
+    updatedAt: now,
+  });
+}
+
+export async function applyDeletePhoto(
+  ctx: MutationCtx,
+  photoId: Id<"productPhotos">,
+) {
+  const photo = await ctx.db.get(photoId);
+
+  if (!photo) {
+    throw new ConvexError("Photo not found.");
+  }
+
+  const now = Date.now();
+  const toDelete: Doc<"productPhotos">[] = [photo];
+
+  if (photo.kind === "original") {
+    const aiChild = await getAiForOriginal(ctx, photo._id);
+
+    if (aiChild) {
+      toDelete.push(aiChild);
+    }
+  }
+
+  for (const row of toDelete) {
+    await deleteStorageBlob(ctx, row.storageId);
+    // Shopify Files are deleted by shopify.deleteProductPhoto when present.
+    await ctx.db.delete(row._id);
+  }
+
+  // TODO(Wave E): fuller product needsPhotoReview / pendingOperation recalc.
+  await recomputeProductPhotoFlags(ctx, photo.productId, now, {
+    clearPendingIfIdle: true,
+  });
+}
+
 export const listByProduct = query({
   args: {
     sessionToken: v.string(),
@@ -355,6 +451,31 @@ export const listByProductKind = query({
       .collect();
 
     return photos.sort(comparePhotoOrder);
+  },
+});
+
+/** Batch photo fetch for product-list thumbnails (avoids N+1 listByProduct). */
+export const listForProducts = query({
+  args: {
+    sessionToken: v.string(),
+    productIds: v.array(v.id("products")),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+
+    const uniqueIds = [...new Set(args.productIds)];
+    const photosByProductId: Record<string, Doc<"productPhotos">[]> = {};
+
+    await Promise.all(
+      uniqueIds.map(async (productId) => {
+        photosByProductId[productId] = await listPhotosForProduct(
+          ctx,
+          productId,
+        );
+      }),
+    );
+
+    return photosByProductId;
   },
 });
 
@@ -475,42 +596,83 @@ export const setSortOrder = mutation({
   },
 });
 
-export const deletePhoto = mutation({
+export const getPhotoForPromote = internalQuery({
   args: {
-    sessionToken: v.string(),
     photoId: v.id("productPhotos"),
   },
   handler: async (ctx, args) => {
-    await requireSessionUser(ctx, args.sessionToken);
     const photo = await ctx.db.get(args.photoId);
 
     if (!photo) {
-      throw new ConvexError("Photo not found.");
+      return null;
     }
 
-    const now = Date.now();
-    const toDelete: Doc<"productPhotos">[] = [photo];
+    const product = await ctx.db.get(photo.productId);
+
+    return {
+      photo,
+      sku: product?.sku ?? "product",
+    };
+  },
+});
+
+export const getPhotoForDeletion = internalQuery({
+  args: {
+    photoId: v.id("productPhotos"),
+  },
+  handler: async (ctx, args) => {
+    const photo = await ctx.db.get(args.photoId);
+
+    if (!photo) {
+      return null;
+    }
+
+    const product = await ctx.db.get(photo.productId);
+    const shopifyFileIds: string[] = [];
+
+    if (photo.shopifyFileId) {
+      shopifyFileIds.push(photo.shopifyFileId);
+    }
 
     if (photo.kind === "original") {
       const aiChild = await getAiForOriginal(ctx, photo._id);
 
-      if (aiChild) {
-        toDelete.push(aiChild);
+      if (aiChild?.shopifyFileId) {
+        shopifyFileIds.push(aiChild.shopifyFileId);
       }
     }
 
-    for (const row of toDelete) {
-      await deleteStorageBlob(ctx, row.storageId);
-      // STUB (C1): Shopify file deletion. If row.shopifyFileId is set, do not call
-      // Shopify here — C1 will delete remote files (or soft-clear shopify fields /
-      // mark shopifyFileDeletedAt). For now we only remove the Convex row.
-      await ctx.db.delete(row._id);
-    }
+    return {
+      photoId: photo._id,
+      productId: photo.productId,
+      shopifyFileIds,
+      shopifyStatus: product?.shopifyStatus,
+    };
+  },
+});
 
-    // TODO(Wave E): fuller product needsPhotoReview / pendingOperation recalc.
-    await recomputeProductPhotoFlags(ctx, photo.productId, now, {
-      clearPendingIfIdle: true,
-    });
+export const deletePhoto = mutation({
+  args: {
+    sessionToken: v.string(),
+    photoId: v.id("productPhotos"),
+    /**
+     * Informational: Shopify deletion is handled by shopify.deleteProductPhoto.
+     * This mutation only removes Convex rows + storage.
+     */
+    shopifyFilesHandled: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    await applyDeletePhoto(ctx, args.photoId);
+  },
+});
+
+export const deletePhotoInternal = internalMutation({
+  args: {
+    photoId: v.id("productPhotos"),
+  },
+  handler: async (ctx, args) => {
+    await applyDeletePhoto(ctx, args.photoId);
   },
 });
 
@@ -624,29 +786,26 @@ export const markPromoted = mutation({
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const photo = await ctx.db.get(args.photoId);
-
-    if (!photo) {
-      throw new ConvexError("Photo not found.");
-    }
-
-    const now = Date.now();
-    const patch: Partial<Doc<"productPhotos">> = {
-      shopifyFileDeletedAt: undefined,
+    await applyMarkPromoted(ctx, {
+      photoId: args.photoId,
       shopifyFileId: args.shopifyFileId,
       shopifyFileStatus: args.shopifyFileStatus,
-      status: "promoted",
-      updatedAt: now,
-      url: args.shopifyFileUrl ?? photo.url,
-    };
+      shopifyFileUrl: args.shopifyFileUrl,
+      keepStorageId: args.keepStorageId,
+    });
+  },
+});
 
-    if (args.keepStorageId === false && photo.storageId) {
-      await deleteStorageBlob(ctx, photo.storageId);
-      patch.storageId = undefined;
-    }
-
-    await ctx.db.patch(args.photoId, patch);
-    await ctx.db.patch(photo.productId, { updatedAt: now });
+export const markPromotedInternal = internalMutation({
+  args: {
+    photoId: v.id("productPhotos"),
+    shopifyFileId: v.string(),
+    shopifyFileStatus: shopifyFileStatus,
+    shopifyFileUrl: v.optional(v.string()),
+    keepStorageId: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    await applyMarkPromoted(ctx, args);
   },
 });
 
@@ -657,22 +816,15 @@ export const clearStorageId = mutation({
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const photo = await ctx.db.get(args.photoId);
+    await applyClearStorageId(ctx, args.photoId);
+  },
+});
 
-    if (!photo) {
-      throw new ConvexError("Photo not found.");
-    }
-
-    if (!photo.storageId) {
-      return;
-    }
-
-    const now = Date.now();
-
-    await deleteStorageBlob(ctx, photo.storageId);
-    await ctx.db.patch(args.photoId, {
-      storageId: undefined,
-      updatedAt: now,
-    });
+export const clearStorageIdInternal = internalMutation({
+  args: {
+    photoId: v.id("productPhotos"),
+  },
+  handler: async (ctx, args) => {
+    await applyClearStorageId(ctx, args.photoId);
   },
 });

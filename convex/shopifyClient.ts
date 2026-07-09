@@ -300,9 +300,54 @@ export async function uploadImageBufferToShopify(
     originalSource: target.resourceUrl,
   });
 
-  for (let attempt = 0; attempt < 4 && file.status !== "ready"; attempt += 1) {
+  for (
+    let attempt = 0;
+    attempt < 8 && (file.status !== "ready" || !file.url);
+    attempt += 1
+  ) {
+    if (file.status === "failed") {
+      throw new ConvexError("Shopify image processing failed.");
+    }
+
     await wait(750);
     file = await getShopifyFile(connection, file.id);
+  }
+
+  if (file.status !== "ready" || !file.url) {
+    throw new ConvexError(
+      "Shopify image was not ready with a fetchable URL in time.",
+    );
+  }
+
+  return file;
+}
+
+export async function pollShopifyFileUntilReady(
+  connection: ShopifyConnection,
+  fileId: string,
+  options?: { maxAttempts?: number; delayMs?: number },
+) {
+  const maxAttempts = options?.maxAttempts ?? 8;
+  const delayMs = options?.delayMs ?? 750;
+  let file = await getShopifyFile(connection, fileId);
+
+  for (
+    let attempt = 0;
+    attempt < maxAttempts && (file.status !== "ready" || !file.url);
+    attempt += 1
+  ) {
+    if (file.status === "failed") {
+      throw new ConvexError("Shopify image processing failed.");
+    }
+
+    await wait(delayMs);
+    file = await getShopifyFile(connection, fileId);
+  }
+
+  if (file.status !== "ready" || !file.url) {
+    throw new ConvexError(
+      "Shopify image was not ready with a fetchable URL in time.",
+    );
   }
 
   return file;

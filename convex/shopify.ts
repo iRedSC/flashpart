@@ -1,12 +1,22 @@
 import { ConvexError, v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
-import { action, httpAction, mutation, query } from "./_generated/server";
+import {
+  action,
+  httpAction,
+  internalAction,
+  mutation,
+  query,
+} from "./_generated/server";
+import type { ActionCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { requireSessionUser } from "./authUtils";
 import {
   createShopifyFile,
   createStagedImageUpload,
   deleteShopifyFiles,
   getShopifyFile,
+  pollShopifyFileUntilReady,
+  uploadImageBufferToShopify,
 } from "./shopifyClient";
 
 const SHOPIFY_SCOPES = ["read_products", "write_products", "read_files", "write_files"];
@@ -15,6 +25,11 @@ const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 type ShopifyAccessTokenResponse = {
   access_token?: string;
   scope?: string;
+};
+
+type ShopifyConnection = {
+  accessToken: string;
+  shopDomain: string;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,6 +43,9 @@ const shopifyModel = {
   currentActiveConnection: makeFunctionReference(
     "shopifyModel.js:currentActiveConnection",
   ) as any,
+  firstActiveConnection: makeFunctionReference(
+    "shopifyModel.js:firstActiveConnection",
+  ) as any,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,6 +55,25 @@ const productModel = {
   ) as any,
   markShopifyFileDeleted: makeFunctionReference(
     "products.js:markShopifyFileDeleted",
+  ) as any,
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const productPhotosModel = {
+  getPhotoForPromote: makeFunctionReference(
+    "productPhotos.js:getPhotoForPromote",
+  ) as any,
+  getPhotoForDeletion: makeFunctionReference(
+    "productPhotos.js:getPhotoForDeletion",
+  ) as any,
+  markPromotedInternal: makeFunctionReference(
+    "productPhotos.js:markPromotedInternal",
+  ) as any,
+  clearStorageIdInternal: makeFunctionReference(
+    "productPhotos.js:clearStorageIdInternal",
+  ) as any,
+  deletePhotoInternal: makeFunctionReference(
+    "productPhotos.js:deletePhotoInternal",
   ) as any,
 };
 
@@ -127,6 +164,169 @@ const htmlResponse = (title: string, message: string, status = 200) =>
 
 const wait = (milliseconds: number) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function confirmUrlFetchable(url: string) {
+  try {
+    const head = await fetch(url, { method: "HEAD" });
+
+    if (head.ok) {
+      return;
+    }
+  } catch {
+    // Fall through to GET.
+  }
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new ConvexError("Shopify file URL is not fetchable yet.");
+  }
+}
+
+async function promotePhotoWithConnection(
+  ctx: ActionCtx,
+  connection: ShopifyConnection,
+  photoId: Id<"productPhotos">,
+) {
+  const payload = (await ctx.runQuery(productPhotosModel.getPhotoForPromote, {
+    photoId,
+  })) as {
+    photo: {
+      _id: Id<"productPhotos">;
+      kind: "original" | "ai";
+      storageId?: Id<"_storage">;
+      shopifyFileId?: string;
+      shopifyFileStatus?: "uploaded" | "processing" | "ready" | "failed";
+      status: "uploading" | "ready" | "failed" | "promoted";
+      url?: string;
+      sortOrder: number;
+    };
+    sku: string;
+  } | null;
+
+  if (!payload?.photo) {
+    throw new ConvexError("Photo not found.");
+  }
+
+  const { photo, sku } = payload;
+
+  // Retry-safe: already promoted with Shopify file → ensure storage cleared.
+  if (
+    photo.shopifyFileId &&
+    (photo.status === "promoted" || photo.shopifyFileStatus === "ready")
+  ) {
+    let file = {
+      id: photo.shopifyFileId,
+      status: photo.shopifyFileStatus ?? ("ready" as const),
+      url: photo.url,
+    };
+
+    if (file.status !== "ready" || !file.url) {
+      const polled = await pollShopifyFileUntilReady(
+        connection,
+        photo.shopifyFileId,
+      );
+      file = polled;
+      await ctx.runMutation(productPhotosModel.markPromotedInternal, {
+        photoId,
+        shopifyFileId: file.id,
+        shopifyFileStatus: file.status,
+        shopifyFileUrl: file.url,
+        keepStorageId: true,
+      });
+    }
+
+    if (photo.storageId) {
+      await ctx.runMutation(productPhotosModel.clearStorageIdInternal, {
+        photoId,
+      });
+    }
+
+    return {
+      shopifyFileId: file.id,
+      url: file.url,
+      status: file.status,
+    };
+  }
+
+  if (!photo.storageId && !photo.shopifyFileId) {
+    throw new ConvexError(
+      "Photo has no Convex storage or Shopify file to promote.",
+    );
+  }
+
+  // Partial promote: Shopify file exists but not yet marked ready/promoted.
+  if (photo.shopifyFileId) {
+    const file = await pollShopifyFileUntilReady(
+      connection,
+      photo.shopifyFileId,
+    );
+
+    if (file.url) {
+      await confirmUrlFetchable(file.url);
+    }
+
+    await ctx.runMutation(productPhotosModel.markPromotedInternal, {
+      photoId,
+      shopifyFileId: file.id,
+      shopifyFileStatus: file.status,
+      shopifyFileUrl: file.url,
+      keepStorageId: true,
+    });
+    await ctx.runMutation(productPhotosModel.clearStorageIdInternal, {
+      photoId,
+    });
+
+    return {
+      shopifyFileId: file.id,
+      url: file.url,
+      status: file.status,
+    };
+  }
+
+  const storageId = photo.storageId!;
+  const blob = await ctx.storage.get(storageId);
+
+  if (!blob) {
+    throw new ConvexError("Could not load photo from Convex storage.");
+  }
+
+  const mimeType = blob.type || "image/jpeg";
+  const extension = mimeType.includes("png")
+    ? "png"
+    : mimeType.includes("webp")
+      ? "webp"
+      : "jpg";
+  const kindLabel = photo.kind === "ai" ? "ai" : "original";
+  const data = await blob.arrayBuffer();
+  const file = await uploadImageBufferToShopify(connection, {
+    alt: `${sku} ${kindLabel} photo`,
+    data,
+    filename: `${sku}-${kindLabel}-${photo.sortOrder}.${extension}`,
+    mimeType,
+  });
+
+  if (file.url) {
+    await confirmUrlFetchable(file.url);
+  }
+
+  await ctx.runMutation(productPhotosModel.markPromotedInternal, {
+    photoId,
+    shopifyFileId: file.id,
+    shopifyFileStatus: file.status,
+    shopifyFileUrl: file.url,
+    keepStorageId: true,
+  });
+  await ctx.runMutation(productPhotosModel.clearStorageIdInternal, {
+    photoId,
+  });
+
+  return {
+    shopifyFileId: file.id,
+    url: file.url,
+    status: file.status,
+  };
+}
 
 export const startShopifyInstall = action({
   args: {
@@ -238,6 +438,90 @@ export const finalizeFileUpload = action({
     }
 
     return file;
+  },
+});
+
+export const promotePhotoToShopify = action({
+  args: {
+    sessionToken: v.string(),
+    photoId: v.id("productPhotos"),
+  },
+  handler: async (ctx, args) => {
+    const connection = await ctx.runQuery(shopifyModel.currentActiveConnection, {
+      sessionToken: args.sessionToken,
+    });
+
+    if (!connection) {
+      throw new ConvexError("Connect Shopify before promoting photos.");
+    }
+
+    return await promotePhotoWithConnection(ctx, connection, args.photoId);
+  },
+});
+
+/** Session-free promote for listing jobs (uses first active Shopify connection). */
+export const promotePhotoInternal = internalAction({
+  args: {
+    photoId: v.id("productPhotos"),
+  },
+  handler: async (ctx, args) => {
+    const connection = await ctx.runQuery(shopifyModel.firstActiveConnection, {});
+
+    if (!connection) {
+      throw new ConvexError("Connect Shopify before promoting photos.");
+    }
+
+    return await promotePhotoWithConnection(ctx, connection, args.photoId);
+  },
+});
+
+export const deleteProductPhoto = action({
+  args: {
+    sessionToken: v.string(),
+    photoId: v.id("productPhotos"),
+    confirmPublishedDelete: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const [connection, deletion] = await Promise.all([
+      ctx.runQuery(shopifyModel.currentActiveConnection, {
+        sessionToken: args.sessionToken,
+      }),
+      ctx.runQuery(productPhotosModel.getPhotoForDeletion, {
+        photoId: args.photoId,
+      }),
+    ]);
+
+    if (!deletion) {
+      throw new ConvexError("Photo not found.");
+    }
+
+    if (deletion.shopifyFileIds.length > 0) {
+      if (!connection) {
+        throw new ConvexError("Connect Shopify before deleting stored photos.");
+      }
+
+      if (
+        deletion.shopifyStatus === "published" &&
+        !args.confirmPublishedDelete
+      ) {
+        throw new ConvexError(
+          "This product is published. Confirm before deleting its Shopify file.",
+        );
+      }
+
+      await deleteShopifyFiles(connection, deletion.shopifyFileIds).catch(
+        () => undefined,
+      );
+    }
+
+    await ctx.runMutation(productPhotosModel.deletePhotoInternal, {
+      photoId: args.photoId,
+    });
+
+    return {
+      deletedFileIds: deletion.shopifyFileIds,
+      photoId: args.photoId,
+    };
   },
 });
 
