@@ -19,6 +19,7 @@ import { maybeUnarchiveGroupForActiveProduct } from "./groups";
 import {
   applyApproveAiPhoto,
   applyMarkAiGenerating,
+  productHasPhotoRows,
 } from "./productPhotos";
 import { productErrorFields } from "./productState";
 import { resolveAiImageSettings } from "./settings";
@@ -74,6 +75,36 @@ type GeminiResponse = {
   }>;
   error?: { message?: string };
 };
+
+type ShopifyConnection = {
+  accessToken: string;
+  shopDomain: string;
+};
+
+/** Delete Shopify Files; treat already-gone as success (same as deleteProductPhoto). */
+async function deleteShopifyFilesBestEffort(
+  connection: ShopifyConnection,
+  fileIds: string[],
+) {
+  const unique = [...new Set(fileIds.filter(Boolean))];
+  if (unique.length === 0) {
+    return;
+  }
+
+  try {
+    await deleteShopifyFiles(connection, unique);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const alreadyGone =
+      /not found|does not exist|FILE_DOES_NOT_EXIST|already deleted/i.test(
+        message,
+      );
+    if (!alreadyGone) {
+      // Best-effort cleanup: do not fail AI generation on Shopify delete errors.
+      console.error("Failed to delete previous Shopify files:", message);
+    }
+  }
+}
 
 function assertGeminiEnv() {
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
@@ -352,15 +383,20 @@ export const scheduleProcessing = internalMutation({
         return;
       }
 
-      const { aiGeneration } = await applyMarkAiGenerating(ctx, {
-        productId: args.productId,
-        originalPhotoId: args.originalPhotoId,
-      });
+      const { aiGeneration, previousShopifyFileIds } =
+        await applyMarkAiGenerating(ctx, {
+          productId: args.productId,
+          originalPhotoId: args.originalPhotoId,
+        });
 
       await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
         productId: args.productId,
         originalPhotoId: args.originalPhotoId,
         aiGeneration,
+        previousShopifyFileIds:
+          previousShopifyFileIds.length > 0
+            ? previousShopifyFileIds
+            : undefined,
       });
       return;
     }
@@ -405,6 +441,8 @@ export const scheduleProcessing = internalMutation({
 export const processProductPhoto = internalAction({
   args: {
     previousAiShopifyFileId: v.optional(v.string()),
+    /** Cleared Shopify file ids from regen/replace (multi-photo path). */
+    previousShopifyFileIds: v.optional(v.array(v.string())),
     productId: v.id("products"),
     originalPhotoId: v.optional(v.id("productPhotos")),
     /** Required for multi-photo path when caller already bumped via applyMarkAiGenerating. */
@@ -413,6 +451,7 @@ export const processProductPhoto = internalAction({
   handler: async (ctx, args) => {
     if (args.originalPhotoId) {
       let aiGeneration = args.aiGeneration;
+      let previousShopifyFileIds = args.previousShopifyFileIds ?? [];
 
       if (aiGeneration === undefined) {
         const marked = await ctx.runMutation(
@@ -423,9 +462,29 @@ export const processProductPhoto = internalAction({
           },
         );
         aiGeneration = marked.aiGeneration as number;
+        const fromMark = (marked.previousShopifyFileIds ?? []) as string[];
+        if (fromMark.length > 0) {
+          previousShopifyFileIds = [
+            ...previousShopifyFileIds,
+            ...fromMark,
+          ];
+        }
       }
 
       try {
+        if (previousShopifyFileIds.length > 0) {
+          const connection = await ctx.runQuery(
+            shopifyModel.firstActiveConnection,
+            {},
+          );
+          if (connection) {
+            await deleteShopifyFilesBestEffort(
+              connection,
+              previousShopifyFileIds,
+            );
+          }
+        }
+
         const payload = await ctx.runQuery(photoAiModel.processingPayload, {
           productId: args.productId,
           originalPhotoId: args.originalPhotoId,
@@ -477,12 +536,22 @@ export const processProductPhoto = internalAction({
         );
         const url = await ctx.storage.getUrl(storageId);
 
-        await ctx.runMutation(productPhotosModel.markAiReadyInternal, {
-          originalPhotoId: args.originalPhotoId,
-          storageId,
-          url: url ?? undefined,
-          aiGeneration,
-        });
+        try {
+          await ctx.runMutation(productPhotosModel.markAiReadyInternal, {
+            originalPhotoId: args.originalPhotoId,
+            storageId,
+            url: url ?? undefined,
+            aiGeneration,
+          });
+        } catch (markError) {
+          // Row missing or mark failed after store: drop the new blob.
+          try {
+            await ctx.storage.delete(storageId);
+          } catch {
+            // Storage may already be gone.
+          }
+          throw markError;
+        }
       } catch (error) {
         await ctx.runMutation(productPhotosModel.markAiFailedInternal, {
           error:
@@ -518,9 +587,9 @@ export const processProductPhoto = internalAction({
       }
 
       if (args.previousAiShopifyFileId) {
-        await deleteShopifyFiles(connection, [args.previousAiShopifyFileId]).catch(
-          () => undefined,
-        );
+        await deleteShopifyFilesBestEffort(connection, [
+          args.previousAiShopifyFileId,
+        ]);
       }
 
       const originalResponse = await fetch(payload.shopifyFileUrl);
@@ -602,11 +671,12 @@ export const regenerate = mutation({
 
       const now = Date.now();
       // Clears shopifyFile* so promote cannot reuse a stale Shopify file after regen.
-      const { aiGeneration } = await applyMarkAiGenerating(ctx, {
-        productId: args.productId,
-        originalPhotoId: args.originalPhotoId,
-        prompt,
-      });
+      const { aiGeneration, previousShopifyFileIds } =
+        await applyMarkAiGenerating(ctx, {
+          productId: args.productId,
+          originalPhotoId: args.originalPhotoId,
+          prompt,
+        });
 
       await ctx.db.patch(args.productId, {
         aiImagePrompt: prompt,
@@ -616,6 +686,10 @@ export const regenerate = mutation({
         productId: args.productId,
         originalPhotoId: args.originalPhotoId,
         aiGeneration,
+        previousShopifyFileIds:
+          previousShopifyFileIds.length > 0
+            ? previousShopifyFileIds
+            : undefined,
       });
       return;
     }
@@ -687,11 +761,12 @@ export const regenerateForPhoto = mutation({
     const now = Date.now();
 
     // Clears shopifyFile* so promote cannot reuse a stale Shopify file after regen.
-    const { aiGeneration } = await applyMarkAiGenerating(ctx, {
-      productId: original.productId,
-      originalPhotoId: args.originalPhotoId,
-      prompt,
-    });
+    const { aiGeneration, previousShopifyFileIds } =
+      await applyMarkAiGenerating(ctx, {
+        productId: original.productId,
+        originalPhotoId: args.originalPhotoId,
+        prompt,
+      });
 
     await ctx.db.patch(original.productId, {
       aiImagePrompt: prompt,
@@ -701,6 +776,10 @@ export const regenerateForPhoto = mutation({
       productId: original.productId,
       originalPhotoId: args.originalPhotoId,
       aiGeneration,
+      previousShopifyFileIds:
+        previousShopifyFileIds.length > 0
+          ? previousShopifyFileIds
+          : undefined,
     });
   },
 });
@@ -727,6 +806,13 @@ export const approvePhoto = mutation({
 
     if (!product) {
       throw new ConvexError("Product not found.");
+    }
+
+    // Multi-photo products must approve per AI row via approveAiPhoto.
+    if (await productHasPhotoRows(ctx, args.productId)) {
+      throw new ConvexError(
+        "Use approveAiPhoto for multi-photo products.",
+      );
     }
 
     if (product.aiImageStatus !== "ready") {

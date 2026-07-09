@@ -339,7 +339,12 @@ export async function applyMarkAiGenerating(
     originalPhotoId: Id<"productPhotos">;
     prompt?: string;
   },
-): Promise<{ aiPhotoId: Id<"productPhotos">; aiGeneration: number }> {
+): Promise<{
+  aiPhotoId: Id<"productPhotos">;
+  aiGeneration: number;
+  /** Cleared Shopify file ids — caller must delete via action (e.g. processProductPhoto). */
+  previousShopifyFileIds: string[];
+}> {
   const product = await ctx.db.get(args.productId);
 
   if (!product) {
@@ -360,14 +365,18 @@ export async function applyMarkAiGenerating(
   const existingAi = await getAiForOriginal(ctx, args.originalPhotoId);
   const prompt = args.prompt?.trim();
   const aiGeneration = (existingAi?.aiGeneration ?? 0) + 1;
+  const previousShopifyFileIds: string[] = [];
+
+  if (existingAi?.shopifyFileId) {
+    previousShopifyFileIds.push(existingAi.shopifyFileId);
+  }
 
   let aiPhotoId: Id<"productPhotos">;
 
   if (existingAi) {
     // Regen must not reuse a prior Shopify file on promote (clear even if
     // already generating — e.g. reserved slot or interrupted regen).
-    // Shopify file leak on clear: delete helpers live in shopify.ts (out of
-    // scope); cleared IDs may orphan until manual/ops cleanup.
+    // Callers schedule Shopify fileDelete with previousShopifyFileIds.
     await ctx.db.patch(existingAi._id, {
       aiError: undefined,
       aiGeneration,
@@ -380,6 +389,7 @@ export async function applyMarkAiGenerating(
       sortOrder: original.sortOrder,
       status: "uploading",
       // Keep prior Convex blob until markAiReady replaces it (stale jobs no-op).
+      // Drop Shopify CDN url when there is no Convex blob to fall back to.
       url: existingAi.storageId ? existingAi.url : undefined,
       updatedAt: now,
     });
@@ -401,7 +411,7 @@ export async function applyMarkAiGenerating(
 
   await syncProductPhotoFlags(ctx, args.productId);
 
-  return { aiPhotoId, aiGeneration };
+  return { aiPhotoId, aiGeneration, previousShopifyFileIds };
 }
 
 export async function applyMarkAiReady(
@@ -414,7 +424,14 @@ export async function applyMarkAiReady(
     originalPhotoId?: Id<"productPhotos">;
   },
 ) {
-  const aiPhoto = await resolveAiPhotoRow(ctx, args);
+  let aiPhoto: Doc<"productPhotos">;
+  try {
+    aiPhoto = await resolveAiPhotoRow(ctx, args);
+  } catch {
+    // Row deleted mid-run: drop the just-stored blob so it is not orphaned.
+    await deleteStorageBlob(ctx, args.storageId);
+    return null;
+  }
 
   if ((aiPhoto.aiGeneration ?? 0) !== args.aiGeneration) {
     // Stale job: drop orphaned blob from this generation attempt.
@@ -429,10 +446,15 @@ export async function applyMarkAiReady(
     await deleteStorageBlob(ctx, aiPhoto.storageId);
   }
 
+  // Always clear Shopify identity so a concurrent promote cannot leave a stale
+  // file id that the next promote would resume.
   await ctx.db.patch(aiPhoto._id, {
     aiError: undefined,
     aiStatus: "ready",
     approvedAt: undefined,
+    shopifyFileDeletedAt: undefined,
+    shopifyFileId: undefined,
+    shopifyFileStatus: undefined,
     storageId: args.storageId,
     status: "ready",
     url: url ?? undefined,
@@ -453,7 +475,13 @@ export async function applyMarkAiFailed(
     originalPhotoId?: Id<"productPhotos">;
   },
 ) {
-  const aiPhoto = await resolveAiPhotoRow(ctx, args);
+  let aiPhoto: Doc<"productPhotos">;
+  try {
+    aiPhoto = await resolveAiPhotoRow(ctx, args);
+  } catch {
+    // Row deleted mid-run: no-op (caller may still clean up a stored blob).
+    return null;
+  }
 
   if ((aiPhoto.aiGeneration ?? 0) !== args.aiGeneration) {
     return null;
@@ -510,6 +538,16 @@ export async function applyMarkPromoted(
     shopifyFileUrl?: string;
     /** When false, delete Convex storage immediately. Promote path usually keeps then clearStorageId. */
     keepStorageId?: boolean;
+    /**
+     * Generation token captured at promote start. Abort if the AI row was
+     * regenerated (or is no longer approved/ready) before this mark lands.
+     */
+    expectedAiGeneration?: number;
+    /**
+     * When false, persist Shopify file identity without status "promoted"
+     * (post-fileCreate, pre-poll). Default true — only mark promoted after ready.
+     */
+    markAsPromoted?: boolean;
   },
 ) {
   const photo = await ctx.db.get(args.photoId);
@@ -518,15 +556,39 @@ export async function applyMarkPromoted(
     throw new ConvexError("Photo not found.");
   }
 
+  // Re-assert eligibility at mark time so an in-flight promote cannot stamp a
+  // stale Shopify file onto a regenerated / unapproved AI row.
+  if (photo.kind === "ai") {
+    if (photo.aiStatus !== "ready") {
+      throw new ConvexError("AI photo is no longer ready for publish.");
+    }
+
+    if (photo.approvedAt == null) {
+      throw new ConvexError("AI photo is no longer approved for publish.");
+    }
+
+    if (
+      args.expectedAiGeneration !== undefined &&
+      (photo.aiGeneration ?? 0) !== args.expectedAiGeneration
+    ) {
+      throw new ConvexError(
+        "AI photo was regenerated during promote; aborting stale promote.",
+      );
+    }
+  }
+
   const now = Date.now();
   const patch: Partial<Doc<"productPhotos">> = {
     shopifyFileDeletedAt: undefined,
     shopifyFileId: args.shopifyFileId,
     shopifyFileStatus: args.shopifyFileStatus,
-    status: "promoted",
     updatedAt: now,
     url: args.shopifyFileUrl ?? photo.url,
   };
+
+  if (args.markAsPromoted !== false) {
+    patch.status = "promoted";
+  }
 
   // Always clear storage when keepStorageId is explicitly false.
   // (promotePhotoToShopify clears via clearStorageId after mark; photoGc is the safety net.)
@@ -536,6 +598,33 @@ export async function applyMarkPromoted(
   }
 
   await ctx.db.patch(args.photoId, patch);
+  await ctx.db.patch(photo.productId, { updatedAt: now });
+}
+
+/** Terminal Shopify promote failure: keep Convex storage for retry; do not mark promoted. */
+export async function applyMarkPromoteFailed(
+  ctx: MutationCtx,
+  args: {
+    photoId: Id<"productPhotos">;
+    shopifyFileId?: string;
+    shopifyFileStatus?: "uploaded" | "processing" | "ready" | "failed";
+    shopifyFileUrl?: string;
+  },
+) {
+  const photo = await ctx.db.get(args.photoId);
+
+  if (!photo) {
+    throw new ConvexError("Photo not found.");
+  }
+
+  const now = Date.now();
+  await ctx.db.patch(args.photoId, {
+    status: "failed",
+    shopifyFileId: args.shopifyFileId ?? photo.shopifyFileId,
+    shopifyFileStatus: args.shopifyFileStatus ?? "failed",
+    url: args.shopifyFileUrl ?? photo.url,
+    updatedAt: now,
+  });
   await ctx.db.patch(photo.productId, { updatedAt: now });
 }
 
@@ -791,10 +880,13 @@ async function finalizeReservedOriginal(
   await ctx.db.patch(args.originalPhotoId, patch);
 
   // Mark AI generating + bump generation only when work is scheduled.
-  const { aiGeneration } = await applyMarkAiGenerating(ctx, {
-    productId: original.productId,
-    originalPhotoId: args.originalPhotoId,
-  });
+  const { aiGeneration, previousShopifyFileIds } = await applyMarkAiGenerating(
+    ctx,
+    {
+      productId: original.productId,
+      originalPhotoId: args.originalPhotoId,
+    },
+  );
 
   const productPatch: Partial<Doc<"products">> = {
     lastError: undefined,
@@ -813,6 +905,8 @@ async function finalizeReservedOriginal(
     productId: original.productId,
     originalPhotoId: args.originalPhotoId,
     aiGeneration,
+    previousShopifyFileIds:
+      previousShopifyFileIds.length > 0 ? previousShopifyFileIds : undefined,
   });
 
   return args.originalPhotoId;
@@ -911,9 +1005,12 @@ export const replaceOriginalFromUpload = mutation({
     const oldStorageId = photo.storageId;
     const url = await ctx.storage.getUrl(args.storageId);
     const now = Date.now();
+    const previousShopifyFileIds: string[] = [];
 
-    // Shopify file leak on clear: delete helpers live in shopify.ts (out of
-    // scope); cleared IDs may orphan until manual/ops cleanup.
+    if (photo.shopifyFileId) {
+      previousShopifyFileIds.push(photo.shopifyFileId);
+    }
+
     await ctx.db.patch(args.photoId, {
       storageId: args.storageId,
       url: url ?? undefined,
@@ -925,10 +1022,12 @@ export const replaceOriginalFromUpload = mutation({
       updatedAt: now,
     });
 
-    const { aiGeneration } = await applyMarkAiGenerating(ctx, {
-      productId: photo.productId,
-      originalPhotoId: args.photoId,
-    });
+    const { aiGeneration, previousShopifyFileIds: aiShopifyFileIds } =
+      await applyMarkAiGenerating(ctx, {
+        productId: photo.productId,
+        originalPhotoId: args.photoId,
+      });
+    previousShopifyFileIds.push(...aiShopifyFileIds);
 
     // Replace drops the prior AI blob immediately (regen keeps it until ready).
     const aiChild = await getAiForOriginal(ctx, args.photoId);
@@ -960,6 +1059,8 @@ export const replaceOriginalFromUpload = mutation({
       productId: photo.productId,
       originalPhotoId: args.photoId,
       aiGeneration,
+      previousShopifyFileIds:
+        previousShopifyFileIds.length > 0 ? previousShopifyFileIds : undefined,
     });
 
     if (oldStorageId && oldStorageId !== args.storageId) {
@@ -1164,9 +1265,23 @@ export const markPromotedInternal = internalMutation({
     shopifyFileStatus: shopifyFileStatus,
     shopifyFileUrl: v.optional(v.string()),
     keepStorageId: v.optional(v.boolean()),
+    expectedAiGeneration: v.optional(v.number()),
+    markAsPromoted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await applyMarkPromoted(ctx, args);
+  },
+});
+
+export const markPromoteFailedInternal = internalMutation({
+  args: {
+    photoId: v.id("productPhotos"),
+    shopifyFileId: v.optional(v.string()),
+    shopifyFileStatus: v.optional(shopifyFileStatus),
+    shopifyFileUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await applyMarkPromoteFailed(ctx, args);
   },
 });
 

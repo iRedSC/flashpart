@@ -70,6 +70,9 @@ const productPhotosModel = {
   markPromotedInternal: makeFunctionReference(
     "productPhotos.js:markPromotedInternal",
   ) as any,
+  markPromoteFailedInternal: makeFunctionReference(
+    "productPhotos.js:markPromoteFailedInternal",
+  ) as any,
   clearStorageIdInternal: makeFunctionReference(
     "productPhotos.js:clearStorageIdInternal",
   ) as any,
@@ -210,6 +213,7 @@ type PromotePhotoRow = {
   sortOrder: number;
   approvedAt?: number;
   aiStatus?: "pending" | "generating" | "ready" | "failed";
+  aiGeneration?: number;
 };
 
 function assertPhotoEligibleForPromote(
@@ -237,12 +241,73 @@ function assertPhotoEligibleForPromote(
   }
 }
 
+/**
+ * Re-load the photo and re-assert promote eligibility immediately before
+ * markPromoted so a concurrent regen cannot leave a stale Shopify file stamped.
+ */
+async function assertStillEligibleForMarkPromoted(
+  ctx: ActionCtx,
+  photoId: Id<"productPhotos">,
+  options: {
+    requireApprovedAi: boolean;
+    expectedAiGeneration?: number;
+  },
+) {
+  const payload = (await ctx.runQuery(productPhotosModel.getPhotoForPromote, {
+    photoId,
+  })) as {
+    photo: PromotePhotoRow;
+    sku: string;
+  } | null;
+
+  if (!payload?.photo) {
+    throw new ConvexError("Photo not found.");
+  }
+
+  assertPhotoEligibleForPromote(payload.photo, options);
+
+  if (
+    options.expectedAiGeneration !== undefined &&
+    (payload.photo.aiGeneration ?? 0) !== options.expectedAiGeneration
+  ) {
+    throw new ConvexError(
+      "AI photo was regenerated during promote; aborting stale promote.",
+    );
+  }
+
+  return payload.photo;
+}
+
+async function markPromoteFailedIfShopifyTerminal(
+  ctx: ActionCtx,
+  connection: ShopifyConnection,
+  photoId: Id<"productPhotos">,
+  shopifyFileId: string,
+) {
+  try {
+    const file = await getShopifyFile(connection, shopifyFileId);
+    if (file.status !== "failed") {
+      return;
+    }
+
+    await ctx.runMutation(productPhotosModel.markPromoteFailedInternal, {
+      photoId,
+      shopifyFileId: file.id,
+      shopifyFileStatus: "failed",
+      shopifyFileUrl: file.url,
+    });
+  } catch {
+    // Best-effort; promote error still propagates to the caller.
+  }
+}
+
 async function finishPromoteFromShopifyFile(
   ctx: ActionCtx,
   connection: ShopifyConnection,
   photoId: Id<"productPhotos">,
   shopifyFileId: string,
   photo: PromotePhotoRow,
+  options: { requireApprovedAi: boolean; expectedAiGeneration?: number },
 ) {
   let file = {
     id: shopifyFileId,
@@ -250,13 +315,25 @@ async function finishPromoteFromShopifyFile(
     url: photo.url,
   };
 
-  if (file.status !== "ready" || !file.url) {
-    file = await pollShopifyFileUntilReady(connection, shopifyFileId);
+  try {
+    if (file.status !== "ready" || !file.url) {
+      file = await pollShopifyFileUntilReady(connection, shopifyFileId);
+    }
+
+    if (file.url) {
+      await confirmUrlFetchable(file.url);
+    }
+  } catch (error) {
+    await markPromoteFailedIfShopifyTerminal(
+      ctx,
+      connection,
+      photoId,
+      shopifyFileId,
+    );
+    throw error;
   }
 
-  if (file.url) {
-    await confirmUrlFetchable(file.url);
-  }
+  await assertStillEligibleForMarkPromoted(ctx, photoId, options);
 
   await ctx.runMutation(productPhotosModel.markPromotedInternal, {
     photoId,
@@ -264,6 +341,8 @@ async function finishPromoteFromShopifyFile(
     shopifyFileStatus: file.status,
     shopifyFileUrl: file.url,
     keepStorageId: true,
+    expectedAiGeneration: options.expectedAiGeneration,
+    markAsPromoted: true,
   });
 
   if (photo.storageId) {
@@ -300,6 +379,11 @@ async function promotePhotoWithConnection(
 
   const { photo, sku } = payload;
   assertPhotoEligibleForPromote(photo, options);
+  const expectedAiGeneration = photo.aiGeneration;
+  const markOptions = {
+    requireApprovedAi: options.requireApprovedAi,
+    expectedAiGeneration,
+  };
 
   // Fully promoted: return existing Shopify file (retry-safe).
   if (photo.status === "promoted" && photo.shopifyFileId) {
@@ -309,6 +393,7 @@ async function promotePhotoWithConnection(
       photoId,
       photo.shopifyFileId,
       photo,
+      markOptions,
     );
   }
 
@@ -319,18 +404,26 @@ async function promotePhotoWithConnection(
   }
 
   // Partial promote: Shopify file id already persisted (upload succeeded, crash
-  // before markPromoted). Resume poll/mark instead of creating a duplicate file.
-  if (photo.shopifyFileId) {
+  // before poll confirmed ready). Resume poll/mark instead of creating a
+  // duplicate — unless Shopify already terminal-failed (re-upload from storage).
+  if (photo.shopifyFileId && photo.shopifyFileStatus !== "failed") {
     return await finishPromoteFromShopifyFile(
       ctx,
       connection,
       photoId,
       photo.shopifyFileId,
       photo,
+      markOptions,
     );
   }
 
-  const storageId = photo.storageId!;
+  if (!photo.storageId) {
+    throw new ConvexError(
+      "Photo has no Convex storage to promote (Shopify file failed or missing).",
+    );
+  }
+
+  const storageId = photo.storageId;
   const blob = await ctx.storage.get(storageId);
 
   if (!blob) {
@@ -345,32 +438,54 @@ async function promotePhotoWithConnection(
       : "jpg";
   const kindLabel = photo.kind === "ai" ? "ai" : "original";
   const data = await blob.arrayBuffer();
-  const file = await uploadImageBufferToShopify(
-    connection,
-    {
-      alt: `${sku} ${kindLabel} photo`,
-      data,
-      filename: `${sku}-${kindLabel}-${photo.sortOrder}.${extension}`,
-      mimeType,
-    },
-    {
-      // Persist shopifyFileId immediately after fileCreate so a crash during
-      // polling does not re-upload a duplicate Shopify file on retry.
-      onFileCreated: async (created) => {
-        await ctx.runMutation(productPhotosModel.markPromotedInternal, {
-          photoId,
-          shopifyFileId: created.id,
-          shopifyFileStatus: created.status,
-          shopifyFileUrl: created.url,
-          keepStorageId: true,
-        });
+  let createdShopifyFileId: string | undefined;
+
+  let file;
+  try {
+    file = await uploadImageBufferToShopify(
+      connection,
+      {
+        alt: `${sku} ${kindLabel} photo`,
+        data,
+        filename: `${sku}-${kindLabel}-${photo.sortOrder}.${extension}`,
+        mimeType,
       },
-    },
-  );
+      {
+        // Persist shopifyFileId immediately after fileCreate so a crash during
+        // polling does not re-upload a duplicate Shopify file on retry. Do NOT
+        // mark status "promoted" until poll confirms ready (GC skips non-promoted).
+        onFileCreated: async (created) => {
+          createdShopifyFileId = created.id;
+          await assertStillEligibleForMarkPromoted(ctx, photoId, markOptions);
+          await ctx.runMutation(productPhotosModel.markPromotedInternal, {
+            photoId,
+            shopifyFileId: created.id,
+            shopifyFileStatus: created.status,
+            shopifyFileUrl: created.url,
+            keepStorageId: true,
+            expectedAiGeneration,
+            markAsPromoted: false,
+          });
+        },
+      },
+    );
+  } catch (error) {
+    if (createdShopifyFileId) {
+      await markPromoteFailedIfShopifyTerminal(
+        ctx,
+        connection,
+        photoId,
+        createdShopifyFileId,
+      );
+    }
+    throw error;
+  }
 
   if (file.url) {
     await confirmUrlFetchable(file.url);
   }
+
+  await assertStillEligibleForMarkPromoted(ctx, photoId, markOptions);
 
   // Promote success clears this photo's storage; GC sweep is an orphan safety net.
   await ctx.runMutation(productPhotosModel.markPromotedInternal, {
@@ -379,6 +494,8 @@ async function promotePhotoWithConnection(
     shopifyFileStatus: file.status,
     shopifyFileUrl: file.url,
     keepStorageId: true,
+    expectedAiGeneration,
+    markAsPromoted: true,
   });
   await ctx.runMutation(productPhotosModel.clearStorageIdInternal, {
     photoId,
