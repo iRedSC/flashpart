@@ -38,6 +38,7 @@ import {
   Globe,
   GripVertical,
   ListFilter,
+  Loader2,
   MoreVertical,
   Plus,
   RefreshCw,
@@ -615,6 +616,7 @@ export function ProductsPage() {
   const [importSkippedRows, setImportSkippedRows] = React.useState(0);
   const [importError, setImportError] = React.useState<string | null>(null);
   const [importResult, setImportResult] = React.useState<ImportResult | null>(null);
+  const [isParsingImport, setIsParsingImport] = React.useState(false);
   const [isImporting, setIsImporting] = React.useState(false);
   const [selectedGroupId, setSelectedGroupId] = React.useState<Id<"groups"> | "">("");
   const [newGroupName, setNewGroupName] = React.useState("");
@@ -1241,6 +1243,7 @@ export function ProductsPage() {
     setImportSkippedRows(0);
     setImportError(null);
     setImportResult(null);
+    setIsParsingImport(false);
     setIsImporting(false);
   }
 
@@ -1295,21 +1298,36 @@ export function ProductsPage() {
       setImportRows([]);
       setImportSkippedRows(0);
       setImportError(null);
+      setIsParsingImport(false);
       return;
     }
 
-    try {
-      const parsed = parseProductCsv(await file.text());
+    setIsParsingImport(true);
+    setImportFileName(file.name);
+    setImportRows([]);
+    setImportSkippedRows(0);
+    setImportError(null);
 
-      setImportFileName(file.name);
+    // Yield so React can paint the spinner before synchronous CSV parsing.
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => resolve());
+      });
+    });
+
+    try {
+      const text = await file.text();
+      const parsed = parseProductCsv(text);
+
       setImportRows(parsed.products);
       setImportSkippedRows(parsed.skippedRows);
       setImportError(parsed.error);
     } catch {
-      setImportFileName(file.name);
       setImportRows([]);
       setImportSkippedRows(0);
       setImportError("The CSV file could not be read.");
+    } finally {
+      setIsParsingImport(false);
     }
   }
 
@@ -1323,7 +1341,7 @@ export function ProductsPage() {
 
     try {
       const skuPrefix = importSkuPrefix.trim();
-      const result = await importProducts({
+      await importProducts({
         existingEntryBehavior: importMode,
         products: importRows.map((product) => ({
           ...product,
@@ -1331,14 +1349,12 @@ export function ProductsPage() {
         })),
       });
 
-      if (result) {
-        setImportResult(result);
-      }
+      setImportOpen(false);
+      resetImportDialog();
     } catch (error) {
       setImportError(
         error instanceof Error ? error.message : "Products could not be imported.",
       );
-    } finally {
       setIsImporting(false);
     }
   }
@@ -1535,6 +1551,7 @@ export function ProductsPage() {
               </label>
               <Input
                 accept=".csv,text/csv"
+                disabled={isParsingImport || isImporting}
                 id="product-csv"
                 onChange={(event) =>
                   void handleImportFileChange(event).catch(() => undefined)
@@ -1553,6 +1570,7 @@ export function ProductsPage() {
                 Prefix
               </label>
               <Input
+                disabled={isParsingImport || isImporting}
                 id="sku-prefix"
                 onChange={(event) => {
                   setImportSkuPrefix(event.currentTarget.value);
@@ -1569,6 +1587,7 @@ export function ProductsPage() {
               </label>
               <Switch
                 checked={importMode === "overwrite"}
+                disabled={isParsingImport || isImporting}
                 id="overwrite-existing"
                 onCheckedChange={(checked) =>
                   setImportMode(checked ? "overwrite" : "ignore")
@@ -1576,7 +1595,15 @@ export function ProductsPage() {
               />
             </div>
 
-            {importFileName ? (
+            {isParsingImport ? (
+              <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                <div>
+                  <p className="font-medium text-slate-950">{importFileName}</p>
+                  <p className="mt-1">Parsing CSV…</p>
+                </div>
+              </div>
+            ) : importFileName ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
                 <p className="font-medium">{importFileName}</p>
                 <p className="mt-1 text-slate-500">
@@ -1606,14 +1633,27 @@ export function ProductsPage() {
             ) : null}
           </div>
           <DialogFooter>
-            <Button onClick={() => setImportOpen(false)} variant="outline">
+            <Button
+              disabled={isParsingImport || isImporting}
+              onClick={() => setImportOpen(false)}
+              variant="outline"
+            >
               Close
             </Button>
             <Button
-              disabled={importRows.length === 0 || isImporting}
+              disabled={
+                importRows.length === 0 || isParsingImport || isImporting
+              }
               onClick={() => void handleImportProducts().catch(() => undefined)}
             >
-              {isImporting ? "Importing..." : "Import products"}
+              {isImporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                "Import products"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
