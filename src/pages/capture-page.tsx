@@ -85,10 +85,15 @@ export function CapturePage() {
     ? { name: captureSelection.label }
     : groups.find((item) => item._id === typedGroupId);
   const groupProducts = captureSelection
-    ? products.filter((product) =>
-        captureSelection.productIds.includes(product._id),
+    ? products.filter(
+        (product) =>
+          captureSelection.productIds.includes(product._id) &&
+          product.archivedAt === undefined,
       )
-    : products.filter((product) => product.groupId === typedGroupId);
+    : products.filter(
+        (product) =>
+          product.groupId === typedGroupId && product.archivedAt === undefined,
+      );
   const nextProduct = captureSelection
     ? nextUncapturedSelectionProduct(products, captureSelection.productIds)
     : typedGroupId === undefined

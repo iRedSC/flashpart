@@ -104,6 +104,7 @@ export default defineSchema({
     shopifyTokenLastFour: v.optional(v.string()),
     shopifyProductType: v.optional(v.string()),
     shopifyDefaultTags: v.optional(v.string()),
+    autoArchiveComplete: v.optional(v.boolean()),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
 
@@ -144,6 +145,7 @@ export default defineSchema({
     pendingOperation: v.optional(pendingOperation),
     needsPhotoReview: v.optional(v.boolean()),
     lastError: v.optional(lastError),
+    archivedAt: v.optional(v.number()),
     groupId: v.optional(v.id("groups")),
     captureId: v.optional(v.id("captures")),
     shopifyFileId: v.optional(v.string()),

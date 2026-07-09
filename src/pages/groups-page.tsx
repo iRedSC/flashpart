@@ -24,7 +24,9 @@ import { groupProductProgress } from "../lib/product-state";
 export function GroupsPage() {
   const { assignFirstUngrouped, deleteGroup, groups, products } = useAppData();
   const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
-  const ungroupedCount = products.filter((product) => !product.groupId).length;
+  const ungroupedCount = products.filter(
+    (product) => !product.groupId && product.archivedAt === undefined,
+  ).length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain md:overflow-visible">

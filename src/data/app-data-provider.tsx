@@ -13,7 +13,8 @@ type ListingJob = FunctionReturnType<typeof convexApi.listingJobs.list>[number];
 type DuplicatePolicy = "blockExisting" | "updateExisting";
 type ShopifyPublishTarget = "draft" | "published";
 type ConvexSettings = FunctionReturnType<typeof convexApi.settings.get>;
-type Settings = Omit<ConvexSettings, "duplicatePolicy"> & {
+type Settings = Omit<ConvexSettings, "duplicatePolicy" | "autoArchiveComplete"> & {
+  autoArchiveComplete: boolean;
   duplicatePolicy: DuplicatePolicy;
   shopifyPublishTarget: ShopifyPublishTarget;
 };
@@ -79,6 +80,12 @@ type AppDataContextValue = {
     price?: number;
   }) => Promise<null>;
   deleteProducts: (ids: Id<"products">[]) => Promise<{ deleted: number } | null>;
+  archiveProducts: (
+    ids: Id<"products">[],
+  ) => Promise<{ archived: number; skippedErrored: number } | null>;
+  unarchiveProducts: (
+    ids: Id<"products">[],
+  ) => Promise<{ unarchived: number } | null>;
   reorderProducts: (
     orderedIds: Id<"products">[],
   ) => Promise<{ updated: number } | null>;
@@ -101,6 +108,9 @@ type AppDataContextValue = {
   setDuplicatePolicy: (
     duplicatePolicy: DuplicatePolicy,
   ) => Promise<{ duplicatePolicy: DuplicatePolicy } | null>;
+  setAutoArchiveComplete: (
+    autoArchiveComplete: boolean,
+  ) => Promise<{ autoArchiveComplete: boolean } | null>;
   setShopifyPublishTarget: (
     shopifyPublishTarget: ShopifyPublishTarget,
   ) => Promise<{ shopifyPublishTarget: ShopifyPublishTarget } | null>;
@@ -185,7 +195,10 @@ function completedForGroups(product: Product) {
 
 function recomputeGroupCounts(groups: Group[], products: Product[]) {
   return groups.map((group) => {
-    const groupProducts = products.filter((product) => product.groupId === group._id);
+    const groupProducts = products.filter(
+      (product) =>
+        product.groupId === group._id && product.archivedAt === undefined,
+    );
 
     return {
       ...group,
@@ -215,6 +228,8 @@ export function AppDataProvider({
   const createProductMutation = useMutation(convexApi.products.create);
   const importProductsMutation = useMutation(convexApi.products.importProducts);
   const deleteProductsMutation = useMutation(convexApi.products.removeMany);
+  const archiveProductsMutation = useMutation(convexApi.products.archiveMany);
+  const unarchiveProductsMutation = useMutation(convexApi.products.unarchiveMany);
   const reorderProductsMutation = useMutation(convexApi.products.reorder);
   const assignProductsMutation = useMutation(convexApi.groups.assignProducts);
   const publishProductsMutation = useMutation(
@@ -222,6 +237,9 @@ export function AppDataProvider({
   );
   const setDuplicatePolicyMutation = useMutation(
     convexApi.settings.setDuplicatePolicy,
+  );
+  const setAutoArchiveCompleteMutation = useMutation(
+    convexApi.settings.setAutoArchiveComplete,
   );
   const setShopifyPublishTargetMutation = useMutation(
     convexApi.settings.setShopifyPublishTarget,
@@ -267,6 +285,7 @@ export function AppDataProvider({
       settings: settings
         ? ({
             ...settings,
+            autoArchiveComplete: settings.autoArchiveComplete ?? false,
             shopifyPublishTarget: settings.shopifyPublishTarget ?? "draft",
           } satisfies Settings)
         : null,
@@ -458,6 +477,72 @@ export function AppDataProvider({
               : `Deleting ${ids.length.toLocaleString()} products`,
           productIds: ids,
         }),
+      archiveProducts: (ids) => {
+        const now = Date.now();
+        const idSet = new Set(ids);
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: state.products.map((product) =>
+              idSet.has(product._id) && product.lastError === undefined
+                ? { ...product, archivedAt: now, updatedAt: now }
+                : product,
+            ),
+            groups: recomputeGroupCounts(
+              state.groups,
+              state.products.map((product) =>
+                idSet.has(product._id) && product.lastError === undefined
+                  ? { ...product, archivedAt: now, updatedAt: now }
+                  : product,
+              ),
+            ),
+          }),
+          commit: () =>
+            archiveProductsMutation({
+              ids,
+              sessionToken: session.sessionToken,
+            }),
+          label:
+            ids.length === 1
+              ? "Archiving product"
+              : `Archiving ${ids.length.toLocaleString()} products`,
+          productIds: ids,
+        });
+      },
+      unarchiveProducts: (ids) => {
+        const now = Date.now();
+        const idSet = new Set(ids);
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            products: state.products.map((product) =>
+              idSet.has(product._id)
+                ? { ...product, archivedAt: undefined, updatedAt: now }
+                : product,
+            ),
+            groups: recomputeGroupCounts(
+              state.groups,
+              state.products.map((product) =>
+                idSet.has(product._id)
+                  ? { ...product, archivedAt: undefined, updatedAt: now }
+                  : product,
+              ),
+            ),
+          }),
+          commit: () =>
+            unarchiveProductsMutation({
+              ids,
+              sessionToken: session.sessionToken,
+            }),
+          label:
+            ids.length === 1
+              ? "Restoring product"
+              : `Restoring ${ids.length.toLocaleString()} products`,
+          productIds: ids,
+        });
+      },
       reorderProducts: (orderedIds) => {
         const indexById = new Map(orderedIds.map((id, index) => [id, index]));
 
@@ -589,6 +674,25 @@ export function AppDataProvider({
               sessionToken: session.sessionToken,
             }),
           label: "Saving existing SKU behavior",
+        }),
+      setAutoArchiveComplete: (autoArchiveComplete) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  autoArchiveComplete,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setAutoArchiveCompleteMutation({
+              autoArchiveComplete,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving auto-archive setting",
         }),
       setShopifyPublishTarget: (shopifyPublishTarget) =>
         runOptimistic({
@@ -916,6 +1020,8 @@ export function AppDataProvider({
       createGroupMutation,
       deleteGroupMutation,
       createProductMutation,
+      archiveProductsMutation,
+      unarchiveProductsMutation,
       deleteProductsMutation,
       deleteProductFileAction,
       finalizeFileUploadAction,
@@ -946,6 +1052,7 @@ export function AppDataProvider({
       setAiImageEditStrengthMutation,
       setAiImageModelMutation,
       setDuplicatePolicyMutation,
+      setAutoArchiveCompleteMutation,
       setShopifyPublishTargetMutation,
       setShopifyProductTypeMutation,
       setShopifyDefaultTagsMutation,

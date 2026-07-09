@@ -17,6 +17,7 @@ const defaultSettings = {
   aiImageDefaultPrompt: DEFAULT_AI_IMAGE_PROMPT,
   aiImageEditStrength: DEFAULT_AI_IMAGE_EDIT_STRENGTH as AiImageEditStrength,
   aiImageModel: GEMINI_IMAGE_MODEL as AiImageModelId,
+  autoArchiveComplete: false,
   duplicatePolicy: "blockExisting" as const,
   shopifyPublishTarget: "draft" as const,
   shopifyProductType: "Part" as const,
@@ -43,7 +44,7 @@ export function resolveAiImageSettings(
   };
 }
 
-async function getSettingsDocument(ctx: QueryCtx | MutationCtx) {
+export async function getSettingsDocument(ctx: QueryCtx | MutationCtx) {
   return await ctx.db
     .query("appSettings")
     .withIndex("by_key", (q) => q.eq("key", "singleton"))
@@ -88,6 +89,33 @@ export const setDuplicatePolicy = mutation({
     }
 
     return { duplicatePolicy: args.duplicatePolicy };
+  },
+});
+
+export const setAutoArchiveComplete = mutation({
+  args: {
+    sessionToken: v.string(),
+    autoArchiveComplete: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const settings = await getSettingsDocument(ctx);
+    const now = Date.now();
+
+    if (settings) {
+      await ctx.db.patch(settings._id, {
+        autoArchiveComplete: args.autoArchiveComplete,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("appSettings", {
+        ...defaultSettings,
+        autoArchiveComplete: args.autoArchiveComplete,
+        updatedAt: now,
+      });
+    }
+
+    return { autoArchiveComplete: args.autoArchiveComplete };
   },
 });
 

@@ -17,7 +17,8 @@ export const list = query({
 
     return groups.map((group) => {
       const groupProducts = products.filter(
-        (product) => product.groupId === group._id,
+        (product) =>
+          product.groupId === group._id && product.archivedAt === undefined,
       );
       const completed = groupProducts.filter((product) =>
         isGroupCaptureComplete({ phase: resolveProductPhase(product) }),
@@ -58,7 +59,10 @@ export const assignFirstUngrouped = mutation({
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
     const products = await ctx.db.query("products").collect();
-    const candidates = products.filter((product) => product.groupId === undefined);
+    const candidates = products.filter(
+      (product) =>
+        product.groupId === undefined && product.archivedAt === undefined,
+    );
     const now = Date.now();
 
     for (const product of candidates) {

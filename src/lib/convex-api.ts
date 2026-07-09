@@ -82,6 +82,12 @@ export const convexApi = {
     removeMany: deployedFunction<typeof api.products.removeMany>(
       "products.js:removeMany",
     ),
+    archiveMany: deployedFunction<typeof api.products.archiveMany>(
+      "products.js:archiveMany",
+    ),
+    unarchiveMany: deployedFunction<typeof api.products.unarchiveMany>(
+      "products.js:unarchiveMany",
+    ),
     reorder: deployedFunction<typeof api.products.reorder>(
       "products.js:reorder",
     ),
@@ -91,6 +97,9 @@ export const convexApi = {
     setDuplicatePolicy: deployedFunction<
       typeof api.settings.setDuplicatePolicy
     >("settings.js:setDuplicatePolicy"),
+    setAutoArchiveComplete: deployedFunction<
+      typeof api.settings.setAutoArchiveComplete
+    >("settings.js:setAutoArchiveComplete"),
     setShopifyPublishTarget: deployedFunction<
       typeof api.settings.setShopifyPublishTarget
     >("settings.js:setShopifyPublishTarget"),

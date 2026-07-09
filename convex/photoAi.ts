@@ -14,6 +14,7 @@ import {
   isAiImageEditStrength,
   isAiImageModel,
 } from "./photoAiConstants";
+import { productErrorFields } from "./productState";
 import { resolveAiImageSettings } from "./settings";
 import {
   deleteShopifyFiles,
@@ -255,14 +256,15 @@ export const markFailed = internalMutation({
     await ctx.db.patch(args.productId, {
       aiImageError: args.error,
       aiImageStatus: "failed",
-      pendingOperation: undefined,
-      lastError: {
-        at: now,
-        code: "aiImageGeneration",
-        message: args.error,
-        operation: "aiImageGenerating",
-      },
-      updatedAt: now,
+      ...productErrorFields(
+        {
+          at: now,
+          code: "aiImageGeneration",
+          message: args.error,
+          operation: "aiImageGenerating",
+        },
+        now,
+      ),
     });
   },
 });
