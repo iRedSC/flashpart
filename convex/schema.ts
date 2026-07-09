@@ -105,6 +105,7 @@ export default defineSchema({
     shopifyProductType: v.optional(v.string()),
     shopifyDefaultTags: v.optional(v.string()),
     autoArchiveComplete: v.optional(v.boolean()),
+    autoArchiveCompleteGroups: v.optional(v.boolean()),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
 
@@ -178,6 +179,7 @@ export default defineSchema({
       v.literal("paused"),
       v.literal("completed"),
     ),
+    archivedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_status", ["status"]),

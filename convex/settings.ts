@@ -18,6 +18,7 @@ const defaultSettings = {
   aiImageEditStrength: DEFAULT_AI_IMAGE_EDIT_STRENGTH as AiImageEditStrength,
   aiImageModel: GEMINI_IMAGE_MODEL as AiImageModelId,
   autoArchiveComplete: false,
+  autoArchiveCompleteGroups: false,
   duplicatePolicy: "blockExisting" as const,
   shopifyPublishTarget: "draft" as const,
   shopifyProductType: "Part" as const,
@@ -116,6 +117,33 @@ export const setAutoArchiveComplete = mutation({
     }
 
     return { autoArchiveComplete: args.autoArchiveComplete };
+  },
+});
+
+export const setAutoArchiveCompleteGroups = mutation({
+  args: {
+    sessionToken: v.string(),
+    autoArchiveCompleteGroups: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const settings = await getSettingsDocument(ctx);
+    const now = Date.now();
+
+    if (settings) {
+      await ctx.db.patch(settings._id, {
+        autoArchiveCompleteGroups: args.autoArchiveCompleteGroups,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("appSettings", {
+        ...defaultSettings,
+        autoArchiveCompleteGroups: args.autoArchiveCompleteGroups,
+        updatedAt: now,
+      });
+    }
+
+    return { autoArchiveCompleteGroups: args.autoArchiveCompleteGroups };
   },
 });
 

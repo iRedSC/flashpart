@@ -31,6 +31,7 @@ export function SettingsPage() {
     setAiImageEditStrength,
     setAiImageModel,
     setAutoArchiveComplete,
+    setAutoArchiveCompleteGroups,
     setDuplicatePolicy,
     setShopifyDefaultTags,
     setShopifyProductType,
@@ -72,6 +73,8 @@ export function SettingsPage() {
   const updateExisting = settings?.duplicatePolicy === "updateExisting";
   const publishDirectly = settings?.shopifyPublishTarget === "published";
   const autoArchiveComplete = settings?.autoArchiveComplete === true;
+  const autoArchiveCompleteGroups =
+    settings?.autoArchiveCompleteGroups === true;
 
   React.useEffect(() => {
     setProductType(settings?.shopifyProductType ?? "Part");
@@ -206,6 +209,23 @@ export function SettingsPage() {
               checked={autoArchiveComplete}
               onCheckedChange={(checked) =>
                 void setAutoArchiveComplete(checked).catch(() => undefined)
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
+            <div>
+              <p className="font-medium">Auto-archive complete groups</p>
+              <p className="text-sm text-slate-500">
+                Archive a group only after every product in it is archived.
+              </p>
+            </div>
+            <Switch
+              aria-label="Auto-archive complete groups"
+              checked={autoArchiveCompleteGroups}
+              onCheckedChange={(checked) =>
+                void setAutoArchiveCompleteGroups(checked).catch(
+                  () => undefined,
+                )
               }
             />
           </div>

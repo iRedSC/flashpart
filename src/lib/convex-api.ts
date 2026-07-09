@@ -56,6 +56,10 @@ export const convexApi = {
     assignProducts: deployedFunction<typeof api.groups.assignProducts>(
       "groups.js:assignProducts",
     ),
+    archive: deployedFunction<typeof api.groups.archive>("groups.js:archive"),
+    unarchive: deployedFunction<typeof api.groups.unarchive>(
+      "groups.js:unarchive",
+    ),
     remove: deployedFunction<typeof api.groups.remove>("groups.js:remove"),
   },
   listingJobs: {
@@ -100,6 +104,9 @@ export const convexApi = {
     setAutoArchiveComplete: deployedFunction<
       typeof api.settings.setAutoArchiveComplete
     >("settings.js:setAutoArchiveComplete"),
+    setAutoArchiveCompleteGroups: deployedFunction<
+      typeof api.settings.setAutoArchiveCompleteGroups
+    >("settings.js:setAutoArchiveCompleteGroups"),
     setShopifyPublishTarget: deployedFunction<
       typeof api.settings.setShopifyPublishTarget
     >("settings.js:setShopifyPublishTarget"),

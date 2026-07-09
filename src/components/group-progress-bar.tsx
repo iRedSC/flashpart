@@ -32,15 +32,16 @@ function LegendItem({
 }
 
 export function GroupProgressBar({ progress }: { progress: GroupProductProgress }) {
-  const { captured, pending, published, total } = progress;
+  const { archived, captured, pending, published, total } = progress;
   const pendingWidth = segmentWidth(pending, total);
   const capturedWidth = segmentWidth(captured, total);
   const publishedWidth = segmentWidth(published, total);
+  const archivedWidth = segmentWidth(archived, total);
 
   return (
     <div className="space-y-2">
       <div
-        aria-label={`${pending} pending, ${captured} captured, ${published} published`}
+        aria-label={`${pending} pending, ${captured} captured, ${published} published, ${archived} archived`}
         className="flex h-2 overflow-hidden rounded-full bg-slate-200"
         role="img"
       >
@@ -64,6 +65,12 @@ export function GroupProgressBar({ progress }: { progress: GroupProductProgress 
                 style={{ width: `${publishedWidth}%` }}
               />
             ) : null}
+            {archivedWidth > 0 ? (
+              <div
+                className="h-full bg-slate-500 transition-[width] duration-300"
+                style={{ width: `${archivedWidth}%` }}
+              />
+            ) : null}
           </>
         )}
       </div>
@@ -72,6 +79,7 @@ export function GroupProgressBar({ progress }: { progress: GroupProductProgress 
         <LegendItem colorClassName="bg-slate-300" count={pending} label="Pending" />
         <LegendItem colorClassName="bg-amber-400" count={captured} label="Captured" />
         <LegendItem colorClassName="bg-green-500" count={published} label="Published" />
+        <LegendItem colorClassName="bg-slate-500" count={archived} label="Archived" />
       </div>
     </div>
   );

@@ -79,7 +79,7 @@ import { ProductPhotoDialog } from "../components/product-photo-dialog";
 import { ProductThumbnail } from "../components/product-thumbnail";
 import { useAppData } from "../data/app-data-provider";
 import { createCaptureSelection } from "../lib/capture-selection";
-import { canArchive, isArchived } from "../lib/product-state";
+import { canArchive, isArchived, isGroupArchived } from "../lib/product-state";
 import { cn } from "../lib/utils";
 import { normalizeTagString } from "../lib/tags";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -1366,15 +1366,17 @@ export function ProductsPage() {
                 <span className="flex-1">Ungrouped</span>
                 {groupFilter === UNGROUPED_FILTER ? <Check /> : null}
               </DropdownMenuItem>
-              {groups.map((group) => (
-                <DropdownMenuItem
-                  key={group._id}
-                  onSelect={() => setGroupFilter(group._id)}
-                >
-                  <span className="min-w-0 flex-1 truncate">{group.name}</span>
-                  {groupFilter === group._id ? <Check /> : null}
-                </DropdownMenuItem>
-              ))}
+              {groups
+                .filter((group) => !isGroupArchived(group))
+                .map((group) => (
+                  <DropdownMenuItem
+                    key={group._id}
+                    onSelect={() => setGroupFilter(group._id)}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                    {groupFilter === group._id ? <Check /> : null}
+                  </DropdownMenuItem>
+                ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -1716,26 +1718,28 @@ export function ProductsPage() {
               {selectedCount === 1 ? "" : "s"} to a group.
             </DialogDescription>
           </DialogHeader>
-          {groups.length > 0 ? (
+          {groups.some((group) => !isGroupArchived(group)) ? (
             <div className="grid max-h-56 gap-2 overflow-y-auto">
-              {groups.map((group) => (
-                <button
-                  className={cn(
-                    "rounded-lg border px-4 py-3 text-left text-sm transition-colors",
-                    selectedGroupId === group._id
-                      ? "border-slate-950 bg-slate-50"
-                      : "border-slate-200 hover:bg-slate-50",
-                  )}
-                  key={group._id}
-                  onClick={() => setSelectedGroupId(group._id)}
-                  type="button"
-                >
-                  <span className="font-medium">{group.name}</span>
-                  <span className="mt-1 block text-slate-500">
-                    {group.productCount.toLocaleString()} products
-                  </span>
-                </button>
-              ))}
+              {groups
+                .filter((group) => !isGroupArchived(group))
+                .map((group) => (
+                  <button
+                    className={cn(
+                      "rounded-lg border px-4 py-3 text-left text-sm transition-colors",
+                      selectedGroupId === group._id
+                        ? "border-slate-950 bg-slate-50"
+                        : "border-slate-200 hover:bg-slate-50",
+                    )}
+                    key={group._id}
+                    onClick={() => setSelectedGroupId(group._id)}
+                    type="button"
+                  >
+                    <span className="font-medium">{group.name}</span>
+                    <span className="mt-1 block text-slate-500">
+                      {group.productCount.toLocaleString()} products
+                    </span>
+                  </button>
+                ))}
             </div>
           ) : null}
           <form
@@ -1746,7 +1750,9 @@ export function ProductsPage() {
             }}
           >
             <p className="text-sm font-medium text-slate-950">
-              {groups.length === 0 ? "Create a group" : "Or create a new group"}
+              {groups.every((group) => isGroupArchived(group))
+                ? "Create a group"
+                : "Or create a new group"}
             </p>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input

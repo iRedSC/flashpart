@@ -18,6 +18,10 @@ import {
   updateShopifyProduct,
   updateShopifyVariant,
 } from "./shopifyClient";
+import {
+  maybeAutoArchiveGroup,
+  maybeUnarchiveGroupForActiveProduct,
+} from "./groups";
 import { productErrorFields } from "./productState";
 import { getSettingsDocument } from "./settings";
 import { mergeTagLists } from "./tags";
@@ -274,6 +278,10 @@ export const markJobSucceeded = internalMutation({
       shopifyVariantId: args.shopifyVariantId,
       updatedAt: now,
     });
+
+    if (shouldAutoArchive) {
+      await maybeAutoArchiveGroup(ctx, product?.groupId, now);
+    }
   },
 });
 
@@ -301,6 +309,8 @@ export const markJobBlockedExistingSku = internalMutation({
       status: "failed",
       updatedAt: now,
     });
+    const product = await ctx.db.get(job.productId);
+
     await ctx.db.patch(
       job.productId,
       productErrorFields(
@@ -313,6 +323,7 @@ export const markJobBlockedExistingSku = internalMutation({
         now,
       ),
     );
+    await maybeUnarchiveGroupForActiveProduct(ctx, product?.groupId, now);
   },
 });
 
@@ -329,6 +340,7 @@ export const markJobFailed = internalMutation({
     }
 
     const now = Date.now();
+    const product = await ctx.db.get(job.productId);
 
     await ctx.db.patch(args.jobId, {
       completedAt: now,
@@ -348,6 +360,7 @@ export const markJobFailed = internalMutation({
         now,
       ),
     );
+    await maybeUnarchiveGroupForActiveProduct(ctx, product?.groupId, now);
   },
 });
 
@@ -546,6 +559,10 @@ export const markSucceeded = mutation({
         shopifyStatus: "draft",
         updatedAt: now,
       });
+
+      if (shouldAutoArchive) {
+        await maybeAutoArchiveGroup(ctx, product?.groupId, now);
+      }
     }
   },
 });
@@ -565,6 +582,7 @@ export const markFailed = mutation({
     }
 
     const now = Date.now();
+    const product = await ctx.db.get(job.productId);
 
     await ctx.db.patch(args.jobId, {
       status: "failed",
@@ -583,5 +601,6 @@ export const markFailed = mutation({
         now,
       ),
     );
+    await maybeUnarchiveGroupForActiveProduct(ctx, product?.groupId, now);
   },
 });
