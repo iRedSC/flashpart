@@ -268,6 +268,10 @@ export async function uploadImageBufferToShopify(
     filename: string;
     mimeType: string;
   },
+  options?: {
+    /** Called immediately after Shopify fileCreate so callers can persist the id before polling. */
+    onFileCreated?: (file: ShopifyFile) => Promise<void>;
+  },
 ) {
   const target = await createStagedImageUpload(connection, {
     fileSize: input.data.byteLength,
@@ -299,6 +303,10 @@ export async function uploadImageBufferToShopify(
     alt: input.alt,
     originalSource: target.resourceUrl,
   });
+
+  if (options?.onFileCreated) {
+    await options.onFileCreated(file);
+  }
 
   for (
     let attempt = 0;

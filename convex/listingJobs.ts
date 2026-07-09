@@ -459,29 +459,15 @@ export const processQueuedJob = internalAction({
       let publishFileIds: string[] | undefined;
       let originalShopifyFileId: string | undefined;
       let publishFileId: string | undefined;
+      const approvedAiPhotoIds =
+        (payload.approvedAiPhotoIds as Id<"productPhotos">[] | undefined) ?? [];
 
+      // Cheap preflight before any Shopify file promote/upload work.
       if (useProductPhotos) {
-        const approvedAiPhotoIds =
-          (payload.approvedAiPhotoIds as Id<"productPhotos">[] | undefined) ??
-          [];
-
         if (approvedAiPhotoIds.length < 1) {
           throw new Error(
             "Approve at least one AI photo before publishing.",
           );
-        }
-
-        publishFileIds = [];
-        for (const photoId of approvedAiPhotoIds) {
-          const promoted = (await ctx.runAction(promotePhotoInternal, {
-            photoId,
-          })) as { shopifyFileId: string };
-
-          if (!promoted?.shopifyFileId) {
-            throw new Error("Failed to promote an AI photo to Shopify.");
-          }
-
-          publishFileIds.push(promoted.shopifyFileId);
         }
       } else {
         if (!payload.product.aiShopifyFileId) {
@@ -515,6 +501,31 @@ export const processQueuedJob = internalAction({
         return;
       }
 
+      // Promote only after duplicate-SKU / handle guards pass.
+      if (useProductPhotos) {
+        const connectionId = payload.job.shopifyConnectionId as
+          | Id<"shopifyConnections">
+          | undefined;
+
+        if (!connectionId) {
+          throw new Error("Listing job is missing Shopify connection data.");
+        }
+
+        publishFileIds = [];
+        for (const photoId of approvedAiPhotoIds) {
+          const promoted = (await ctx.runAction(promotePhotoInternal, {
+            photoId,
+            connectionId,
+          })) as { shopifyFileId: string };
+
+          if (!promoted?.shopifyFileId) {
+            throw new Error("Failed to promote an AI photo to Shopify.");
+          }
+
+          publishFileIds.push(promoted.shopifyFileId);
+        }
+      }
+
       const publishTarget = payload.settings.shopifyPublishTarget;
       const shopifyStatus =
         publishTarget === "published" ? ("published" as const) : ("draft" as const);
@@ -536,6 +547,11 @@ export const processQueuedJob = internalAction({
       let shopifyVariantId: string | undefined;
       let mode: "created" | "updated";
 
+      // If product create/update/attach fails after promote, do NOT delete the
+      // promoted Shopify files: photo rows already store shopifyFileId, and
+      // promote retries short-circuit on that id. Deleting here would break
+      // retries and leave worse orphans. Unattached Files-library images from a
+      // failed job are reused on the next successful publish.
       if (existing) {
         const product = await updateShopifyProduct(payload.connection, {
           ...shopifyListing,
