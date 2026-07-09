@@ -44,27 +44,73 @@ export type GroupProductProgress = {
   total: number;
 };
 
+export function countOriginalPhotos(
+  photos?: ProductPhotoCaptureFields[] | null,
+): number {
+  if (photos == null) {
+    return 0;
+  }
+
+  return photos.filter((photo) => photo.kind === "original").length;
+}
+
 export function hasCapturedPhoto(
   product: { shopifyFileId?: string },
   photos?: ProductPhotoCaptureFields[] | null,
 ): boolean {
-  const hasOriginal =
-    photos != null && photos.some((photo) => photo.kind === "original");
+  const hasOriginal = countOriginalPhotos(photos) > 0;
   return hasOriginal || Boolean(product.shopifyFileId);
 }
 
+/**
+ * Pending capture for queue / re-entry.
+ * With photo rows + maxProductPhotos: still pending while originalCount < max.
+ * With photo rows but no max: any original (or legacy shopifyFileId) completes.
+ * Without photo rows: phase === "imported".
+ */
 export function isPendingCapture(
   product: { phase: ProductPhase; shopifyFileId?: string },
   photos?: ProductPhotoCaptureFields[] | null,
+  maxProductPhotos?: number,
 ): boolean {
   if (photos != null) {
+    if (maxProductPhotos != null) {
+      const originalCount = countOriginalPhotos(photos);
+      if (originalCount > 0) {
+        return originalCount < maxProductPhotos;
+      }
+
+      // No originals: skip-without-photo / legacy — phase + shopifyFileId.
+      return (
+        product.phase === "imported" && !hasCapturedPhoto(product, photos)
+      );
+    }
+
     return !hasCapturedPhoto(product, photos);
   }
 
   return product.phase === "imported";
 }
 
-export function isGroupCaptureComplete(product: { phase: ProductPhase }): boolean {
+/** Capture progress complete: at max originals, or legacy captured/published. */
+export function isGroupCaptureComplete(
+  product: { phase: ProductPhase; shopifyFileId?: string },
+  photos?: ProductPhotoCaptureFields[] | null,
+  maxProductPhotos?: number,
+): boolean {
+  if (photos != null && maxProductPhotos != null) {
+    const originalCount = countOriginalPhotos(photos);
+    if (originalCount > 0) {
+      return originalCount >= maxProductPhotos;
+    }
+
+    return (
+      product.phase === "captured" ||
+      product.phase === "published" ||
+      Boolean(product.shopifyFileId)
+    );
+  }
+
   return product.phase === "captured" || product.phase === "published";
 }
 
@@ -140,16 +186,28 @@ export function nextUncapturedGroupProduct<
   products: T[],
   groupId: string,
   photosByProductId?: Record<string, ProductPhotoCaptureFields[]>,
+  maxProductPhotos?: number,
+  excludeProductIds?: Iterable<string>,
 ): T | null {
+  const excludeSet =
+    excludeProductIds == null ? null : new Set(excludeProductIds);
+
   return (
     products
       .filter(
-        (product) => product.groupId === groupId && !isArchived(product),
+        (product) =>
+          product.groupId === groupId &&
+          !isArchived(product) &&
+          !excludeSet?.has(product._id),
       )
       .sort(compareProductDisplayOrder)
       .find((product) =>
         photosByProductId
-          ? isPendingCapture(product, photosByProductId[product._id] ?? [])
+          ? isPendingCapture(
+              product,
+              photosByProductId[product._id] ?? [],
+              maxProductPhotos,
+            )
           : isPendingCapture(product),
       ) ?? null
   );
@@ -168,16 +226,29 @@ export function nextUncapturedSelectionProduct<
   products: T[],
   productIds: string[],
   photosByProductId?: Record<string, ProductPhotoCaptureFields[]>,
+  maxProductPhotos?: number,
+  excludeProductIds?: Iterable<string>,
 ): T | null {
   const idSet = new Set(productIds);
+  const excludeSet =
+    excludeProductIds == null ? null : new Set(excludeProductIds);
 
   return (
     products
-      .filter((product) => idSet.has(product._id) && !isArchived(product))
+      .filter(
+        (product) =>
+          idSet.has(product._id) &&
+          !isArchived(product) &&
+          !excludeSet?.has(product._id),
+      )
       .sort(compareProductDisplayOrder)
       .find((product) =>
         photosByProductId
-          ? isPendingCapture(product, photosByProductId[product._id] ?? [])
+          ? isPendingCapture(
+              product,
+              photosByProductId[product._id] ?? [],
+              maxProductPhotos,
+            )
           : isPendingCapture(product),
       ) ?? null
   );
@@ -188,13 +259,27 @@ export function selectionCaptureProgress<
     _id: string;
     phase: ProductPhase;
     archivedAt?: number;
+    shopifyFileId?: string;
   },
->(products: T[], productIds: string[]) {
+>(
+  products: T[],
+  productIds: string[],
+  photosByProductId?: Record<string, ProductPhotoCaptureFields[]>,
+  maxProductPhotos?: number,
+) {
   const idSet = new Set(productIds);
   const selectionProducts = products.filter(
     (product) => idSet.has(product._id) && !isArchived(product),
   );
-  const completedCount = selectionProducts.filter(isGroupCaptureComplete).length;
+  const completedCount = selectionProducts.filter((product) =>
+    photosByProductId
+      ? isGroupCaptureComplete(
+          product,
+          photosByProductId[product._id] ?? [],
+          maxProductPhotos,
+        )
+      : isGroupCaptureComplete(product),
+  ).length;
 
   return {
     completedCount,
