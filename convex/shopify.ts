@@ -77,6 +77,13 @@ const productPhotosModel = {
   ) as any,
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const photoGcModel = {
+  gcPromotedStorage: makeFunctionReference(
+    "photoGc.js:gcPromotedStorage",
+  ) as any,
+};
+
 const normalizeShopDomain = (value: string) => {
   const domain = value
     .trim()
@@ -183,6 +190,14 @@ async function confirmUrlFetchable(url: string) {
   }
 }
 
+async function schedulePromotedStorageGc(ctx: ActionCtx) {
+  // Light orphan sweep after successful promote (promote already clears the
+  // current photo; GC is a safety net for leftover storageId on other rows).
+  await ctx.scheduler.runAfter(0, photoGcModel.gcPromotedStorage, {
+    limit: 25,
+  });
+}
+
 async function promotePhotoWithConnection(
   ctx: ActionCtx,
   connection: ShopifyConnection,
@@ -242,6 +257,8 @@ async function promotePhotoWithConnection(
       });
     }
 
+    await schedulePromotedStorageGc(ctx);
+
     return {
       shopifyFileId: file.id,
       url: file.url,
@@ -277,6 +294,8 @@ async function promotePhotoWithConnection(
       photoId,
     });
 
+    await schedulePromotedStorageGc(ctx);
+
     return {
       shopifyFileId: file.id,
       url: file.url,
@@ -310,6 +329,7 @@ async function promotePhotoWithConnection(
     await confirmUrlFetchable(file.url);
   }
 
+  // Promote success clears this photo's storage; GC sweep is an orphan safety net.
   await ctx.runMutation(productPhotosModel.markPromotedInternal, {
     photoId,
     shopifyFileId: file.id,
@@ -320,6 +340,8 @@ async function promotePhotoWithConnection(
   await ctx.runMutation(productPhotosModel.clearStorageIdInternal, {
     photoId,
   });
+
+  await schedulePromotedStorageGc(ctx);
 
   return {
     shopifyFileId: file.id,

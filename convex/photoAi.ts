@@ -16,7 +16,7 @@ import {
   isAiImageModel,
 } from "./photoAiConstants";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
-import { applyApproveAiPhoto } from "./productPhotos";
+import { applyApproveAiPhoto, syncProductPhotoFlags } from "./productPhotos";
 import { productErrorFields } from "./productState";
 import { resolveAiImageSettings } from "./settings";
 import {
@@ -613,10 +613,10 @@ export const regenerate = mutation({
 
       await ctx.db.patch(args.productId, {
         aiImagePrompt: prompt,
-        needsPhotoReview: undefined,
-        pendingOperation: "aiImageGenerating",
         updatedAt: now,
       });
+      // List badges from productPhotos rows (pendingOperation / aiImageStatus / needsPhotoReview)
+      await syncProductPhotoFlags(ctx, args.productId);
       await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
         productId: args.productId,
         originalPhotoId: args.originalPhotoId,
@@ -720,10 +720,9 @@ export const regenerateForPhoto = mutation({
 
     await ctx.db.patch(original.productId, {
       aiImagePrompt: prompt,
-      needsPhotoReview: undefined,
-      pendingOperation: "aiImageGenerating",
       updatedAt: now,
     });
+    await syncProductPhotoFlags(ctx, original.productId);
     await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
       productId: original.productId,
       originalPhotoId: args.originalPhotoId,

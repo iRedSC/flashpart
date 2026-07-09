@@ -134,25 +134,14 @@ async function listPhotosForProduct(ctx: DbCtx, productId: Id<"products">) {
   return photos.sort(comparePhotoOrder);
 }
 
-async function hasGeneratingAi(ctx: DbCtx, productId: Id<"products">) {
-  const aiPhotos = await getAiPhotos(ctx, productId);
-  return aiPhotos.some((photo) => photo.aiStatus === "generating");
-}
-
-async function hasUnapprovedReadyAi(ctx: DbCtx, productId: Id<"products">) {
-  const aiPhotos = await getAiPhotos(ctx, productId);
-  return aiPhotos.some(
-    (photo) => photo.aiStatus === "ready" && photo.approvedAt === undefined,
-  );
-}
-
-async function recomputeProductPhotoFlags(
+/**
+ * Keep product-level list badges in sync with productPhotos rows.
+ * No-op when the product has no photo rows (legacy product fields own those).
+ * Does not write shopifyFile* / aiShopifyFile* denorm for the multi-photo path.
+ */
+export async function syncProductPhotoFlags(
   ctx: MutationCtx,
   productId: Id<"products">,
-  now: number,
-  options?: {
-    clearPendingIfIdle?: boolean;
-  },
 ) {
   const product = await ctx.db.get(productId);
 
@@ -160,20 +149,89 @@ async function recomputeProductPhotoFlags(
     return;
   }
 
-  const generating = await hasGeneratingAi(ctx, productId);
-  const needsReview = await hasUnapprovedReadyAi(ctx, productId);
+  const now = Date.now();
+
+  if (!(await productHasPhotoRows(ctx, productId))) {
+    // Last multi-photo rows were removed: clear derived badges without touching
+    // legacy Shopify-hosted products (those still have shopifyFile* / aiShopify*).
+    if (!product.shopifyFileId && !product.aiShopifyFileId) {
+      const emptyPatch: Partial<Doc<"products">> = {
+        aiImageStatus: undefined,
+        needsPhotoReview: undefined,
+        updatedAt: now,
+      };
+
+      if (product.pendingOperation === "aiImageGenerating") {
+        emptyPatch.pendingOperation = undefined;
+      }
+
+      if (product.phase === "captured") {
+        emptyPatch.phase = "imported";
+      }
+
+      await ctx.db.patch(productId, emptyPatch);
+    }
+
+    return;
+  }
+
+  const originals = await getOriginalPhotos(ctx, productId);
+  const aiPhotos = await getAiPhotos(ctx, productId);
+
+  const anyGenerating = aiPhotos.some(
+    (photo) => photo.aiStatus === "generating",
+  );
+  const anyReadyUnapproved = aiPhotos.some(
+    (photo) => photo.aiStatus === "ready" && photo.approvedAt === undefined,
+  );
+  const anyFailed = aiPhotos.some((photo) => photo.aiStatus === "failed");
+  const anyApproved = aiPhotos.some((photo) => photo.approvedAt !== undefined);
+  const allAisApproved =
+    aiPhotos.length > 0 &&
+    aiPhotos.every((photo) => photo.approvedAt !== undefined);
+
   const patch: Partial<Doc<"products">> = {
-    needsPhotoReview: needsReview ? true : undefined,
     updatedAt: now,
   };
 
-  if (generating) {
+  const clearAiGeneratingPending = () => {
+    if (product.pendingOperation === "aiImageGenerating") {
+      patch.pendingOperation = undefined;
+    }
+  };
+
+  if (anyGenerating) {
     patch.pendingOperation = "aiImageGenerating";
-  } else if (
-    options?.clearPendingIfIdle &&
-    product.pendingOperation === "aiImageGenerating"
+    patch.aiImageStatus = "generating";
+    // Sibling AIs may still need review while one is regenerating.
+    patch.needsPhotoReview = anyReadyUnapproved ? true : undefined;
+  } else if (anyReadyUnapproved) {
+    patch.needsPhotoReview = true;
+    patch.aiImageStatus = "ready";
+    clearAiGeneratingPending();
+  } else if (anyFailed && !anyReadyUnapproved) {
+    patch.aiImageStatus = "failed";
+    patch.needsPhotoReview = undefined;
+    clearAiGeneratingPending();
+  } else if (allAisApproved || (aiPhotos.length === 0 && originals.length > 0)) {
+    patch.needsPhotoReview = undefined;
+    clearAiGeneratingPending();
+    if (anyApproved) {
+      patch.aiImageStatus = "ready";
+    } else if (aiPhotos.length === 0) {
+      // Originals only — clear stale AI badge until generation starts.
+      patch.aiImageStatus = undefined;
+    }
+  } else {
+    patch.needsPhotoReview = undefined;
+    clearAiGeneratingPending();
+  }
+
+  if (
+    originals.length >= 1 &&
+    (product.phase === "imported" || product.phase === undefined)
   ) {
-    patch.pendingOperation = undefined;
+    patch.phase = "captured";
   }
 
   await ctx.db.patch(productId, patch);
@@ -279,11 +337,7 @@ export async function applyMarkAiGenerating(
     });
   }
 
-  await ctx.db.patch(args.productId, {
-    needsPhotoReview: undefined,
-    pendingOperation: "aiImageGenerating",
-    updatedAt: now,
-  });
+  await syncProductPhotoFlags(ctx, args.productId);
 
   return aiPhotoId;
 }
@@ -311,9 +365,7 @@ export async function applyMarkAiReady(
     updatedAt: now,
   });
 
-  await recomputeProductPhotoFlags(ctx, aiPhoto.productId, now, {
-    clearPendingIfIdle: true,
-  });
+  await syncProductPhotoFlags(ctx, aiPhoto.productId);
 
   return aiPhoto._id;
 }
@@ -336,9 +388,7 @@ export async function applyMarkAiFailed(
     updatedAt: now,
   });
 
-  await recomputeProductPhotoFlags(ctx, aiPhoto.productId, now, {
-    clearPendingIfIdle: true,
-  });
+  await syncProductPhotoFlags(ctx, aiPhoto.productId);
 
   return aiPhoto._id;
 }
@@ -364,12 +414,7 @@ export async function applyApproveAiPhoto(
     updatedAt: now,
   });
 
-  const stillNeedsReview = await hasUnapprovedReadyAi(ctx, photo.productId);
-
-  await ctx.db.patch(photo.productId, {
-    needsPhotoReview: stillNeedsReview ? true : undefined,
-    updatedAt: now,
-  });
+  await syncProductPhotoFlags(ctx, photo.productId);
 }
 
 export async function applyMarkPromoted(
@@ -383,6 +428,7 @@ export async function applyMarkPromoted(
       | "ready"
       | "failed";
     shopifyFileUrl?: string;
+    /** When false, delete Convex storage immediately. Promote path usually keeps then clearStorageId. */
     keepStorageId?: boolean;
   },
 ) {
@@ -402,6 +448,8 @@ export async function applyMarkPromoted(
     url: args.shopifyFileUrl ?? photo.url,
   };
 
+  // Always clear storage when keepStorageId is explicitly false.
+  // (promotePhotoToShopify clears via clearStorageId after mark; photoGc is the safety net.)
   if (args.keepStorageId === false && photo.storageId) {
     await deleteStorageBlob(ctx, photo.storageId);
     patch.storageId = undefined;
@@ -444,7 +492,6 @@ export async function applyDeletePhoto(
     throw new ConvexError("Photo not found.");
   }
 
-  const now = Date.now();
   const toDelete: Doc<"productPhotos">[] = [photo];
 
   if (photo.kind === "original") {
@@ -461,10 +508,7 @@ export async function applyDeletePhoto(
     await ctx.db.delete(row._id);
   }
 
-  // TODO(Wave E): fuller product needsPhotoReview / pendingOperation recalc.
-  await recomputeProductPhotoFlags(ctx, photo.productId, now, {
-    clearPendingIfIdle: true,
-  });
+  await syncProductPhotoFlags(ctx, photo.productId);
 }
 
 export const listByProduct = query({
@@ -582,15 +626,13 @@ export const createOriginalFromUpload = mutation({
       updatedAt: now,
     };
 
-    if (product.phase === "imported" || product.phase === undefined) {
-      productPatch.phase = "captured";
-    }
-
     if (args.captureId) {
       productPatch.captureId = args.captureId;
     }
 
     await ctx.db.patch(args.productId, productPatch);
+    // phase / needsPhotoReview / pendingOperation / aiImageStatus from rows
+    await syncProductPhotoFlags(ctx, args.productId);
 
     await ctx.scheduler.runAfter(0, processProductPhotoRef, {
       productId: args.productId,

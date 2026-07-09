@@ -18,6 +18,7 @@ import type * as listingJobs from "../listingJobs.js";
 import type * as migrations from "../migrations.js";
 import type * as photoAi from "../photoAi.js";
 import type * as photoAiConstants from "../photoAiConstants.js";
+import type * as photoGc from "../photoGc.js";
 import type * as productPhotos from "../productPhotos.js";
 import type * as productState from "../productState.js";
 import type * as products from "../products.js";
@@ -43,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   migrations: typeof migrations;
   photoAi: typeof photoAi;
   photoAiConstants: typeof photoAiConstants;
+  photoGc: typeof photoGc;
   productPhotos: typeof productPhotos;
   productState: typeof productState;
   products: typeof products;
