@@ -83,6 +83,7 @@ import { useAppData } from "../data/app-data-provider";
 import { createCaptureSelection } from "../lib/capture-selection";
 import { convexApi } from "../lib/convex-api";
 import {
+  canPublishProduct,
   listOriginals,
   needsAiPhotoApproval,
   type ProductPhoto,
@@ -1044,6 +1045,25 @@ export function ProductsPage() {
   const selectedAreArchived = selectedRows.some((row) =>
     isArchived(row.original),
   );
+  const photosBatchLoading =
+    filteredProductIds.length > 0 && photosByProductIdQuery === undefined;
+  const selectedCanPublish =
+    !photosBatchLoading &&
+    hasSelection &&
+    viewFilter !== VIEW_ARCHIVED &&
+    selectedRows.every((row) =>
+      canPublishProduct(
+        {
+          aiImageStatus: row.original.aiImageStatus,
+          aiShopifyFileId: row.original.aiShopifyFileId ?? undefined,
+          needsPhotoReview: row.original.needsPhotoReview,
+          pendingOperation: row.original.pendingOperation ?? undefined,
+          phase: row.original.phase,
+          shopifyFileId: row.original.shopifyFileId ?? undefined,
+        },
+        photosByProductId[row.original._id],
+      ),
+    );
   const activeDragIndex = activeDragProductId
     ? visibleIds.indexOf(activeDragProductId)
     : -1;
@@ -1601,7 +1621,7 @@ export function ProductsPage() {
               Capture photos
             </DropdownMenuItem>
             <DropdownMenuItem
-              disabled={!hasSelection || viewFilter === VIEW_ARCHIVED}
+              disabled={!selectedCanPublish}
               onSelect={() =>
                 void handlePublishSelected().catch(() => undefined)
               }
@@ -1950,6 +1970,9 @@ export function ProductsPage() {
       <ProductPhotoDialog
         onClose={() => setPhotoProductId(null)}
         onOpenProduct={setPhotoProductId}
+        photosByProductId={
+          photosByProductIdQuery === undefined ? undefined : photosByProductId
+        }
         product={photoProduct}
       />
 

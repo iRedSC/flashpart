@@ -96,24 +96,23 @@ export function getProductThumbnailUrl(
   product: ProductPhotoFields,
   photos?: ProductPhoto[] | null,
 ) {
-  if (photos?.length) {
+  // undefined = batch still loading — do not flash legacy Shopify URLs.
+  if (photos === undefined) {
+    return null;
+  }
+
+  if (photos.length > 0) {
     const ais = listAis(photos);
     const approvedAi = ais.find((photo) => photo.approvedAt != null && photo.url);
     if (approvedAi?.url) {
       return approvedAi.url;
     }
 
-    const readyAi = ais.find(
-      (photo) => photo.aiStatus === "ready" && photo.url,
-    );
-    if (readyAi?.url) {
-      return readyAi.url;
-    }
-
     const original = listOriginals(photos).find((photo) => photo.url);
     return original?.url ?? null;
   }
 
+  // photos === [] — allow legacy product-level fallback.
   if (product.aiImageStatus === "ready" && product.aiShopifyFileUrl) {
     return product.aiShopifyFileUrl;
   }
@@ -128,13 +127,12 @@ export function isAiImageGenerating(
   },
   photos?: ProductPhoto[] | null,
 ) {
-  if (photos?.length) {
-    return (
-      listAis(photos).some((photo) => photo.aiStatus === "generating") ||
-      product.pendingOperation === "aiImageGenerating"
-    );
+  if (photos != null && photos.length > 0) {
+    // Per-row AI status only — product pendingOperation would spin all thumbs.
+    return listAis(photos).some((photo) => photo.aiStatus === "generating");
   }
 
+  // No photo rows yet (loading or legacy): fall back to product fields.
   return (
     product.aiImageStatus === "generating" ||
     product.pendingOperation === "aiImageGenerating"
@@ -247,11 +245,34 @@ export function findNextPhotoNeedingApproval<
       }
     }
 
+    // Wrap around so approving the last product can reach earlier ones.
+    for (let index = 0; index < startIndex; index += 1) {
+      const product = sorted[index];
+      if (product._id === currentProductId) {
+        continue;
+      }
+      const aiPhoto = listAis(photosByProductId[product._id] ?? []).find(
+        needsAiPhotoApproval,
+      );
+      if (aiPhoto) {
+        return { product, aiPhoto };
+      }
+    }
+
     return null;
   }
 
   for (let index = startIndex; index < sorted.length; index += 1) {
     if (needsPhotoApproval(sorted[index])) {
+      return sorted[index];
+    }
+  }
+
+  for (let index = 0; index < startIndex; index += 1) {
+    if (
+      sorted[index]._id !== currentProductId &&
+      needsPhotoApproval(sorted[index])
+    ) {
       return sorted[index];
     }
   }
@@ -271,20 +292,20 @@ export function canPublishProduct(
   photos?: ProductPhoto[] | null,
 ) {
   if (photos?.length) {
-    const originals = listOriginals(photos);
-    const ais = listAis(photos);
-    const hasGeneratingAi = ais.some(
-      (photo) => photo.aiStatus === "generating",
-    );
-    // Match listingJobs gate: every AI row must be approved (delete unwanted pairs).
-    const allAisApproved =
-      ais.length >= 1 && ais.every((photo) => photo.approvedAt != null);
+    const pairs = buildPhotoPairs(photos);
+    // Match listingJobs gate: every original → paired AI with ready + approvedAt.
+    const everyOriginalHasApprovedReadyAi =
+      pairs.length >= 1 &&
+      pairs.every(
+        (pair) =>
+          pair.ai != null &&
+          pair.ai.aiStatus === "ready" &&
+          pair.ai.approvedAt != null,
+      );
 
     return (
       product.phase === "captured" &&
-      originals.length >= 1 &&
-      allAisApproved &&
-      !hasGeneratingAi &&
+      everyOriginalHasApprovedReadyAi &&
       !product.pendingOperation
     );
   }

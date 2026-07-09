@@ -28,9 +28,11 @@ export function ProductThumbnail({
   photos?: ProductPhoto[] | null;
   product: ProductThumbnailProduct;
 }) {
+  const photosLoading = photos === undefined;
   const thumbnailUrl = getProductThumbnailUrl(product, photos);
-  const generating = isAiImageGenerating(product, photos);
-  const failed = isAiImageFailed(product, photos);
+  const generating =
+    !photosLoading && isAiImageGenerating(product, photos);
+  const failed = !photosLoading && isAiImageFailed(product, photos);
   const showCount = photoCount != null && photoCount > 1;
   const sharedClassName = cn(
     "relative shrink-0 overflow-hidden rounded-lg bg-slate-100",
@@ -42,6 +44,29 @@ export function ProductThumbnail({
       {photoCount}
     </span>
   ) : null;
+
+  if (photosLoading) {
+    const content = (
+      <span className="flex h-full w-full items-center justify-center text-slate-400">
+        <Loader2 className="h-4 w-4 animate-spin" />
+      </span>
+    );
+
+    if (onClick) {
+      return (
+        <button
+          aria-label={`View photo for ${product.sku}`}
+          className={cn(sharedClassName, "transition-transform active:scale-95")}
+          onClick={onClick}
+          type="button"
+        >
+          {content}
+        </button>
+      );
+    }
+
+    return <div className={sharedClassName}>{content}</div>;
+  }
 
   if (thumbnailUrl) {
     const content = (

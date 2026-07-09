@@ -9,6 +9,7 @@ import {
   Loader2,
   PencilLine,
   RefreshCcw,
+  Replace,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -41,6 +42,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 
 type Product = ReturnType<typeof useAppData>["products"][number];
 type PhotoView = "original" | "ai";
+type CaptureMode = "add" | "replace";
 
 type DialogPair = {
   original: ProductPhoto | null;
@@ -93,7 +95,12 @@ function buildDialogPairs(
   photos: ProductPhoto[] | undefined,
   product: Product | null,
 ): DialogPair[] {
-  if (photos && photos.length > 0) {
+  // U2: while loading, do not flash legacy Shopify pairs.
+  if (photos === undefined) {
+    return [];
+  }
+
+  if (photos.length > 0) {
     return buildPhotoPairs(photos).map((pair: ProductPhotoPair) => ({
       original: pair.original,
       ai: pair.ai,
@@ -163,20 +170,21 @@ function buildDialogPairs(
 }
 
 function pairAiGenerating(pair: DialogPair, product: Product | null) {
-  if (pair.ai?.aiStatus === "generating" || pair.ai?.status === "uploading") {
+  if (
+    pair.ai?.aiStatus === "generating" ||
+    pair.ai?.status === "uploading" ||
+    pair.ai?.aiStatus === "pending"
+  ) {
     return true;
   }
 
+  // Product-level pendingOperation only for legacy single-photo pairs —
+  // otherwise it marks every pair as generating.
   if (pair.isLegacy && product) {
     return isAiImageGenerating(product);
   }
 
-  return (
-    pair.ai == null &&
-    pair.original != null &&
-    !pair.isLegacy &&
-    product?.pendingOperation === "aiImageGenerating"
-  );
+  return false;
 }
 
 function pairAiFailed(pair: DialogPair, product: Product | null) {
@@ -194,10 +202,12 @@ function pairAiFailed(pair: DialogPair, product: Product | null) {
 export function ProductPhotoDialog({
   onClose,
   onOpenProduct,
+  photosByProductId,
   product,
 }: {
   onClose: () => void;
   onOpenProduct: (productId: Id<"products">) => void;
+  photosByProductId?: Record<string, ProductPhoto[]>;
   product: Product | null;
 }) {
   const {
@@ -208,6 +218,7 @@ export function ProductPhotoDialog({
     products,
     regenerateAiImage,
     regenerateAiImageForPhoto,
+    replaceProductPhoto,
     session,
     settings,
   } = useAppData();
@@ -218,6 +229,7 @@ export function ProductPhotoDialog({
   const touchStartXRef = React.useRef<number | null>(null);
   const initializedForProductRef = React.useRef<string | null>(null);
   const [captureFile, setCaptureFile] = React.useState<File | null>(null);
+  const [captureMode, setCaptureMode] = React.useState<CaptureMode>("add");
   const [activeView, setActiveView] = React.useState<PhotoView>("ai");
   const [pairIndex, setPairIndex] = React.useState(0);
   const [prompt, setPrompt] = React.useState(defaultPrompt);
@@ -240,9 +252,13 @@ export function ProductPhotoDialog({
       ? { productId: product._id, sessionToken: session.sessionToken }
       : "skip",
   );
+  const photosLoading = product !== null && productPhotos === undefined;
 
   const photos = React.useMemo(
-    () => productPhotos?.map(toClientPhoto),
+    () =>
+      productPhotos === undefined
+        ? undefined
+        : productPhotos.map(toClientPhoto),
     [productPhotos],
   );
 
@@ -276,6 +292,7 @@ export function ProductPhotoDialog({
     setError(null);
     setStage(null);
     setCaptureFile(null);
+    setCaptureMode("add");
     setPromptDialogOpen(false);
     initializedForProductRef.current = null;
 
@@ -289,14 +306,27 @@ export function ProductPhotoDialog({
       return;
     }
 
-    if (initializedForProductRef.current === product._id) {
+    // Wait until pairs exist so empty→loaded and legacy→multi can re-init.
+    if (pairs.length === 0) {
       return;
     }
 
-    initializedForProductRef.current = product._id;
+    const mode = pairs.some((pair) => pair.isLegacy) ? "legacy" : "photos";
+    const initKey = `${product._id}:${mode}`;
 
-    if (pairs.length === 0) {
+    if (initializedForProductRef.current === initKey) {
       return;
+    }
+
+    const previousKey = initializedForProductRef.current;
+    initializedForProductRef.current = initKey;
+
+    // Real Convex photos replacing a synthetic legacy pair — reset carousel.
+    if (
+      previousKey === `${product._id}:legacy` &&
+      mode === "photos"
+    ) {
+      setPairIndex(0);
     }
 
     const firstNeedingApproval = pairs.findIndex(
@@ -326,6 +356,7 @@ export function ProductPhotoDialog({
     ? pairAiGenerating(currentPair, product)
     : false;
   const aiFailed = currentPair ? pairAiFailed(currentPair, product) : false;
+  // Missing AI (not generating / failed) — show Regen, not an eternal spinner.
   const aiAbsent = Boolean(
     currentPair &&
       activeView === "ai" &&
@@ -336,8 +367,15 @@ export function ProductPhotoDialog({
   const canTakePhoto = Boolean(product?.groupId);
   const isBusy = isSaving || isRegenerating || isApproving || isDeleting;
   const originalCount = pairs.filter((pair) => pair.original != null).length;
+  // U3: once photos loaded, enforce max (no legacy exemption).
   const canAddPhoto =
-    canTakePhoto && (currentPair?.isLegacy || originalCount < maxProductPhotos);
+    canTakePhoto && !photosLoading && originalCount < maxProductPhotos;
+  const canReplacePhoto = Boolean(
+    canTakePhoto &&
+      currentPair?.original &&
+      !currentPair.isLegacy &&
+      !photosLoading,
+  );
   const hasPhotoTabs = Boolean(
     pairs.length > 0 ||
       originalUrl ||
@@ -354,9 +392,19 @@ export function ProductPhotoDialog({
       : Boolean(product && currentPair?.isLegacy && needsPhotoApproval(product));
   const pairPositionLabel =
     pairs.length > 0 ? `${safePairIndex + 1}/${pairs.length}` : null;
+  const showExistingOriginalActions =
+    activeView === "original" &&
+    !captureFile &&
+    Boolean(currentPair?.original) &&
+    !currentPair?.isLegacy;
+  const canSaveCapture =
+    Boolean(captureFile) &&
+    !isBusy &&
+    (captureMode === "replace" ? canReplacePhoto : canAddPhoto);
 
   function resetCapture() {
     setCaptureFile(null);
+    setCaptureMode("add");
     setError(null);
     setStage(null);
   }
@@ -460,7 +508,16 @@ export function ProductPhotoDialog({
     }
   }
 
-  function handleTakePhoto() {
+  function handleTakePhoto(mode: CaptureMode = "add") {
+    if (mode === "add" && !canAddPhoto) {
+      return;
+    }
+
+    if (mode === "replace" && !canReplacePhoto) {
+      return;
+    }
+
+    setCaptureMode(mode);
     fileInputRef.current?.click();
   }
 
@@ -469,24 +526,49 @@ export function ProductPhotoDialog({
       return;
     }
 
+    if (captureMode === "add" && !canAddPhoto) {
+      return;
+    }
+
+    if (captureMode === "replace") {
+      if (!currentPair?.original || currentPair.isLegacy) {
+        return;
+      }
+    }
+
     triggerHaptic();
     setError(null);
     setIsSaving(true);
 
     try {
-      setStage("Uploading photo...");
-      await addProductPhoto({
-        groupId: product.groupId,
-        productId: product._id,
-        file: captureFile,
-      });
+      setStage(
+        captureMode === "replace"
+          ? "Replacing photo..."
+          : "Uploading photo...",
+      );
+
+      if (captureMode === "replace" && currentPair?.original) {
+        await replaceProductPhoto({
+          file: captureFile,
+          groupId: product.groupId,
+          photoId: currentPair.original._id as Id<"productPhotos">,
+          productId: product._id,
+        });
+      } else {
+        await addProductPhoto({
+          groupId: product.groupId,
+          productId: product._id,
+          file: captureFile,
+        });
+        // New original lands at the end; clamp once listByProduct refreshes.
+        setPairIndex(pairs.length);
+      }
+
       triggerHaptic();
       resetCapture();
       setPrompt(defaultPrompt);
       setDraftPrompt(defaultPrompt);
       setActiveView("ai");
-      // New original lands at the end; clamp once listByProduct refreshes.
-      setPairIndex(pairs.length);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -567,21 +649,41 @@ export function ProductPhotoDialog({
           return;
         }
 
-        // Cross-product: only current product's photos are loaded here, so use
-        // product-level dual-read. Full photos-map jump needs listForProducts.
-        const nextProduct = findNextPhotoNeedingApproval(products, product._id);
+        // U1: prefer batch photos map; fall back to product-level dual-read.
+        const nextFromPhotos = photosByProductId
+          ? findNextPhotoNeedingApproval(
+              products,
+              product._id,
+              photosByProductId,
+            )
+          : null;
+        const nextProductId =
+          nextFromPhotos?.product._id ??
+          findNextPhotoNeedingApproval(products, product._id)?._id ??
+          null;
 
-        if (nextProduct) {
-          onOpenProduct(nextProduct._id);
+        if (nextProductId) {
+          onOpenProduct(nextProductId);
         } else {
           onClose();
         }
       } else {
         await approvePhoto(product._id);
-        const nextProduct = findNextPhotoNeedingApproval(products, product._id);
 
-        if (nextProduct) {
-          onOpenProduct(nextProduct._id);
+        const nextFromPhotos = photosByProductId
+          ? findNextPhotoNeedingApproval(
+              products,
+              product._id,
+              photosByProductId,
+            )
+          : null;
+        const nextProductId =
+          nextFromPhotos?.product._id ??
+          findNextPhotoNeedingApproval(products, product._id)?._id ??
+          null;
+
+        if (nextProductId) {
+          onOpenProduct(nextProductId);
         } else {
           onClose();
         }
@@ -602,6 +704,17 @@ export function ProductPhotoDialog({
       return;
     }
 
+    const confirmed =
+      product.shopifyStatus === "published"
+        ? window.confirm(
+            "This product is published. Delete its photo anyway?",
+          )
+        : true;
+
+    if (!confirmed) {
+      return;
+    }
+
     triggerHaptic();
     setError(null);
     setIsDeleting(true);
@@ -609,6 +722,7 @@ export function ProductPhotoDialog({
     try {
       await deleteProductPhoto(
         currentPair.original._id as Id<"productPhotos">,
+        { confirmPublishedDelete: product.shopifyStatus === "published" },
       );
       setPairIndex((index) => Math.max(0, Math.min(index, pairs.length - 2)));
     } catch (caught) {
@@ -621,6 +735,8 @@ export function ProductPhotoDialog({
       setIsDeleting(false);
     }
   }
+
+  const footerButtonClass = "h-9 shrink-0 px-2.5 text-xs sm:px-3 sm:text-sm";
 
   return (
     <>
@@ -687,7 +803,12 @@ export function ProductPhotoDialog({
             onTouchEnd={handleTouchEnd}
             onTouchStart={handleTouchStart}
           >
-            {displayUrl ? (
+            {photosLoading ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
+                <Loader2 className="h-8 w-8 animate-spin" />
+                <span className="text-sm font-medium">Loading photos…</span>
+              </div>
+            ) : displayUrl ? (
               <img
                 alt={`${activeView === "ai" ? "AI" : "Original"} photo for ${product?.sku ?? "product"}`}
                 className="absolute inset-0 h-full w-full object-cover"
@@ -708,15 +829,23 @@ export function ProductPhotoDialog({
                 </span>
               </div>
             ) : activeView === "ai" && aiAbsent ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-slate-500">
+                <Sparkles className="h-8 w-8" />
+                <span className="text-sm font-medium">
+                  No AI photo yet. Tap Regen to generate one.
+                </span>
+              </div>
+            ) : currentPair?.original?.status === "uploading" &&
+              !currentPair.original.url ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
                 <Loader2 className="h-8 w-8 animate-spin" />
-                <span className="text-sm font-medium">Generating…</span>
+                <span className="text-sm font-medium">Uploading photo…</span>
               </div>
             ) : (
               <button
                 className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500 transition-colors hover:bg-slate-200/60 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={!canAddPhoto || isBusy}
-                onClick={handleTakePhoto}
+                onClick={() => handleTakePhoto("add")}
                 type="button"
               >
                 <Camera className="h-8 w-8" />
@@ -727,7 +856,7 @@ export function ProductPhotoDialog({
             )}
             {previewUrl ? (
               <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white backdrop-blur">
-                New photo
+                {captureMode === "replace" ? "Replace photo" : "New photo"}
               </span>
             ) : null}
             {pairPositionLabel && !previewUrl ? (
@@ -794,95 +923,129 @@ export function ProductPhotoDialog({
             </p>
           ) : null}
 
-          {activeView === "ai" && !captureFile ? (
-            <DialogFooter className="flex flex-row flex-wrap gap-2 sm:justify-start">
-              <Button
-                disabled={isBusy || aiGenerating}
-                onClick={openPromptDialog}
-                variant="outline"
-              >
-                <PencilLine className="h-4 w-4" />
-                Edit prompt
-              </Button>
-              <Button
-                disabled={
-                  isBusy ||
-                  aiGenerating ||
-                  (!originalUrl && !currentPair?.original)
-                }
-                onClick={() => void handleRegenerate()}
-                variant="outline"
-              >
-                {isRegenerating || aiGenerating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="h-4 w-4" />
-                )}
-                Regenerate
-              </Button>
-              {currentAiNeedsApproval ? (
-                <Button disabled={isBusy} onClick={() => void handleApprove()}>
-                  {isApproving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Check className="h-4 w-4" />
-                  )}
-                  Approve & next
+          <DialogFooter className="flex flex-row flex-nowrap items-center gap-1.5 overflow-x-auto sm:justify-start">
+            {activeView === "ai" && !captureFile ? (
+              <>
+                <Button
+                  className={footerButtonClass}
+                  disabled={isBusy || aiGenerating || photosLoading}
+                  onClick={openPromptDialog}
+                  variant="outline"
+                >
+                  <PencilLine className="h-3.5 w-3.5" />
+                  Prompt
                 </Button>
-              ) : null}
-            </DialogFooter>
-          ) : (
-            <DialogFooter className="flex flex-row flex-wrap gap-2 sm:justify-start">
-              {captureFile ? (
-                <>
-                  <Button disabled={isBusy} onClick={resetCapture} variant="ghost">
-                    Cancel
-                  </Button>
+                <Button
+                  className={footerButtonClass}
+                  disabled={
+                    isBusy ||
+                    aiGenerating ||
+                    photosLoading ||
+                    (!originalUrl && !currentPair?.original)
+                  }
+                  onClick={() => void handleRegenerate()}
+                  variant="outline"
+                >
+                  {isRegenerating || aiGenerating ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="h-3.5 w-3.5" />
+                  )}
+                  Regen
+                </Button>
+                {currentAiNeedsApproval ? (
                   <Button
+                    className={footerButtonClass}
                     disabled={isBusy}
-                    onClick={handleTakePhoto}
-                    variant="outline"
+                    onClick={() => void handleApprove()}
                   >
-                    <Camera className="h-4 w-4" />
-                    Take photo
-                  </Button>
-                  <Button disabled={isBusy} onClick={() => void handleSave()}>
-                    {isSaving ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                    {isApproving ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      <Check className="h-4 w-4" />
+                      <Check className="h-3.5 w-3.5" />
                     )}
-                    Save photo
+                    Approve →
                   </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    disabled={!canAddPhoto || isBusy}
-                    onClick={handleTakePhoto}
-                    variant="outline"
-                  >
-                    <Camera className="h-4 w-4" />
-                    {originalCount > 0 ? "Add photo" : "Take photo"}
-                  </Button>
-                  {currentPair?.original && !currentPair.isLegacy ? (
-                    <Button
-                      disabled={isBusy}
-                      onClick={() => void handleDeleteOriginal()}
-                      variant="outline"
-                    >
-                      {isDeleting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                      Delete
-                    </Button>
-                  ) : null}
-                </>
-              )}
-            </DialogFooter>
-          )}
+                ) : null}
+              </>
+            ) : captureFile ? (
+              <>
+                <Button
+                  className={footerButtonClass}
+                  disabled={isBusy}
+                  onClick={resetCapture}
+                  variant="ghost"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className={footerButtonClass}
+                  disabled={isBusy}
+                  onClick={() => handleTakePhoto(captureMode)}
+                  variant="outline"
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                  Retake
+                </Button>
+                <Button
+                  className={footerButtonClass}
+                  disabled={!canSaveCapture}
+                  onClick={() => void handleSave()}
+                >
+                  {isSaving ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Check className="h-3.5 w-3.5" />
+                  )}
+                  Save
+                </Button>
+              </>
+            ) : showExistingOriginalActions ? (
+              <>
+                <Button
+                  className={footerButtonClass}
+                  disabled={!canAddPhoto || isBusy}
+                  onClick={() => handleTakePhoto("add")}
+                  variant="outline"
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                  Add photo
+                </Button>
+                <Button
+                  className={footerButtonClass}
+                  disabled={!canReplacePhoto || isBusy}
+                  onClick={() => handleTakePhoto("replace")}
+                  variant="outline"
+                >
+                  <Replace className="h-3.5 w-3.5" />
+                  Replace photo
+                </Button>
+                <Button
+                  className={footerButtonClass}
+                  disabled={isBusy}
+                  onClick={() => void handleDeleteOriginal()}
+                  variant="outline"
+                >
+                  {isDeleting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  Delete
+                </Button>
+              </>
+            ) : (
+              <Button
+                className={footerButtonClass}
+                disabled={!canAddPhoto || isBusy}
+                onClick={() => handleTakePhoto("add")}
+                variant="outline"
+              >
+                <Camera className="h-3.5 w-3.5" />
+                {originalCount > 0 ? "Add photo" : "Take photo"}
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
