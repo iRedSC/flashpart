@@ -125,6 +125,9 @@ export const convexApi = {
     setAiImageEditStrength: deployedFunction<
       typeof api.settings.setAiImageEditStrength
     >("settings.js:setAiImageEditStrength"),
+    setMaxProductPhotos: deployedFunction<
+      typeof api.settings.setMaxProductPhotos
+    >("settings.js:setMaxProductPhotos"),
   },
   shopify: {
     currentConnection: deployedFunction<typeof api.shopify.currentConnection>(

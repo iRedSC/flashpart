@@ -33,6 +33,7 @@ export function SettingsPage() {
     setAutoArchiveComplete,
     setAutoArchiveCompleteGroups,
     setDuplicatePolicy,
+    setMaxProductPhotos,
     setShopifyDefaultTags,
     setShopifyProductType,
     setShopifyPublishTarget,
@@ -64,6 +65,9 @@ export function SettingsPage() {
       (settings?.aiImageEditStrength as AiImageEditStrength | undefined) ??
         DEFAULT_AI_IMAGE_EDIT_STRENGTH,
     );
+  const [maxProductPhotos, setMaxProductPhotosState] = React.useState(
+    settings?.maxProductPhotos ?? 5,
+  );
   const selectedModel = AI_IMAGE_MODEL_OPTIONS.find(
     (option) => option.id === aiImageModel,
   );
@@ -103,6 +107,10 @@ export function SettingsPage() {
         DEFAULT_AI_IMAGE_EDIT_STRENGTH,
     );
   }, [settings?.aiImageEditStrength]);
+
+  React.useEffect(() => {
+    setMaxProductPhotosState(settings?.maxProductPhotos ?? 5);
+  }, [settings?.maxProductPhotos]);
 
   React.useEffect(() => {
     setShopDomain(shopifyConnection?.shopDomain ?? "");
@@ -368,6 +376,44 @@ export function SettingsPage() {
             <p className="text-sm text-slate-500">
               Used for new captures and retakes. Per-product prompt edits in the
               photo dialog are kept until the photo is retaken.
+            </p>
+          </div>
+          <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
+            <label
+              className="grid gap-2 text-sm font-medium"
+              htmlFor="max-product-photos"
+            >
+              Max photos per product
+              <Input
+                id="max-product-photos"
+                inputMode="numeric"
+                max={20}
+                min={1}
+                onBlur={() => {
+                  const parsed = Number(maxProductPhotos);
+                  const value = Number.isFinite(parsed)
+                    ? Math.min(20, Math.max(1, Math.round(parsed)))
+                    : 5;
+
+                  setMaxProductPhotosState(value);
+
+                  if (value !== (settings?.maxProductPhotos ?? 5)) {
+                    void setMaxProductPhotos(value).catch(() => undefined);
+                  }
+                }}
+                onChange={(event) => {
+                  const next = Number(event.currentTarget.value);
+                  setMaxProductPhotosState(
+                    Number.isFinite(next) ? next : (settings?.maxProductPhotos ?? 5),
+                  );
+                }}
+                type="number"
+                value={maxProductPhotos}
+              />
+            </label>
+            <p className="text-sm text-slate-500">
+              Limits how many original photos can be attached to a single
+              product (1–20).
             </p>
           </div>
         </CardContent>

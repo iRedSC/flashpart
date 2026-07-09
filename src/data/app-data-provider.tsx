@@ -139,6 +139,9 @@ type AppDataContextValue = {
   setAiImageEditStrength: (
     aiImageEditStrength: AiImageEditStrength,
   ) => Promise<{ aiImageEditStrength: AiImageEditStrength } | null>;
+  setMaxProductPhotos: (
+    maxProductPhotos: number,
+  ) => Promise<{ maxProductPhotos: number } | null>;
   disconnectShopify: () => Promise<null>;
   deleteShopifyFile: (
     productId: Id<"products">,
@@ -327,6 +330,9 @@ export function AppDataProvider({
   const setAiImageEditStrengthMutation = useMutation(
     convexApi.settings.setAiImageEditStrength,
   );
+  const setMaxProductPhotosMutation = useMutation(
+    convexApi.settings.setMaxProductPhotos,
+  );
   const disconnectShopifyMutation = useMutation(convexApi.shopify.disconnect);
   const prepareFileUploadAction = useAction(convexApi.shopify.prepareFileUpload);
   const finalizeFileUploadAction = useAction(convexApi.shopify.finalizeFileUpload);
@@ -358,6 +364,7 @@ export function AppDataProvider({
             autoArchiveComplete: settings.autoArchiveComplete ?? false,
             autoArchiveCompleteGroups:
               settings.autoArchiveCompleteGroups ?? false,
+            maxProductPhotos: settings.maxProductPhotos ?? 5,
             shopifyPublishTarget: settings.shopifyPublishTarget ?? "draft",
           } satisfies Settings)
         : null,
@@ -902,6 +909,25 @@ export function AppDataProvider({
             }),
           label: "Saving AI edit strength",
         }),
+      setMaxProductPhotos: (maxProductPhotos) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  maxProductPhotos,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setMaxProductPhotosMutation({
+              maxProductPhotos,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving max product photos",
+        }),
       disconnectShopify: () =>
         runOptimistic({
           apply: (state) => ({
@@ -1191,6 +1217,7 @@ export function AppDataProvider({
       setAiImageDefaultPromptMutation,
       setAiImageEditStrengthMutation,
       setAiImageModelMutation,
+      setMaxProductPhotosMutation,
       setDuplicatePolicyMutation,
       setAutoArchiveCompleteMutation,
       setAutoArchiveCompleteGroupsMutation,

@@ -12,6 +12,10 @@ import {
 import type { AiImageEditStrength, AiImageModelId } from "./photoAiConstants";
 import { normalizeTagString } from "./tags";
 
+const DEFAULT_MAX_PRODUCT_PHOTOS = 5;
+const MIN_MAX_PRODUCT_PHOTOS = 1;
+const MAX_MAX_PRODUCT_PHOTOS = 20;
+
 const defaultSettings = {
   key: "singleton" as const,
   aiImageDefaultPrompt: DEFAULT_AI_IMAGE_PROMPT,
@@ -20,10 +24,25 @@ const defaultSettings = {
   autoArchiveComplete: false,
   autoArchiveCompleteGroups: false,
   duplicatePolicy: "blockExisting" as const,
+  maxProductPhotos: DEFAULT_MAX_PRODUCT_PHOTOS,
   shopifyPublishTarget: "draft" as const,
   shopifyProductType: "Part" as const,
   updatedAt: 0,
 };
+
+export function resolveMaxProductPhotos(
+  settings: { maxProductPhotos?: number } | null,
+) {
+  const value = settings?.maxProductPhotos;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_MAX_PRODUCT_PHOTOS;
+  }
+
+  return Math.min(
+    MAX_MAX_PRODUCT_PHOTOS,
+    Math.max(MIN_MAX_PRODUCT_PHOTOS, Math.round(value)),
+  );
+}
 
 export function resolveAiImageSettings(
   settings: {
@@ -62,6 +81,7 @@ export const get = query({
       ...defaultSettings,
       ...stored,
       ...resolveAiImageSettings(stored),
+      maxProductPhotos: resolveMaxProductPhotos(stored),
     };
   },
 });
@@ -310,6 +330,36 @@ export const setAiImageEditStrength = mutation({
     }
 
     return { aiImageEditStrength: args.aiImageEditStrength };
+  },
+});
+
+export const setMaxProductPhotos = mutation({
+  args: {
+    maxProductPhotos: v.number(),
+    sessionToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const settings = await getSettingsDocument(ctx);
+    const now = Date.now();
+    const maxProductPhotos = resolveMaxProductPhotos({
+      maxProductPhotos: args.maxProductPhotos,
+    });
+
+    if (settings) {
+      await ctx.db.patch(settings._id, {
+        maxProductPhotos,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("appSettings", {
+        ...defaultSettings,
+        maxProductPhotos,
+        updatedAt: now,
+      });
+    }
+
+    return { maxProductPhotos };
   },
 });
 
