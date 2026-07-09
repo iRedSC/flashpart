@@ -209,6 +209,11 @@ export async function syncProductPhotoFlags(
 
   const originals = await getOriginalPhotos(ctx, productId);
   const aiPhotos = await getAiPhotos(ctx, productId);
+  const aiBySource = new Map(
+    aiPhotos
+      .filter((photo) => photo.sourcePhotoId !== undefined)
+      .map((photo) => [photo.sourcePhotoId!, photo]),
+  );
 
   const anyGenerating = aiPhotos.some(
     (photo) => photo.aiStatus === "generating",
@@ -217,10 +222,22 @@ export async function syncProductPhotoFlags(
     (photo) => photo.aiStatus === "ready" && photo.approvedAt === undefined,
   );
   const anyFailed = aiPhotos.some((photo) => photo.aiStatus === "failed");
-  const anyApproved = aiPhotos.some((photo) => photo.approvedAt !== undefined);
-  const allAisApproved =
-    aiPhotos.length > 0 &&
-    aiPhotos.every((photo) => photo.approvedAt !== undefined);
+  const anyPending = aiPhotos.some((photo) => photo.aiStatus === "pending");
+  // Product badge is "complete" only when every original has an approved ready AI.
+  // Pending reserved slots / missing AIs must not leave a stale "ready".
+  const allOriginalsHaveApprovedReadyAi =
+    originals.length > 0 &&
+    originals.every((original) => {
+      const ai = aiBySource.get(original._id);
+      return (
+        ai != null &&
+        ai.aiStatus === "ready" &&
+        ai.approvedAt !== undefined
+      );
+    });
+  const missingAiForOriginal = originals.some(
+    (original) => !aiBySource.has(original._id),
+  );
 
   const patch: Partial<Doc<"products">> = {
     updatedAt: now,
@@ -241,22 +258,30 @@ export async function syncProductPhotoFlags(
     patch.needsPhotoReview = true;
     patch.aiImageStatus = "ready";
     clearAiGeneratingPending();
-  } else if (anyFailed && !anyReadyUnapproved) {
+  } else if (anyFailed && !anyReadyUnapproved && !anyPending) {
     patch.aiImageStatus = "failed";
     patch.needsPhotoReview = undefined;
     clearAiGeneratingPending();
-  } else if (allAisApproved || (aiPhotos.length === 0 && originals.length > 0)) {
+  } else if (allOriginalsHaveApprovedReadyAi) {
     patch.needsPhotoReview = undefined;
     clearAiGeneratingPending();
-    if (anyApproved) {
-      patch.aiImageStatus = "ready";
-    } else if (aiPhotos.length === 0) {
-      // Originals only — clear stale AI badge until generation starts.
+    patch.aiImageStatus = "ready";
+  } else if (aiPhotos.length === 0 && originals.length > 0) {
+    // Originals only — clear stale AI badge until generation starts.
+    patch.needsPhotoReview = undefined;
+    clearAiGeneratingPending();
+    patch.aiImageStatus = undefined;
+  } else {
+    // Incomplete: pending reserved slots, partial approval, or missing AIs.
+    patch.needsPhotoReview = undefined;
+    clearAiGeneratingPending();
+    if (anyPending || missingAiForOriginal) {
+      patch.aiImageStatus = "pending";
+    } else if (anyFailed) {
+      patch.aiImageStatus = "failed";
+    } else {
       patch.aiImageStatus = undefined;
     }
-  } else {
-    patch.needsPhotoReview = undefined;
-    clearAiGeneratingPending();
   }
 
   if (
