@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
+import { useIsMobile } from "../../lib/use-is-mobile";
 import { cn } from "../../lib/utils";
 
 export const Dialog = DialogPrimitive.Root;
@@ -23,28 +24,77 @@ export const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+function scrollFocusedFieldIntoView(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (
+    !(
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement
+    )
+  ) {
+    return;
+  }
+
+  // Let the keyboard animation settle, then keep the field above it.
+  window.setTimeout(() => {
+    target.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+      behavior: "smooth",
+    });
+  }, 100);
+}
+
 export const DialogContent = React.forwardRef<
   React.ComponentRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      className={cn(
-        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border border-slate-200 bg-white p-6 shadow-lg",
-        className,
-      )}
-      ref={ref}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-white transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2 disabled:pointer-events-none">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-));
+>(({ className, children, onFocusCapture, ...props }, ref) => {
+  const isMobile = useIsMobile();
+
+  return (
+    <DialogPortal>
+      <DialogOverlay />
+      <DialogPrimitive.Content
+        className={cn(
+          "z-50 grid w-full gap-4 border border-slate-200 bg-white p-6 shadow-lg",
+          isMobile
+            ? [
+                "fixed inset-x-0 bottom-0 top-auto max-h-[min(90dvh,100%)]",
+                "translate-x-0 translate-y-0 overflow-y-auto overscroll-contain",
+                "rounded-t-2xl rounded-b-none",
+                "pb-[max(1.5rem,env(safe-area-inset-bottom))]",
+              ]
+            : [
+                "fixed left-1/2 top-1/2 max-h-[min(85dvh,100%)] max-w-lg",
+                "-translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain",
+                "rounded-xl",
+              ],
+          className,
+          // Keep mobile sheets full-bleed even when callers pass max-w-*.
+          isMobile && "max-w-none",
+        )}
+        onFocusCapture={(event) => {
+          onFocusCapture?.(event);
+          if (!event.defaultPrevented) {
+            scrollFocusedFieldIntoView(event.target);
+          }
+        }}
+        ref={ref}
+        {...props}
+      >
+        {children}
+        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-white transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2 disabled:pointer-events-none">
+          <X className="h-4 w-4" />
+          <span className="sr-only">Close</span>
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  );
+});
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 export function DialogHeader({
@@ -53,7 +103,7 @@ export function DialogHeader({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("flex flex-col space-y-1.5 text-center sm:text-left", className)}
+      className={cn("flex flex-col space-y-1.5 text-left", className)}
       {...props}
     />
   );
