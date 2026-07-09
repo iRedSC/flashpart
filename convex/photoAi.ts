@@ -14,6 +14,7 @@ import {
   isAiImageEditStrength,
   isAiImageModel,
 } from "./photoAiConstants";
+import { maybeUnarchiveGroupForActiveProduct } from "./groups";
 import { productErrorFields } from "./productState";
 import { resolveAiImageSettings } from "./settings";
 import {
@@ -252,6 +253,7 @@ export const markFailed = internalMutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const product = await ctx.db.get(args.productId);
 
     await ctx.db.patch(args.productId, {
       aiImageError: args.error,
@@ -266,6 +268,7 @@ export const markFailed = internalMutation({
         now,
       ),
     });
+    await maybeUnarchiveGroupForActiveProduct(ctx, product?.groupId, now);
   },
 });
 

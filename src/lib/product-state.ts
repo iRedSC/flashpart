@@ -33,6 +33,7 @@ export type GroupProductProgress = {
   pending: number;
   captured: number;
   published: number;
+  archived: number;
   total: number;
 };
 
@@ -144,14 +145,13 @@ export function groupProductProgress<
   let pending = 0;
   let captured = 0;
   let published = 0;
-  let total = 0;
+  let archived = 0;
 
   for (const product of products) {
     if (isArchived(product)) {
+      archived += 1;
       continue;
     }
-
-    total += 1;
 
     if (product.phase === "published") {
       published += 1;
@@ -166,8 +166,19 @@ export function groupProductProgress<
     pending,
     captured,
     published,
-    total,
+    archived,
+    total: pending + captured + published + archived,
   };
+}
+
+export function isGroupArchived(group: { archivedAt?: number }): boolean {
+  return group.archivedAt !== undefined;
+}
+
+export function allGroupProductsArchived<
+  T extends { archivedAt?: number },
+>(products: T[]): boolean {
+  return products.length > 0 && products.every(isArchived);
 }
 
 export const phaseLabels: Record<ProductPhase, string> = {

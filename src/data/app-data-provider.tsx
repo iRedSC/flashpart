@@ -4,7 +4,10 @@ import type { FunctionReturnType } from "convex/server";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { AuthSession } from "../lib/auth-session";
 import { convexApi } from "../lib/convex-api";
-import { isGroupCaptureComplete } from "../lib/product-state";
+import {
+  allGroupProductsArchived,
+  isGroupCaptureComplete,
+} from "../lib/product-state";
 import type { AiImageEditStrength, AiImageModelId } from "../lib/ai-image-settings";
 
 type Product = FunctionReturnType<typeof convexApi.products.list>[number];
@@ -13,8 +16,12 @@ type ListingJob = FunctionReturnType<typeof convexApi.listingJobs.list>[number];
 type DuplicatePolicy = "blockExisting" | "updateExisting";
 type ShopifyPublishTarget = "draft" | "published";
 type ConvexSettings = FunctionReturnType<typeof convexApi.settings.get>;
-type Settings = Omit<ConvexSettings, "duplicatePolicy" | "autoArchiveComplete"> & {
+type Settings = Omit<
+  ConvexSettings,
+  "duplicatePolicy" | "autoArchiveComplete" | "autoArchiveCompleteGroups"
+> & {
   autoArchiveComplete: boolean;
+  autoArchiveCompleteGroups: boolean;
   duplicatePolicy: DuplicatePolicy;
   shopifyPublishTarget: ShopifyPublishTarget;
 };
@@ -111,6 +118,9 @@ type AppDataContextValue = {
   setAutoArchiveComplete: (
     autoArchiveComplete: boolean,
   ) => Promise<{ autoArchiveComplete: boolean } | null>;
+  setAutoArchiveCompleteGroups: (
+    autoArchiveCompleteGroups: boolean,
+  ) => Promise<{ autoArchiveCompleteGroups: boolean } | null>;
   setShopifyPublishTarget: (
     shopifyPublishTarget: ShopifyPublishTarget,
   ) => Promise<{ shopifyPublishTarget: ShopifyPublishTarget } | null>;
@@ -138,6 +148,10 @@ type AppDataContextValue = {
   assignFirstUngrouped: (
     groupId: Id<"groups">,
   ) => Promise<{ assigned: number } | null>;
+  archiveGroup: (groupId: Id<"groups">) => Promise<{ archived: boolean } | null>;
+  unarchiveGroup: (
+    groupId: Id<"groups">,
+  ) => Promise<{ unarchived: boolean } | null>;
   deleteGroup: (
     groupId: Id<"groups">,
   ) => Promise<{ deleted: boolean; ungrouped: number } | null>;
@@ -195,17 +209,68 @@ function completedForGroups(product: Product) {
 
 function recomputeGroupCounts(groups: Group[], products: Product[]) {
   return groups.map((group) => {
-    const groupProducts = products.filter(
-      (product) =>
-        product.groupId === group._id && product.archivedAt === undefined,
+    const allGroupProducts = products.filter(
+      (product) => product.groupId === group._id,
+    );
+    const activeProducts = allGroupProducts.filter(
+      (product) => product.archivedAt === undefined,
     );
 
     return {
       ...group,
-      productCount: groupProducts.length,
-      completedCount: groupProducts.filter(completedForGroups).length,
+      productCount: activeProducts.length,
+      archivedCount: allGroupProducts.length - activeProducts.length,
+      completedCount: activeProducts.filter(completedForGroups).length,
     };
   });
+}
+
+function applyGroupArchiveSideEffects(
+  groups: Group[],
+  products: Product[],
+  settings: Settings | null,
+  now: number,
+) {
+  const withCounts = recomputeGroupCounts(groups, products);
+
+  if (settings?.autoArchiveCompleteGroups !== true) {
+    return withCounts;
+  }
+
+  return withCounts.map((group) => {
+    if (group.archivedAt !== undefined) {
+      return group;
+    }
+
+    const groupProducts = products.filter(
+      (product) => product.groupId === group._id,
+    );
+
+    if (!allGroupProductsArchived(groupProducts)) {
+      return group;
+    }
+
+    return { ...group, archivedAt: now, updatedAt: now };
+  });
+}
+
+function applyGroupUnarchiveSideEffects(
+  groups: Group[],
+  products: Product[],
+  now: number,
+) {
+  const withCounts = recomputeGroupCounts(groups, products);
+  const activeGroupIds = new Set(
+    products
+      .filter((product) => product.archivedAt === undefined && product.groupId)
+      .map((product) => product.groupId as Id<"groups">),
+  );
+
+  return withCounts.map((group) =>
+    group.archivedAt !== undefined && activeGroupIds.has(group._id)
+      ? { ...group, archivedAt: undefined, updatedAt: now }
+      : group,
+  );
 }
 
 export function AppDataProvider({
@@ -232,6 +297,8 @@ export function AppDataProvider({
   const unarchiveProductsMutation = useMutation(convexApi.products.unarchiveMany);
   const reorderProductsMutation = useMutation(convexApi.products.reorder);
   const assignProductsMutation = useMutation(convexApi.groups.assignProducts);
+  const archiveGroupMutation = useMutation(convexApi.groups.archive);
+  const unarchiveGroupMutation = useMutation(convexApi.groups.unarchive);
   const publishProductsMutation = useMutation(
     convexApi.listingJobs.enqueueCreateDrafts,
   );
@@ -240,6 +307,9 @@ export function AppDataProvider({
   );
   const setAutoArchiveCompleteMutation = useMutation(
     convexApi.settings.setAutoArchiveComplete,
+  );
+  const setAutoArchiveCompleteGroupsMutation = useMutation(
+    convexApi.settings.setAutoArchiveCompleteGroups,
   );
   const setShopifyPublishTargetMutation = useMutation(
     convexApi.settings.setShopifyPublishTarget,
@@ -286,6 +356,8 @@ export function AppDataProvider({
         ? ({
             ...settings,
             autoArchiveComplete: settings.autoArchiveComplete ?? false,
+            autoArchiveCompleteGroups:
+              settings.autoArchiveCompleteGroups ?? false,
             shopifyPublishTarget: settings.shopifyPublishTarget ?? "draft",
           } satisfies Settings)
         : null,
@@ -482,22 +554,24 @@ export function AppDataProvider({
         const idSet = new Set(ids);
 
         return runOptimistic({
-          apply: (state) => ({
-            ...state,
-            products: state.products.map((product) =>
+          apply: (state) => {
+            const products = state.products.map((product) =>
               idSet.has(product._id) && product.lastError === undefined
                 ? { ...product, archivedAt: now, updatedAt: now }
                 : product,
-            ),
-            groups: recomputeGroupCounts(
-              state.groups,
-              state.products.map((product) =>
-                idSet.has(product._id) && product.lastError === undefined
-                  ? { ...product, archivedAt: now, updatedAt: now }
-                  : product,
+            );
+
+            return {
+              ...state,
+              products,
+              groups: applyGroupArchiveSideEffects(
+                state.groups,
+                products,
+                state.settings,
+                now,
               ),
-            ),
-          }),
+            };
+          },
           commit: () =>
             archiveProductsMutation({
               ids,
@@ -515,22 +589,23 @@ export function AppDataProvider({
         const idSet = new Set(ids);
 
         return runOptimistic({
-          apply: (state) => ({
-            ...state,
-            products: state.products.map((product) =>
+          apply: (state) => {
+            const products = state.products.map((product) =>
               idSet.has(product._id)
                 ? { ...product, archivedAt: undefined, updatedAt: now }
                 : product,
-            ),
-            groups: recomputeGroupCounts(
-              state.groups,
-              state.products.map((product) =>
-                idSet.has(product._id)
-                  ? { ...product, archivedAt: undefined, updatedAt: now }
-                  : product,
+            );
+
+            return {
+              ...state,
+              products,
+              groups: applyGroupUnarchiveSideEffects(
+                state.groups,
+                products,
+                now,
               ),
-            ),
-          }),
+            };
+          },
           commit: () =>
             unarchiveProductsMutation({
               ids,
@@ -693,6 +768,25 @@ export function AppDataProvider({
               sessionToken: session.sessionToken,
             }),
           label: "Saving auto-archive setting",
+        }),
+      setAutoArchiveCompleteGroups: (autoArchiveCompleteGroups) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  autoArchiveCompleteGroups,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setAutoArchiveCompleteGroupsMutation({
+              autoArchiveCompleteGroups,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving group auto-archive setting",
         }),
       setShopifyPublishTarget: (shopifyPublishTarget) =>
         runOptimistic({
@@ -866,6 +960,7 @@ export function AppDataProvider({
               {
                 _creationTime: Date.now(),
                 _id: `optimistic-group-${operationIdRef.current}` as Id<"groups">,
+                archivedCount: 0,
                 completedCount: 0,
                 createdAt: Date.now(),
                 name,
@@ -882,7 +977,10 @@ export function AppDataProvider({
         }),
       assignFirstUngrouped: (groupId) => {
         const candidateIds = optimisticData.products
-          .filter((product) => product.groupId === undefined)
+          .filter(
+            (product) =>
+              product.groupId === undefined && product.archivedAt === undefined,
+          )
           .map((product) => product._id);
 
         return runOptimistic({
@@ -901,6 +999,46 @@ export function AppDataProvider({
             }),
           label: "Assigning ungrouped products",
           productIds: candidateIds,
+        });
+      },
+      archiveGroup: (groupId) => {
+        const now = Date.now();
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            groups: state.groups.map((group) =>
+              group._id === groupId
+                ? { ...group, archivedAt: now, updatedAt: now }
+                : group,
+            ),
+          }),
+          commit: () =>
+            archiveGroupMutation({
+              groupId,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Archiving group",
+        });
+      },
+      unarchiveGroup: (groupId) => {
+        const now = Date.now();
+
+        return runOptimistic({
+          apply: (state) => ({
+            ...state,
+            groups: state.groups.map((group) =>
+              group._id === groupId
+                ? { ...group, archivedAt: undefined, updatedAt: now }
+                : group,
+            ),
+          }),
+          commit: () =>
+            unarchiveGroupMutation({
+              groupId,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Restoring group",
         });
       },
       deleteGroup: (groupId) => {
@@ -1018,6 +1156,8 @@ export function AppDataProvider({
       assignFirstUngroupedMutation,
       assignProductsMutation,
       createGroupMutation,
+      archiveGroupMutation,
+      unarchiveGroupMutation,
       deleteGroupMutation,
       createProductMutation,
       archiveProductsMutation,
@@ -1053,6 +1193,7 @@ export function AppDataProvider({
       setAiImageModelMutation,
       setDuplicatePolicyMutation,
       setAutoArchiveCompleteMutation,
+      setAutoArchiveCompleteGroupsMutation,
       setShopifyPublishTargetMutation,
       setShopifyProductTypeMutation,
       setShopifyDefaultTagsMutation,

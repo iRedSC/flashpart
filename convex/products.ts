@@ -1,7 +1,11 @@
 import { ConvexError, v } from "convex/values";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
+import {
+  maybeAutoArchiveGroup,
+  maybeUnarchiveGroupForActiveProduct,
+} from "./groups";
 import {
   canArchive,
   compareProductDisplayOrder,
@@ -278,6 +282,7 @@ export const archiveMany = mutation({
     const now = Date.now();
     let archived = 0;
     let skippedErrored = 0;
+    const touchedGroupIds = new Set<Id<"groups">>();
 
     for (const id of args.ids) {
       const product = await ctx.db.get(id);
@@ -300,6 +305,14 @@ export const archiveMany = mutation({
         updatedAt: now,
       });
       archived += 1;
+
+      if (product.groupId) {
+        touchedGroupIds.add(product.groupId);
+      }
+    }
+
+    for (const groupId of touchedGroupIds) {
+      await maybeAutoArchiveGroup(ctx, groupId, now);
     }
 
     return { archived, skippedErrored };
@@ -315,6 +328,7 @@ export const unarchiveMany = mutation({
     await requireSessionUser(ctx, args.sessionToken);
     const now = Date.now();
     let unarchived = 0;
+    const touchedGroupIds = new Set<Id<"groups">>();
 
     for (const id of args.ids) {
       const product = await ctx.db.get(id);
@@ -328,6 +342,14 @@ export const unarchiveMany = mutation({
         updatedAt: now,
       });
       unarchived += 1;
+
+      if (product.groupId) {
+        touchedGroupIds.add(product.groupId);
+      }
+    }
+
+    for (const groupId of touchedGroupIds) {
+      await maybeUnarchiveGroupForActiveProduct(ctx, groupId, now);
     }
 
     return { unarchived };
