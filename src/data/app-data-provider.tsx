@@ -378,6 +378,9 @@ export function AppDataProvider({
   const replaceOriginalFromUploadMutation = useMutation(
     convexApi.productPhotos.replaceOriginalFromUpload,
   );
+  const deleteUploadedStorageMutation = useMutation(
+    convexApi.productPhotos.deleteUploadedStorage,
+  );
   const regenerateAiImageMutation = useMutation(convexApi.photoAi.regenerate);
   const regenerateAiImageForPhotoMutation = useMutation(
     convexApi.photoAi.regenerateForPhoto,
@@ -1324,19 +1327,31 @@ export function AppDataProvider({
           }),
           commit: async () => {
             const uploaded = await uploadCaptureFile(args.file);
-            const captureId = await recordConvexCaptureMutation({
-              groupId: args.groupId,
-              productId: args.productId,
-              sessionToken: session.sessionToken,
-            });
-            const photoId = await replaceOriginalFromUploadMutation({
-              captureId,
-              photoId: args.photoId,
-              sessionToken: session.sessionToken,
-              storageId: uploaded.storageId,
-            });
+            try {
+              const captureId = await recordConvexCaptureMutation({
+                groupId: args.groupId,
+                productId: args.productId,
+                sessionToken: session.sessionToken,
+              });
+              const photoId = await replaceOriginalFromUploadMutation({
+                captureId,
+                photoId: args.photoId,
+                sessionToken: session.sessionToken,
+                storageId: uploaded.storageId,
+              });
 
-            return { captureId, photoId };
+              return { captureId, photoId };
+            } catch (error) {
+              try {
+                await deleteUploadedStorageMutation({
+                  sessionToken: session.sessionToken,
+                  storageId: uploaded.storageId,
+                });
+              } catch {
+                // Best-effort cleanup; surface the original replace error.
+              }
+              throw error;
+            }
           },
           label: "Replacing product photo",
           productIds: [args.productId],
@@ -1450,6 +1465,7 @@ export function AppDataProvider({
       approveAiPhotoMutation,
       approvePhotoMutation,
       deletePhotoMutation,
+      deleteUploadedStorageMutation,
       finalizeOriginalUploadMutation,
       generateUploadUrlMutation,
       recordConvexCaptureMutation,

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useQuery } from "convex/react";
+import { useConvex, useQuery } from "convex/react";
 import {
   AlertCircle,
   Camera,
@@ -222,12 +222,15 @@ export function ProductPhotoDialog({
     session,
     settings,
   } = useAppData();
+  const convex = useConvex();
   const defaultPrompt =
     settings?.aiImageDefaultPrompt?.trim() || DEFAULT_AI_IMAGE_PROMPT;
   const maxProductPhotos = settings?.maxProductPhotos ?? 5;
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const touchStartXRef = React.useRef<number | null>(null);
   const initializedForProductRef = React.useRef<string | null>(null);
+  /** After add, focus the new pair once listByProduct includes this original. */
+  const pendingFocusOriginalIdRef = React.useRef<string | null>(null);
   const [captureFile, setCaptureFile] = React.useState<File | null>(null);
   const [captureMode, setCaptureMode] = React.useState<CaptureMode>("add");
   const [activeView, setActiveView] = React.useState<PhotoView>("ai");
@@ -282,6 +285,7 @@ export function ProductPhotoDialog({
   React.useEffect(() => {
     if (!product) {
       initializedForProductRef.current = null;
+      pendingFocusOriginalIdRef.current = null;
       return;
     }
 
@@ -295,6 +299,7 @@ export function ProductPhotoDialog({
     setCaptureMode("add");
     setPromptDialogOpen(false);
     initializedForProductRef.current = null;
+    pendingFocusOriginalIdRef.current = null;
 
     const preferOriginal =
       isAiImageGenerating(product) || isAiImageFailed(product);
@@ -309,6 +314,21 @@ export function ProductPhotoDialog({
     // Wait until pairs exist so empty→loaded and legacy→multi can re-init.
     if (pairs.length === 0) {
       return;
+    }
+
+    const pendingOriginalId = pendingFocusOriginalIdRef.current;
+    if (pendingOriginalId) {
+      const focusIndex = pairs.findIndex(
+        (pair) => pair.original?._id === pendingOriginalId,
+      );
+      if (focusIndex >= 0) {
+        pendingFocusOriginalIdRef.current = null;
+        setPairIndex(focusIndex);
+        initializedForProductRef.current = `${product._id}:${
+          pairs.some((pair) => pair.isLegacy) ? "legacy" : "photos"
+        }`;
+        return;
+      }
     }
 
     const mode = pairs.some((pair) => pair.isLegacy) ? "legacy" : "photos";
@@ -340,6 +360,9 @@ export function ProductPhotoDialog({
   }, [product?._id, productPhotos, pairs]);
 
   React.useEffect(() => {
+    if (pendingFocusOriginalIdRef.current) {
+      return;
+    }
     if (pairIndex >= pairs.length && pairs.length > 0) {
       setPairIndex(pairs.length - 1);
     }
@@ -555,13 +578,13 @@ export function ProductPhotoDialog({
           productId: product._id,
         });
       } else {
-        await addProductPhoto({
+        const { photoId } = await addProductPhoto({
           groupId: product.groupId,
           productId: product._id,
           file: captureFile,
         });
-        // New original lands at the end; clamp once listByProduct refreshes.
-        setPairIndex(pairs.length);
+        // Focus the new pair only after listByProduct includes this original.
+        pendingFocusOriginalIdRef.current = photoId;
       }
 
       triggerHaptic();
@@ -614,6 +637,56 @@ export function ProductPhotoDialog({
     }
   }
 
+  async function resolveNextProductNeedingApproval(
+    currentProductId: Id<"products">,
+  ): Promise<Id<"products"> | null> {
+    // Prefer a fresh batch so approve→next does not miss siblings still
+    // needing review while the parent photosByProductId map is stale.
+    try {
+      const productIds = products.map(
+        (entry) => entry._id as Id<"products">,
+      );
+      if (productIds.length > 0) {
+        const freshByProductId = await convex.query(
+          convexApi.productPhotos.listForProducts,
+          {
+            productIds,
+            sessionToken: session.sessionToken,
+          },
+        );
+        const freshMap: Record<string, ProductPhoto[]> = {};
+        for (const [id, photos] of Object.entries(freshByProductId)) {
+          freshMap[id] = (photos as Parameters<typeof toClientPhoto>[0][]).map(
+            toClientPhoto,
+          );
+        }
+        const nextFromFresh = findNextPhotoNeedingApproval(
+          products,
+          currentProductId,
+          freshMap,
+        );
+        if (nextFromFresh) {
+          return nextFromFresh.product._id;
+        }
+      }
+    } catch {
+      // Fall through to stale map / product-flag dual-read.
+    }
+
+    const nextFromPhotos = photosByProductId
+      ? findNextPhotoNeedingApproval(
+          products,
+          currentProductId,
+          photosByProductId,
+        )
+      : null;
+    return (
+      nextFromPhotos?.product._id ??
+      findNextPhotoNeedingApproval(products, currentProductId)?._id ??
+      null
+    );
+  }
+
   async function handleApprove() {
     if (!product || isBusy || !currentPair) {
       return;
@@ -649,18 +722,9 @@ export function ProductPhotoDialog({
           return;
         }
 
-        // U1: prefer batch photos map; fall back to product-level dual-read.
-        const nextFromPhotos = photosByProductId
-          ? findNextPhotoNeedingApproval(
-              products,
-              product._id,
-              photosByProductId,
-            )
-          : null;
-        const nextProductId =
-          nextFromPhotos?.product._id ??
-          findNextPhotoNeedingApproval(products, product._id)?._id ??
-          null;
+        const nextProductId = await resolveNextProductNeedingApproval(
+          product._id,
+        );
 
         if (nextProductId) {
           onOpenProduct(nextProductId);
@@ -670,17 +734,9 @@ export function ProductPhotoDialog({
       } else {
         await approvePhoto(product._id);
 
-        const nextFromPhotos = photosByProductId
-          ? findNextPhotoNeedingApproval(
-              products,
-              product._id,
-              photosByProductId,
-            )
-          : null;
-        const nextProductId =
-          nextFromPhotos?.product._id ??
-          findNextPhotoNeedingApproval(products, product._id)?._id ??
-          null;
+        const nextProductId = await resolveNextProductNeedingApproval(
+          product._id,
+        );
 
         if (nextProductId) {
           onOpenProduct(nextProductId);

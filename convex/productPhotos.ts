@@ -656,6 +656,31 @@ export const generateUploadUrl = mutation({
   },
 });
 
+/**
+ * Best-effort delete of an uploaded blob that was never bound to a photo row
+ * (e.g. replaceOriginalFromUpload failed after uploadCaptureFile).
+ */
+export const deleteUploadedStorage = mutation({
+  args: {
+    sessionToken: v.string(),
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+
+    const bound = await ctx.db
+      .query("productPhotos")
+      .withIndex("by_storage", (q) => q.eq("storageId", args.storageId))
+      .first();
+
+    if (bound) {
+      return;
+    }
+
+    await deleteStorageBlob(ctx, args.storageId);
+  },
+});
+
 async function insertReservedOriginalPair(
   ctx: MutationCtx,
   args: {

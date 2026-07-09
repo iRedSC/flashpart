@@ -103,6 +103,9 @@ export const convexApi = {
     generateUploadUrl: deployedFunction<
       typeof api.productPhotos.generateUploadUrl
     >("productPhotos.js:generateUploadUrl"),
+    deleteUploadedStorage: deployedFunction<
+      typeof api.productPhotos.deleteUploadedStorage
+    >("productPhotos.js:deleteUploadedStorage"),
     createOriginalFromUpload: deployedFunction<
       typeof api.productPhotos.createOriginalFromUpload
     >("productPhotos.js:createOriginalFromUpload"),

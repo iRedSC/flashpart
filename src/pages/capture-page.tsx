@@ -416,9 +416,33 @@ export function CapturePage() {
     setSelectedFile(null);
 
     if (currentProductId) {
-      setSkippedProductIds((prev) =>
-        prev.includes(currentProductId) ? prev : [...prev, currentProductId],
-      );
+      // Session skips only defer products. When every remaining under-max
+      // product is skipped, clear the skip set so the queue cycles back
+      // instead of falsely showing "Group complete".
+      setSkippedProductIds((prev) => {
+        const withCurrent = prev.includes(currentProductId)
+          ? prev
+          : [...prev, currentProductId];
+        const nextAfterSkip = captureSelection
+          ? nextUncapturedSelectionProduct(
+              products,
+              captureSelection.productIds,
+              photosByProductId,
+              maxProductPhotos,
+              withCurrent,
+            )
+          : typedGroupId === undefined
+            ? null
+            : nextUncapturedGroupProduct(
+                products,
+                typedGroupId,
+                photosByProductId,
+                maxProductPhotos,
+                withCurrent,
+              );
+
+        return nextAfterSkip ? withCurrent : [];
+      });
     }
 
     clearHeldProduct();
