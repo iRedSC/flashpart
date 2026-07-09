@@ -479,6 +479,24 @@ function findCsvColumnIndex(header: string[], names: string[]) {
   return -1;
 }
 
+const CSV_SKU_HEADERS = ["sku", "variant sku", "product sku"];
+const CSV_NAME_HEADERS = ["name", "title", "product name", "product title"];
+const CSV_PRICE_HEADERS = ["price", "variant price", "variant price usd"];
+const CSV_DESCRIPTION_HEADERS = [
+  "description",
+  "body",
+  "body html",
+  "body (html)",
+];
+const CSV_VENDOR_HEADERS = [
+  "vendor",
+  "vendor name",
+  "supplier",
+  "brand",
+  "manufacturer",
+];
+const CSV_TAGS_HEADERS = ["tags", "tag"];
+
 function parseProductCsv(text: string) {
   const rows = text
     .replace(/^\uFEFF/, "")
@@ -496,27 +514,26 @@ function parseProductCsv(text: string) {
   }
 
   const header = rows[0].map(normalizeCsvHeader);
+  const headerSkuIndex = findCsvColumnIndex(header, CSV_SKU_HEADERS);
+  const headerNameIndex = findCsvColumnIndex(header, CSV_NAME_HEADERS);
+  const headerPriceIndex = findCsvColumnIndex(header, CSV_PRICE_HEADERS);
+  // Treat the first row as headers whenever required columns are labeled,
+  // including Shopify-style Title / Variant SKU / Variant Price names.
   const hasHeader =
-    findCsvColumnIndex(header, ["sku"]) >= 0 &&
-    findCsvColumnIndex(header, ["name", "title", "product name"]) >= 0 &&
-    findCsvColumnIndex(header, ["price", "variant price"]) >= 0;
-  const skuIndex = hasHeader ? findCsvColumnIndex(header, ["sku"]) : 0;
-  const nameIndex = hasHeader
-    ? findCsvColumnIndex(header, ["name", "title", "product name"])
-    : 1;
-  const priceIndex = hasHeader
-    ? findCsvColumnIndex(header, ["price", "variant price"])
-    : 2;
+    headerSkuIndex >= 0 && headerNameIndex >= 0 && headerPriceIndex >= 0;
+  const skuIndex = hasHeader ? headerSkuIndex : 0;
+  const nameIndex = hasHeader ? headerNameIndex : 1;
+  const priceIndex = hasHeader ? headerPriceIndex : 2;
   // Headerless optional columns use fixed positions matching the import help text:
   // sku, name, price, description, vendor, tags.
   const descriptionIndex = hasHeader
-    ? findCsvColumnIndex(header, ["description", "body", "body html"])
+    ? findCsvColumnIndex(header, CSV_DESCRIPTION_HEADERS)
     : 3;
   const vendorIndex = hasHeader
-    ? findCsvColumnIndex(header, ["vendor", "vendor name", "supplier", "brand"])
+    ? findCsvColumnIndex(header, CSV_VENDOR_HEADERS)
     : 4;
   const tagsIndex = hasHeader
-    ? findCsvColumnIndex(header, ["tags", "tag"])
+    ? findCsvColumnIndex(header, CSV_TAGS_HEADERS)
     : 5;
   const hasDescriptionColumn = descriptionIndex >= 0;
   const hasVendorColumn = vendorIndex >= 0;
@@ -812,6 +829,9 @@ export function ProductsPage() {
           <Input
             aria-label={`Vendor for ${row.original.sku}`}
             className={desktopTableInputClass}
+            // Remount when CSV import / remote updates change vendor so the
+            // uncontrolled input does not keep a stale empty defaultValue.
+            key={`${row.original._id}:vendor:${row.original.vendor ?? ""}`}
             defaultValue={row.original.vendor ?? ""}
             title={row.original.vendor ?? ""}
             variant="ghost"
@@ -836,6 +856,7 @@ export function ProductsPage() {
           <Input
             aria-label={`Tags for ${row.original.sku}`}
             className={desktopTableInputClass}
+            key={`${row.original._id}:tags:${row.original.tags ?? ""}`}
             defaultValue={row.original.tags ?? ""}
             placeholder="tag-one, tag-two"
             title={row.original.tags ?? ""}
@@ -1589,9 +1610,9 @@ export function ProductsPage() {
               />
               <p className="text-xs text-slate-500">
                 Header row is optional when columns are ordered as SKU, name,
-                price, description, vendor, tags. With a header row, include a
-                vendor column (or vendor name / supplier / brand). Tags should
-                be comma-separated.
+                price, description, vendor, tags. Header names like Title,
+                Variant SKU, Variant Price, and Vendor are also recognized.
+                Tags should be comma-separated.
               </p>
             </div>
 
