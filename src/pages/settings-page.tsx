@@ -30,6 +30,7 @@ export function SettingsPage() {
     setAiImageDefaultPrompt,
     setAiImageEditStrength,
     setAiImageModel,
+    setAutoArchiveComplete,
     setDuplicatePolicy,
     setShopifyDefaultTags,
     setShopifyProductType,
@@ -70,6 +71,7 @@ export function SettingsPage() {
   );
   const updateExisting = settings?.duplicatePolicy === "updateExisting";
   const publishDirectly = settings?.shopifyPublishTarget === "published";
+  const autoArchiveComplete = settings?.autoArchiveComplete === true;
 
   React.useEffect(() => {
     setProductType(settings?.shopifyProductType ?? "Part");
@@ -188,6 +190,22 @@ export function SettingsPage() {
                 void setShopifyPublishTarget(
                   checked ? "published" : "draft",
                 ).catch(() => undefined)
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
+            <div>
+              <p className="font-medium">Auto-archive complete items</p>
+              <p className="text-sm text-slate-500">
+                Move products to the archive after they are successfully listed
+                on Shopify. Errored products stay in the active list.
+              </p>
+            </div>
+            <Switch
+              aria-label="Auto-archive complete items"
+              checked={autoArchiveComplete}
+              onCheckedChange={(checked) =>
+                void setAutoArchiveComplete(checked).catch(() => undefined)
               }
             />
           </div>

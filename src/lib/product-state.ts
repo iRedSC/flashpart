@@ -59,6 +59,14 @@ export function hasActiveError(product: { lastError?: LastError }): boolean {
   return product.lastError !== undefined;
 }
 
+export function isArchived(product: { archivedAt?: number }): boolean {
+  return product.archivedAt !== undefined;
+}
+
+export function canArchive(product: { lastError?: LastError }): boolean {
+  return !hasActiveError(product);
+}
+
 export function compareProductDisplayOrder<
   T extends { sortOrder?: number; createdAt: number },
 >(left: T, right: T): number {
@@ -77,13 +85,16 @@ export function nextUncapturedGroupProduct<
   T extends {
     phase: ProductPhase;
     groupId?: string;
+    archivedAt?: number;
     sortOrder?: number;
     createdAt: number;
   },
 >(products: T[], groupId: string): T | null {
   return (
     products
-      .filter((product) => product.groupId === groupId)
+      .filter(
+        (product) => product.groupId === groupId && !isArchived(product),
+      )
       .sort(compareProductDisplayOrder)
       .find(isPendingCapture) ?? null
   );
@@ -93,6 +104,7 @@ export function nextUncapturedSelectionProduct<
   T extends {
     _id: string;
     phase: ProductPhase;
+    archivedAt?: number;
     sortOrder?: number;
     createdAt: number;
   },
@@ -101,7 +113,7 @@ export function nextUncapturedSelectionProduct<
 
   return (
     products
-      .filter((product) => idSet.has(product._id))
+      .filter((product) => idSet.has(product._id) && !isArchived(product))
       .sort(compareProductDisplayOrder)
       .find(isPendingCapture) ?? null
   );
@@ -111,10 +123,13 @@ export function selectionCaptureProgress<
   T extends {
     _id: string;
     phase: ProductPhase;
+    archivedAt?: number;
   },
 >(products: T[], productIds: string[]) {
   const idSet = new Set(productIds);
-  const selectionProducts = products.filter((product) => idSet.has(product._id));
+  const selectionProducts = products.filter(
+    (product) => idSet.has(product._id) && !isArchived(product),
+  );
   const completedCount = selectionProducts.filter(isGroupCaptureComplete).length;
 
   return {
@@ -123,14 +138,21 @@ export function selectionCaptureProgress<
   };
 }
 
-export function groupProductProgress<T extends { phase: ProductPhase }>(
-  products: T[],
-): GroupProductProgress {
+export function groupProductProgress<
+  T extends { phase: ProductPhase; archivedAt?: number },
+>(products: T[]): GroupProductProgress {
   let pending = 0;
   let captured = 0;
   let published = 0;
+  let total = 0;
 
   for (const product of products) {
+    if (isArchived(product)) {
+      continue;
+    }
+
+    total += 1;
+
     if (product.phase === "published") {
       published += 1;
     } else if (product.phase === "captured") {
@@ -144,7 +166,7 @@ export function groupProductProgress<T extends { phase: ProductPhase }>(
     pending,
     captured,
     published,
-    total: products.length,
+    total,
   };
 }
 

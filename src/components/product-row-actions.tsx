@@ -1,11 +1,18 @@
-import { FolderPlus, Send, Trash2 } from "lucide-react";
-import { isPublishable } from "../lib/product-state";
+import { Archive, ArchiveRestore, FolderPlus, Send, Trash2 } from "lucide-react";
+import {
+  canArchive,
+  isArchived,
+  isPublishable,
+  type LastError,
+} from "../lib/product-state";
 import { DropdownMenuItem } from "./ui/dropdown-menu";
 
 type Product = {
   _id: string;
   aiImageStatus?: "pending" | "generating" | "ready" | "failed";
   aiShopifyFileId?: string | null;
+  archivedAt?: number;
+  lastError?: LastError;
   needsPhotoReview?: boolean;
   pendingOperation?: string | null;
   phase: "imported" | "captured" | "published";
@@ -16,17 +23,23 @@ type Product = {
 
 export function ProductRowActionItems({
   onAddToGroup,
+  onArchive,
   onDelete,
   onDeleteShopifyFile,
   onPublish,
+  onUnarchive,
   product,
 }: {
   onAddToGroup: () => void;
+  onArchive: () => void;
   onDelete: () => void;
   onDeleteShopifyFile: () => void;
   onPublish: () => void;
+  onUnarchive: () => void;
   product: Product;
 }) {
+  const archived = isArchived(product);
+  const archiveAllowed = canArchive(product);
   const canPublish = isPublishable({
     aiImageStatus: product.aiImageStatus,
     aiShopifyFileId: product.aiShopifyFileId ?? undefined,
@@ -46,10 +59,29 @@ export function ProductRowActionItems({
         <FolderPlus />
         Add to group
       </DropdownMenuItem>
-      <DropdownMenuItem disabled={!canPublish} onSelect={onPublish}>
+      <DropdownMenuItem disabled={!canPublish || archived} onSelect={onPublish}>
         <Send />
         Publish
       </DropdownMenuItem>
+      {archived ? (
+        <DropdownMenuItem onSelect={onUnarchive}>
+          <ArchiveRestore />
+          Unarchive
+        </DropdownMenuItem>
+      ) : (
+        <DropdownMenuItem
+          disabled={!archiveAllowed}
+          onSelect={onArchive}
+          title={
+            archiveAllowed
+              ? undefined
+              : "Resolve the error before archiving this product"
+          }
+        >
+          <Archive />
+          Archive
+        </DropdownMenuItem>
+      )}
       {product.shopifyFileId ? (
         <DropdownMenuItem onSelect={onDeleteShopifyFile}>
           <Trash2 />

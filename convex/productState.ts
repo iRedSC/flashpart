@@ -61,6 +61,24 @@ export type LastError = {
   at: number;
 };
 
+export function isArchived(product: { archivedAt?: number }): boolean {
+  return product.archivedAt !== undefined;
+}
+
+export function canArchive(product: { lastError?: LastError }): boolean {
+  return product.lastError === undefined;
+}
+
+/** Apply an error and ensure the product is visible outside the archive. */
+export function productErrorFields(lastError: LastError, now: number) {
+  return {
+    archivedAt: undefined,
+    lastError,
+    pendingOperation: undefined,
+    updatedAt: now,
+  };
+}
+
 type LegacyStatus =
   | "imported"
   | "grouped"

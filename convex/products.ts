@@ -3,6 +3,7 @@ import type { Doc } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import {
+  canArchive,
   compareProductDisplayOrder,
   migrateLegacyProduct,
   resolveProductPhase,
@@ -264,6 +265,72 @@ export const removeMany = mutation({
     }
 
     return { deleted };
+  },
+});
+
+export const archiveMany = mutation({
+  args: {
+    sessionToken: v.string(),
+    ids: v.array(v.id("products")),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const now = Date.now();
+    let archived = 0;
+    let skippedErrored = 0;
+
+    for (const id of args.ids) {
+      const product = await ctx.db.get(id);
+
+      if (!product) {
+        continue;
+      }
+
+      if (!canArchive(product)) {
+        skippedErrored += 1;
+        continue;
+      }
+
+      if (product.archivedAt !== undefined) {
+        continue;
+      }
+
+      await ctx.db.patch(id, {
+        archivedAt: now,
+        updatedAt: now,
+      });
+      archived += 1;
+    }
+
+    return { archived, skippedErrored };
+  },
+});
+
+export const unarchiveMany = mutation({
+  args: {
+    sessionToken: v.string(),
+    ids: v.array(v.id("products")),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const now = Date.now();
+    let unarchived = 0;
+
+    for (const id of args.ids) {
+      const product = await ctx.db.get(id);
+
+      if (!product || product.archivedAt === undefined) {
+        continue;
+      }
+
+      await ctx.db.patch(id, {
+        archivedAt: undefined,
+        updatedAt: now,
+      });
+      unarchived += 1;
+    }
+
+    return { unarchived };
   },
 });
 

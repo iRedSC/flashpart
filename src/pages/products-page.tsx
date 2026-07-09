@@ -29,6 +29,8 @@ import {
   type Virtualizer,
 } from "@tanstack/react-virtual";
 import {
+  Archive,
+  ArchiveRestore,
   Camera,
   Check,
   FilePenLine,
@@ -77,6 +79,7 @@ import { ProductPhotoDialog } from "../components/product-photo-dialog";
 import { ProductThumbnail } from "../components/product-thumbnail";
 import { useAppData } from "../data/app-data-provider";
 import { createCaptureSelection } from "../lib/capture-selection";
+import { canArchive, isArchived } from "../lib/product-state";
 import { cn } from "../lib/utils";
 import { normalizeTagString } from "../lib/tags";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -98,6 +101,9 @@ type ImportResult = {
 };
 
 const UNGROUPED_FILTER = "ungrouped";
+const VIEW_ACTIVE = "active";
+const VIEW_ARCHIVED = "archived";
+type ProductsView = typeof VIEW_ACTIVE | typeof VIEW_ARCHIVED;
 const desktopGridColumns =
   "grid-cols-[36px_48px_132px_minmax(200px,320px)_minmax(180px,280px)_96px_minmax(110px,160px)_minmax(140px,200px)_88px_minmax(110px,160px)_minmax(190px,280px)]";
 const desktopTableMinWidth = 1540;
@@ -296,10 +302,12 @@ function MobileProductCard({
   isPending,
   measureElement,
   onAddToGroup,
+  onArchive,
   onDelete,
   onDeleteShopifyFile,
   onOpenPhoto,
   onPublish,
+  onUnarchive,
   row,
   shiftY,
   virtualRow,
@@ -310,10 +318,12 @@ function MobileProductCard({
   isPending: boolean;
   measureElement: (node: Element | null) => void;
   onAddToGroup: (product: Product) => void;
+  onArchive: (product: Product) => void;
   onDelete: (product: Product) => void;
   onDeleteShopifyFile: (product: Product) => void;
   onOpenPhoto: (product: Product) => void;
   onPublish: (product: Product) => void;
+  onUnarchive: (product: Product) => void;
   row: Row<Product>;
   shiftY: number;
   virtualRow: VirtualItem;
@@ -408,9 +418,11 @@ function MobileProductCard({
               <DropdownMenuContent align="end">
                 <ProductRowActionItems
                   onAddToGroup={() => onAddToGroup(product)}
+                  onArchive={() => onArchive(product)}
                   onDelete={() => onDelete(product)}
                   onDeleteShopifyFile={() => onDeleteShopifyFile(product)}
                   onPublish={() => onPublish(product)}
+                  onUnarchive={() => onUnarchive(product)}
                   product={product}
                 />
               </DropdownMenuContent>
@@ -537,6 +549,7 @@ export function ProductsPage() {
     createProduct,
     deleteProducts,
     deleteShopifyFile,
+    archiveProducts,
     groups,
     isProductPending,
     isLoading,
@@ -544,6 +557,7 @@ export function ProductsPage() {
     importProducts,
     publishProducts,
     reorderProducts,
+    unarchiveProducts,
     updateProduct,
   } = useAppData();
   const navigate = useNavigate();
@@ -554,17 +568,25 @@ export function ProductsPage() {
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [searchParams, setSearchParams] = useSearchParams();
   const groupFilter = searchParams.get("group");
+  const viewFilter: ProductsView =
+    searchParams.get("view") === VIEW_ARCHIVED ? VIEW_ARCHIVED : VIEW_ACTIVE;
   const filteredProducts = React.useMemo(() => {
+    const byView = products.filter((product) =>
+      viewFilter === VIEW_ARCHIVED
+        ? isArchived(product)
+        : !isArchived(product),
+    );
+
     if (!groupFilter) {
-      return products;
+      return byView;
     }
 
     if (groupFilter === UNGROUPED_FILTER) {
-      return products.filter((product) => !product.groupId);
+      return byView.filter((product) => !product.groupId);
     }
 
-    return products.filter((product) => product.groupId === groupFilter);
-  }, [groupFilter, products]);
+    return byView.filter((product) => product.groupId === groupFilter);
+  }, [groupFilter, products, viewFilter]);
   const [activeDragProductId, setActiveDragProductId] =
     React.useState<Id<"products"> | null>(null);
   const [projectedIndex, setProjectedIndex] = React.useState<number | null>(
@@ -922,6 +944,14 @@ export function ProductsPage() {
     : groupFilter === UNGROUPED_FILTER
       ? "Ungrouped"
       : groupById.get(groupFilter as Id<"groups">) ?? "Group";
+  const viewFilterLabel =
+    viewFilter === VIEW_ARCHIVED ? "Archived" : "Active";
+  const selectedCanArchive = selectedRows.some((row) =>
+    canArchive(row.original),
+  );
+  const selectedAreArchived = selectedRows.some((row) =>
+    isArchived(row.original),
+  );
   const activeDragIndex = activeDragProductId
     ? visibleIds.indexOf(activeDragProductId)
     : -1;
@@ -987,6 +1017,44 @@ export function ProductsPage() {
       },
       { replace: true },
     );
+  }
+
+  function setViewFilter(value: ProductsView) {
+    setSearchParams(
+      (params) => {
+        const next = new URLSearchParams(params);
+
+        if (value === VIEW_ARCHIVED) {
+          next.set("view", VIEW_ARCHIVED);
+        } else {
+          next.delete("view");
+        }
+
+        return next;
+      },
+      { replace: true },
+    );
+    clearSelection();
+  }
+
+  function handleArchiveProducts(ids: Id<"products">[]) {
+    if (ids.length === 0) {
+      return Promise.resolve();
+    }
+
+    return archiveProducts(ids).then(() => {
+      clearSelection();
+    });
+  }
+
+  function handleUnarchiveProducts(ids: Id<"products">[]) {
+    if (ids.length === 0) {
+      return Promise.resolve();
+    }
+
+    return unarchiveProducts(ids).then(() => {
+      clearSelection();
+    });
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -1309,6 +1377,27 @@ export function ProductsPage() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                className="max-w-40 px-3 text-slate-950 md:px-4"
+                variant="outline"
+              >
+                <Archive className="h-4 w-4" />
+                <span className="truncate">{viewFilterLabel}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => setViewFilter(VIEW_ACTIVE)}>
+                <span className="flex-1">Active</span>
+                {viewFilter === VIEW_ACTIVE ? <Check /> : null}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setViewFilter(VIEW_ARCHIVED)}>
+                <span className="flex-1">Archived</span>
+                {viewFilter === VIEW_ARCHIVED ? <Check /> : null}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <div className="hidden shrink-0 items-center gap-2 md:flex">
             <Button
               className="text-slate-950"
@@ -1372,7 +1461,7 @@ export function ProductsPage() {
               Capture photos
             </DropdownMenuItem>
             <DropdownMenuItem
-              disabled={!hasSelection}
+              disabled={!hasSelection || viewFilter === VIEW_ARCHIVED}
               onSelect={() =>
                 void handlePublishSelected().catch(() => undefined)
               }
@@ -1380,6 +1469,31 @@ export function ProductsPage() {
               <Send />
               Publish
             </DropdownMenuItem>
+            {viewFilter === VIEW_ARCHIVED ? (
+              <DropdownMenuItem
+                disabled={!hasSelection || !selectedAreArchived}
+                onSelect={() =>
+                  void handleUnarchiveProducts(selectedProductIds).catch(
+                    () => undefined,
+                  )
+                }
+              >
+                <ArchiveRestore />
+                Unarchive
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                disabled={!hasSelection || !selectedCanArchive}
+                onSelect={() =>
+                  void handleArchiveProducts(selectedProductIds).catch(
+                    () => undefined,
+                  )
+                }
+              >
+                <Archive />
+                Archive
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               className="text-red-600 focus:bg-red-50 focus:text-red-600"
               disabled={!hasSelection}
@@ -1688,9 +1802,11 @@ export function ProductsPage() {
         >
           {!isLoading && rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-500">
-              {groupFilter
-                ? "No products match this filter."
-                : "No products yet."}
+              {viewFilter === VIEW_ARCHIVED
+                ? "No archived products."
+                : groupFilter
+                  ? "No products match this filter."
+                  : "No products yet."}
             </p>
           ) : null}
           <div
@@ -1722,6 +1838,11 @@ export function ProductsPage() {
                     setRowSelection({ [target._id]: true });
                     setAddToGroupOpen(true);
                   }}
+                  onArchive={(target) =>
+                    void handleArchiveProducts([target._id]).catch(
+                      () => undefined,
+                    )
+                  }
                   onDelete={(target) =>
                     void handleDeleteProducts([target._id]).catch(() => undefined)
                   }
@@ -1729,6 +1850,11 @@ export function ProductsPage() {
                   onOpenPhoto={(target) => setPhotoProductId(target._id)}
                   onPublish={(target) =>
                     void publishProducts([target._id]).catch(() => undefined)
+                  }
+                  onUnarchive={(target) =>
+                    void handleUnarchiveProducts([target._id]).catch(
+                      () => undefined,
+                    )
                   }
                   row={row}
                   shiftY={getDropShift({
@@ -1897,9 +2023,11 @@ export function ProductsPage() {
           </table>
           {!isLoading && rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-500">
-              {groupFilter
-                ? "No products match this filter."
-                : "No products yet."}
+              {viewFilter === VIEW_ARCHIVED
+                ? "No archived products."
+                : groupFilter
+                  ? "No products match this filter."
+                  : "No products yet."}
             </p>
           ) : null}
               </div>
@@ -1967,6 +2095,11 @@ export function ProductsPage() {
           {desktopRowMenu ? (
             <ProductRowActionItems
               onAddToGroup={() => openAddToGroupForProduct(desktopRowMenu.product)}
+              onArchive={() =>
+                void handleArchiveProducts([desktopRowMenu.product._id]).catch(
+                  () => undefined,
+                )
+              }
               onDelete={() =>
                 void handleDeleteProducts([desktopRowMenu.product._id]).catch(
                   () => undefined,
@@ -1979,6 +2112,11 @@ export function ProductsPage() {
                 void publishProducts([desktopRowMenu.product._id]).catch(
                   () => undefined,
                 )
+              }
+              onUnarchive={() =>
+                void handleUnarchiveProducts([
+                  desktopRowMenu.product._id,
+                ]).catch(() => undefined)
               }
               product={desktopRowMenu.product}
             />

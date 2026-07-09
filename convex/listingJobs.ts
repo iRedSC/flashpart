@@ -18,6 +18,8 @@ import {
   updateShopifyProduct,
   updateShopifyVariant,
 } from "./shopifyClient";
+import { productErrorFields } from "./productState";
+import { getSettingsDocument } from "./settings";
 import { mergeTagLists } from "./tags";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -243,6 +245,9 @@ export const markJobSucceeded = internalMutation({
     const publishedFileUrl = product?.aiShopifyFileUrl;
     const publishedFileStatus = product?.aiShopifyFileStatus;
 
+    const settings = await getSettingsDocument(ctx);
+    const shouldAutoArchive = settings?.autoArchiveComplete === true;
+
     await ctx.db.patch(job.productId, {
       aiImageError: undefined,
       aiImagePrompt: undefined,
@@ -250,6 +255,7 @@ export const markJobSucceeded = internalMutation({
       aiShopifyFileId: undefined,
       aiShopifyFileStatus: undefined,
       aiShopifyFileUrl: undefined,
+      archivedAt: shouldAutoArchive ? now : product?.archivedAt,
       lastError: undefined,
       needsPhotoReview: undefined,
       pendingOperation: undefined,
@@ -295,16 +301,18 @@ export const markJobBlockedExistingSku = internalMutation({
       status: "failed",
       updatedAt: now,
     });
-    await ctx.db.patch(job.productId, {
-      lastError: {
-        code: "duplicateSku",
-        message,
-        operation: "publishing",
-        at: now,
-      },
-      pendingOperation: undefined,
-      updatedAt: now,
-    });
+    await ctx.db.patch(
+      job.productId,
+      productErrorFields(
+        {
+          code: "duplicateSku",
+          message,
+          operation: "publishing",
+          at: now,
+        },
+        now,
+      ),
+    );
   },
 });
 
@@ -328,16 +336,18 @@ export const markJobFailed = internalMutation({
       status: "failed",
       updatedAt: now,
     });
-    await ctx.db.patch(job.productId, {
-      lastError: {
-        code: "shopifyApi",
-        message: args.error,
-        operation: "publishing",
-        at: now,
-      },
-      pendingOperation: undefined,
-      updatedAt: now,
-    });
+    await ctx.db.patch(
+      job.productId,
+      productErrorFields(
+        {
+          code: "shopifyApi",
+          message: args.error,
+          operation: "publishing",
+          at: now,
+        },
+        now,
+      ),
+    );
   },
 });
 
@@ -523,7 +533,12 @@ export const markSucceeded = mutation({
     });
 
     if (args.shopifyProductId) {
+      const product = await ctx.db.get(job.productId);
+      const settings = await getSettingsDocument(ctx);
+      const shouldAutoArchive = settings?.autoArchiveComplete === true;
+
       await ctx.db.patch(job.productId, {
+        archivedAt: shouldAutoArchive ? now : product?.archivedAt,
         lastError: undefined,
         pendingOperation: undefined,
         phase: "published",
@@ -556,15 +571,17 @@ export const markFailed = mutation({
       error: args.error,
       updatedAt: now,
     });
-    await ctx.db.patch(job.productId, {
-      lastError: {
-        code: "shopifyApi",
-        message: args.error,
-        operation: "publishing",
-        at: now,
-      },
-      pendingOperation: undefined,
-      updatedAt: now,
-    });
+    await ctx.db.patch(
+      job.productId,
+      productErrorFields(
+        {
+          code: "shopifyApi",
+          message: args.error,
+          operation: "publishing",
+          at: now,
+        },
+        now,
+      ),
+    );
   },
 });
