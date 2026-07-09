@@ -16,7 +16,10 @@ import {
   isAiImageModel,
 } from "./photoAiConstants";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
-import { applyApproveAiPhoto, syncProductPhotoFlags } from "./productPhotos";
+import {
+  applyApproveAiPhoto,
+  applyMarkAiGenerating,
+} from "./productPhotos";
 import { productErrorFields } from "./productState";
 import { resolveAiImageSettings } from "./settings";
 import {
@@ -349,9 +352,15 @@ export const scheduleProcessing = internalMutation({
         return;
       }
 
+      const { aiGeneration } = await applyMarkAiGenerating(ctx, {
+        productId: args.productId,
+        originalPhotoId: args.originalPhotoId,
+      });
+
       await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
         productId: args.productId,
         originalPhotoId: args.originalPhotoId,
+        aiGeneration,
       });
       return;
     }
@@ -398,13 +407,23 @@ export const processProductPhoto = internalAction({
     previousAiShopifyFileId: v.optional(v.string()),
     productId: v.id("products"),
     originalPhotoId: v.optional(v.id("productPhotos")),
+    /** Required for multi-photo path when caller already bumped via applyMarkAiGenerating. */
+    aiGeneration: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     if (args.originalPhotoId) {
-      await ctx.runMutation(productPhotosModel.markAiGeneratingInternal, {
-        productId: args.productId,
-        originalPhotoId: args.originalPhotoId,
-      });
+      let aiGeneration = args.aiGeneration;
+
+      if (aiGeneration === undefined) {
+        const marked = await ctx.runMutation(
+          productPhotosModel.markAiGeneratingInternal,
+          {
+            productId: args.productId,
+            originalPhotoId: args.originalPhotoId,
+          },
+        );
+        aiGeneration = marked.aiGeneration as number;
+      }
 
       try {
         const payload = await ctx.runQuery(photoAiModel.processingPayload, {
@@ -462,6 +481,7 @@ export const processProductPhoto = internalAction({
           originalPhotoId: args.originalPhotoId,
           storageId,
           url: url ?? undefined,
+          aiGeneration,
         });
       } catch (error) {
         await ctx.runMutation(productPhotosModel.markAiFailedInternal, {
@@ -470,6 +490,7 @@ export const processProductPhoto = internalAction({
               ? error.message
               : "AI photo generation failed.",
           originalPhotoId: args.originalPhotoId,
+          aiGeneration,
         });
       }
 
@@ -580,46 +601,21 @@ export const regenerate = mutation({
       }
 
       const now = Date.now();
-      const existingAi = await ctx.db
-        .query("productPhotos")
-        .withIndex("by_source", (q) =>
-          q.eq("sourcePhotoId", args.originalPhotoId!),
-        )
-        .unique();
-
-      if (existingAi) {
-        await ctx.db.patch(existingAi._id, {
-          aiError: undefined,
-          aiPrompt: prompt,
-          aiStatus: "generating",
-          approvedAt: undefined,
-          sortOrder: original.sortOrder,
-          status: "uploading",
-          updatedAt: now,
-        });
-      } else {
-        await ctx.db.insert("productPhotos", {
-          productId: args.productId,
-          kind: "ai",
-          status: "uploading",
-          sortOrder: original.sortOrder,
-          sourcePhotoId: args.originalPhotoId,
-          aiStatus: "generating",
-          aiPrompt: prompt,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
+      // Clears shopifyFile* so promote cannot reuse a stale Shopify file after regen.
+      const { aiGeneration } = await applyMarkAiGenerating(ctx, {
+        productId: args.productId,
+        originalPhotoId: args.originalPhotoId,
+        prompt,
+      });
 
       await ctx.db.patch(args.productId, {
         aiImagePrompt: prompt,
         updatedAt: now,
       });
-      // List badges from productPhotos rows (pendingOperation / aiImageStatus / needsPhotoReview)
-      await syncProductPhotoFlags(ctx, args.productId);
       await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
         productId: args.productId,
         originalPhotoId: args.originalPhotoId,
+        aiGeneration,
       });
       return;
     }
@@ -689,43 +685,22 @@ export const regenerateForPhoto = mutation({
     const defaultPrompt = resolveAiImageSettings(settings).aiImageDefaultPrompt;
     const prompt = args.prompt?.trim() || product.aiImagePrompt || defaultPrompt;
     const now = Date.now();
-    const existingAi = await ctx.db
-      .query("productPhotos")
-      .withIndex("by_source", (q) => q.eq("sourcePhotoId", args.originalPhotoId))
-      .unique();
 
-    if (existingAi) {
-      await ctx.db.patch(existingAi._id, {
-        aiError: undefined,
-        aiPrompt: prompt,
-        aiStatus: "generating",
-        approvedAt: undefined,
-        sortOrder: original.sortOrder,
-        status: "uploading",
-        updatedAt: now,
-      });
-    } else {
-      await ctx.db.insert("productPhotos", {
-        productId: original.productId,
-        kind: "ai",
-        status: "uploading",
-        sortOrder: original.sortOrder,
-        sourcePhotoId: args.originalPhotoId,
-        aiStatus: "generating",
-        aiPrompt: prompt,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
+    // Clears shopifyFile* so promote cannot reuse a stale Shopify file after regen.
+    const { aiGeneration } = await applyMarkAiGenerating(ctx, {
+      productId: original.productId,
+      originalPhotoId: args.originalPhotoId,
+      prompt,
+    });
 
     await ctx.db.patch(original.productId, {
       aiImagePrompt: prompt,
       updatedAt: now,
     });
-    await syncProductPhotoFlags(ctx, original.productId);
     await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
       productId: original.productId,
       originalPhotoId: args.originalPhotoId,
+      aiGeneration,
     });
   },
 });

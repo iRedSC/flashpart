@@ -3,6 +3,7 @@ import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { internalMutation, mutation } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
+import { applyDeletePhoto } from "./productPhotos";
 
 /**
  * Safety-net GC for Convex `_storage` blobs left on promoted product photos.
@@ -14,16 +15,12 @@ import { requireSessionUser } from "./authUtils";
  * This sweep catches orphans where promote marked Shopify ready but storageId
  * was never cleared (crash between mark + clear, or older rows).
  *
- * Cron (optional): schedule periodically, e.g. in convex/crons.ts:
- *   crons.interval(
- *     "gc promoted photo storage",
- *     { hours: 6 },
- *     internal.photoGc.gcPromotedStorage,
- *     {},
- *   );
+ * Also cleans abandoned reserved upload slots (original status uploading, no
+ * storageId) older than ABANDONED_UPLOAD_TTL_MS so max-photo capacity recovers.
  */
 
 const GC_BATCH_SIZE = 25;
+const ABANDONED_UPLOAD_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 async function deleteStorageBlob(ctx: MutationCtx, storageId: Id<"_storage">) {
   try {
@@ -82,12 +79,78 @@ async function runGcPromotedStorage(ctx: MutationCtx, requestedLimit?: number) {
   };
 }
 
+/**
+ * Delete reserved original (+ paired AI) slots that never received a storageId.
+ * Frees max-photo capacity after abandoned uploads.
+ */
+async function runGcAbandonedUploads(
+  ctx: MutationCtx,
+  requestedLimit?: number,
+) {
+  const limit = Math.min(
+    Math.max(requestedLimit ?? GC_BATCH_SIZE, 1),
+    GC_BATCH_SIZE,
+  );
+  const cutoff = Date.now() - ABANDONED_UPLOAD_TTL_MS;
+  let deleted = 0;
+  let scanned = 0;
+
+  const uploading = await ctx.db
+    .query("productPhotos")
+    .withIndex("by_status", (q) => q.eq("status", "uploading"))
+    .collect();
+
+  for (const photo of uploading) {
+    scanned += 1;
+
+    if (photo.kind !== "original") {
+      continue;
+    }
+
+    if (photo.storageId) {
+      continue;
+    }
+
+    if (photo.createdAt > cutoff) {
+      continue;
+    }
+
+    // Skip Shopify-backed rows (delete via shopify.deleteProductPhoto).
+    if (photo.shopifyFileId) {
+      continue;
+    }
+
+    await applyDeletePhoto(ctx, photo._id);
+    deleted += 1;
+
+    if (deleted >= limit) {
+      break;
+    }
+  }
+
+  return {
+    deleted,
+    scanned,
+    limit,
+    hasMore: deleted >= limit,
+  };
+}
+
 export const gcPromotedStorage = internalMutation({
   args: {
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     return await runGcPromotedStorage(ctx, args.limit);
+  },
+});
+
+export const gcAbandonedUploads = internalMutation({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await runGcAbandonedUploads(ctx, args.limit);
   },
 });
 
@@ -100,5 +163,17 @@ export const runPhotoStorageGc = mutation({
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
     return await runGcPromotedStorage(ctx, args.limit);
+  },
+});
+
+/** Manual ops entrypoint for abandoned reserved-slot cleanup. */
+export const runAbandonedUploadGc = mutation({
+  args: {
+    sessionToken: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    return await runGcAbandonedUploads(ctx, args.limit);
   },
 });

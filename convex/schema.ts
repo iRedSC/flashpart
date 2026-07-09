@@ -228,6 +228,8 @@ export default defineSchema({
     sourcePhotoId: v.optional(v.id("productPhotos")),
     approvedAt: v.optional(v.number()),
     aiStatus: v.optional(aiImageStatus),
+    /** Monotonic token; stale processProductPhoto jobs no-op on mismatch. */
+    aiGeneration: v.optional(v.number()),
     aiPrompt: v.optional(v.string()),
     aiError: v.optional(v.string()),
     captureId: v.optional(v.id("captures")),
@@ -237,7 +239,8 @@ export default defineSchema({
     .index("by_product", ["productId"])
     .index("by_product_kind", ["productId", "kind"])
     .index("by_source", ["sourcePhotoId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_storage", ["storageId"]),
 
   listingJobs: defineTable({
     productId: v.id("products"),
