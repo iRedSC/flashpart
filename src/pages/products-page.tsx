@@ -465,6 +465,20 @@ function parseCsvLine(line: string) {
   return values;
 }
 
+function normalizeCsvHeader(value: string) {
+  return value.toLowerCase().replace(/[_\s]+/g, " ").trim();
+}
+
+function findCsvColumnIndex(header: string[], names: string[]) {
+  for (const name of names) {
+    const index = header.indexOf(name);
+    if (index >= 0) {
+      return index;
+    }
+  }
+  return -1;
+}
+
 function parseProductCsv(text: string) {
   const rows = text
     .replace(/^\uFEFF/, "")
@@ -481,14 +495,29 @@ function parseProductCsv(text: string) {
     };
   }
 
-  const header = rows[0].map((value) => value.toLowerCase());
-  const hasHeader = header.includes("sku") && header.includes("name") && header.includes("price");
-  const skuIndex = hasHeader ? header.indexOf("sku") : 0;
-  const nameIndex = hasHeader ? header.indexOf("name") : 1;
-  const priceIndex = hasHeader ? header.indexOf("price") : 2;
-  const descriptionIndex = hasHeader ? header.indexOf("description") : -1;
-  const vendorIndex = hasHeader ? header.indexOf("vendor") : -1;
-  const tagsIndex = hasHeader ? header.indexOf("tags") : -1;
+  const header = rows[0].map(normalizeCsvHeader);
+  const hasHeader =
+    findCsvColumnIndex(header, ["sku"]) >= 0 &&
+    findCsvColumnIndex(header, ["name", "title", "product name"]) >= 0 &&
+    findCsvColumnIndex(header, ["price", "variant price"]) >= 0;
+  const skuIndex = hasHeader ? findCsvColumnIndex(header, ["sku"]) : 0;
+  const nameIndex = hasHeader
+    ? findCsvColumnIndex(header, ["name", "title", "product name"])
+    : 1;
+  const priceIndex = hasHeader
+    ? findCsvColumnIndex(header, ["price", "variant price"])
+    : 2;
+  // Headerless optional columns use fixed positions matching the import help text:
+  // sku, name, price, description, vendor, tags.
+  const descriptionIndex = hasHeader
+    ? findCsvColumnIndex(header, ["description", "body", "body html"])
+    : 3;
+  const vendorIndex = hasHeader
+    ? findCsvColumnIndex(header, ["vendor", "vendor name", "supplier", "brand"])
+    : 4;
+  const tagsIndex = hasHeader
+    ? findCsvColumnIndex(header, ["tags", "tag"])
+    : 5;
   const hasDescriptionColumn = descriptionIndex >= 0;
   const hasVendorColumn = vendorIndex >= 0;
   const hasTagsColumn = tagsIndex >= 0;
@@ -1560,8 +1589,9 @@ export function ProductsPage() {
               />
               <p className="text-xs text-slate-500">
                 Header row is optional when columns are ordered as SKU, name,
-                price. Add optional description, vendor, and tags columns when
-                needed. Tags should be comma-separated.
+                price, description, vendor, tags. With a header row, include a
+                vendor column (or vendor name / supplier / brand). Tags should
+                be comma-separated.
               </p>
             </div>
 
