@@ -302,11 +302,11 @@ export function ProductPhotoDialog({
         open={product !== null}
       >
         <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="truncate pr-6">
+          <DialogHeader className="min-w-0 overflow-hidden pr-6">
+            <DialogTitle className="truncate" title={product?.name}>
               {product?.name ?? "Product photo"}
             </DialogTitle>
-            <DialogDescription className="font-mono">
+            <DialogDescription className="truncate font-mono">
               {product?.sku}
             </DialogDescription>
           </DialogHeader>
