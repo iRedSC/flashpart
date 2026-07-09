@@ -46,6 +46,9 @@ export const convexApi = {
   },
   captures: {
     record: deployedFunction<typeof api.captures.record>("captures.js:record"),
+    recordConvexCapture: deployedFunction<
+      typeof api.captures.recordConvexCapture
+    >("captures.js:recordConvexCapture"),
   },
   groups: {
     list: deployedFunction<typeof api.groups.list>("groups.js:list"),
@@ -69,11 +72,55 @@ export const convexApi = {
     >("listingJobs.js:enqueueCreateDrafts"),
   },
   photoAi: {
+    approveAiPhoto: deployedFunction<typeof api.photoAi.approveAiPhoto>(
+      "photoAi.js:approveAiPhoto",
+    ),
     approvePhoto: deployedFunction<typeof api.photoAi.approvePhoto>(
       "photoAi.js:approvePhoto",
     ),
     regenerate: deployedFunction<typeof api.photoAi.regenerate>(
       "photoAi.js:regenerate",
+    ),
+    regenerateForPhoto: deployedFunction<typeof api.photoAi.regenerateForPhoto>(
+      "photoAi.js:regenerateForPhoto",
+    ),
+  },
+  productPhotos: {
+    listByProduct: deployedFunction<typeof api.productPhotos.listByProduct>(
+      "productPhotos.js:listByProduct",
+    ),
+    listByProductKind: deployedFunction<
+      typeof api.productPhotos.listByProductKind
+    >("productPhotos.js:listByProductKind"),
+    generateUploadUrl: deployedFunction<
+      typeof api.productPhotos.generateUploadUrl
+    >("productPhotos.js:generateUploadUrl"),
+    createOriginalFromUpload: deployedFunction<
+      typeof api.productPhotos.createOriginalFromUpload
+    >("productPhotos.js:createOriginalFromUpload"),
+    setSortOrder: deployedFunction<typeof api.productPhotos.setSortOrder>(
+      "productPhotos.js:setSortOrder",
+    ),
+    deletePhoto: deployedFunction<typeof api.productPhotos.deletePhoto>(
+      "productPhotos.js:deletePhoto",
+    ),
+    markAiGenerating: deployedFunction<
+      typeof api.productPhotos.markAiGenerating
+    >("productPhotos.js:markAiGenerating"),
+    markAiReady: deployedFunction<typeof api.productPhotos.markAiReady>(
+      "productPhotos.js:markAiReady",
+    ),
+    markAiFailed: deployedFunction<typeof api.productPhotos.markAiFailed>(
+      "productPhotos.js:markAiFailed",
+    ),
+    approveAiPhoto: deployedFunction<typeof api.productPhotos.approveAiPhoto>(
+      "productPhotos.js:approveAiPhoto",
+    ),
+    markPromoted: deployedFunction<typeof api.productPhotos.markPromoted>(
+      "productPhotos.js:markPromoted",
+    ),
+    clearStorageId: deployedFunction<typeof api.productPhotos.clearStorageId>(
+      "productPhotos.js:clearStorageId",
     ),
   },
   products: {

@@ -65,12 +65,49 @@ export const record = mutation({
       updatedAt: now,
     });
 
+    // Legacy Shopify captures only — Convex uploads use recordConvexCapture +
+    // productPhotos.createOriginalFromUpload (B2 schedules AI per originalPhotoId).
     if (args.shopifyFileId && args.shopifyFileUrl) {
       await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
         previousAiShopifyFileId,
         productId: args.productId,
       });
     }
+
+    return captureId;
+  },
+});
+
+/** Capture row for Convex storage uploads (no Shopify file fields / no legacy AI). */
+export const recordConvexCapture = mutation({
+  args: {
+    sessionToken: v.string(),
+    productId: v.id("products"),
+    groupId: v.id("groups"),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const product = await ctx.db.get(args.productId);
+
+    if (!product) {
+      throw new Error("Product not found");
+    }
+
+    const now = Date.now();
+    const captureId = await ctx.db.insert("captures", {
+      productId: args.productId,
+      groupId: args.groupId,
+      status: "recorded",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.patch(args.productId, {
+      captureId,
+      lastError: undefined,
+      phase: "captured",
+      updatedAt: now,
+    });
 
     return captureId;
   },

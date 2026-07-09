@@ -210,14 +210,14 @@ export function ProductPhotoDialog({
     setIsSaving(true);
 
     try {
-      setStage("Uploading photo to Shopify...");
-      const shopifyFile = await uploadCaptureImage(captureFile);
+      setStage("Uploading photo...");
+      const uploaded = await uploadCaptureImage(captureFile);
 
       setStage("Saving photo...");
       await recordCapture({
         groupId: product.groupId,
         productId: product._id,
-        ...shopifyFile,
+        storageId: uploaded.storageId,
       });
       triggerHaptic();
       resetCapture();
@@ -228,7 +228,7 @@ export function ProductPhotoDialog({
       setError(
         caught instanceof Error
           ? caught.message
-          : "Shopify photo upload failed. Check your connection and retry.",
+          : "Photo upload failed. Check your connection and retry.",
       );
     } finally {
       setIsSaving(false);

@@ -1,9 +1,11 @@
 import * as React from "react";
+import { useQuery } from "convex/react";
 import {
   Camera,
   Check,
   CheckCircle2,
   ChevronLeft,
+  ChevronRight,
   RefreshCcw,
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -21,6 +23,7 @@ import {
   getCaptureSelection,
   removeCaptureSelection,
 } from "../lib/capture-selection";
+import { convexApi } from "../lib/convex-api";
 import {
   isGroupCaptureComplete,
   nextUncapturedGroupProduct,
@@ -40,7 +43,7 @@ const INLINE_CAMERA_UNAVAILABLE =
 export function CapturePage() {
   const { groupId, selectionId } = useParams();
   const navigate = useNavigate();
-  const { groups, products, settings, submitCapture } = useAppData();
+  const { groups, products, settings, session, submitCapture } = useAppData();
   const isMobile = useIsMobile();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
@@ -52,11 +55,19 @@ export function CapturePage() {
   const [isCameraReady, setIsCameraReady] = React.useState(false);
   const [cameraError, setCameraError] = React.useState<string | null>(null);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
+  const [isSaving, setIsSaving] = React.useState(false);
+  /** Keep capturing on this product until max photos or operator advances. */
+  const [heldProductId, setHeldProductId] = React.useState<Id<"products"> | null>(
+    null,
+  );
+  /** Optimistic original count while Convex query catches up after save. */
+  const [localOriginalCount, setLocalOriginalCount] = React.useState(0);
   const previewUrl = React.useMemo(
     () => (selectedFile ? URL.createObjectURL(selectedFile) : null),
     [selectedFile],
   );
   const { zoom, canZoom, cameraPlaneRef } = useCameraTrackZoom(cameraStream);
+  const maxProductPhotos = settings?.maxProductPhotos ?? 5;
 
   React.useEffect(() => {
     return () => {
@@ -94,11 +105,19 @@ export function CapturePage() {
         (product) =>
           product.groupId === typedGroupId && product.archivedAt === undefined,
       );
-  const nextProduct = captureSelection
+  // nextUncaptured* treats a product as done once it has ≥1 original / phase≠imported.
+  const nextUncaptured = captureSelection
     ? nextUncapturedSelectionProduct(products, captureSelection.productIds)
     : typedGroupId === undefined
       ? null
       : nextUncapturedGroupProduct(products, typedGroupId);
+  const heldProduct = heldProductId
+    ? (products.find(
+        (product) =>
+          product._id === heldProductId && product.archivedAt === undefined,
+      ) ?? null)
+    : null;
+  const currentProduct = heldProduct ?? nextUncaptured;
   const { completedCount, total: selectionTotal } = captureSelection
     ? selectionCaptureProgress(products, captureSelection.productIds)
     : {
@@ -109,7 +128,40 @@ export function CapturePage() {
     selectionTotal === 0
       ? 0
       : Math.round((completedCount / selectionTotal) * 100);
-  const nextProductId = nextProduct?._id;
+  const currentProductId = currentProduct?._id;
+
+  const productPhotos = useQuery(
+    convexApi.productPhotos.listByProduct,
+    currentProductId
+      ? { productId: currentProductId, sessionToken: session.sessionToken }
+      : "skip",
+  );
+  const queryOriginalCount =
+    productPhotos?.filter((photo) => photo.kind === "original").length ?? 0;
+  const originalCount = Math.max(queryOriginalCount, localOriginalCount);
+  const saveReachesMax = originalCount + 1 >= maxProductPhotos;
+
+  React.useEffect(() => {
+    if (!heldProductId) {
+      return;
+    }
+
+    if (queryOriginalCount > localOriginalCount) {
+      setLocalOriginalCount(queryOriginalCount);
+    }
+  }, [heldProductId, localOriginalCount, queryOriginalCount]);
+
+  React.useEffect(() => {
+    if (heldProductId && !heldProduct) {
+      setHeldProductId(null);
+      setLocalOriginalCount(0);
+    }
+  }, [heldProduct, heldProductId]);
+
+  function clearHeldProduct() {
+    setHeldProductId(null);
+    setLocalOriginalCount(0);
+  }
 
   React.useEffect(() => {
     let isCancelled = false;
@@ -177,7 +229,7 @@ export function CapturePage() {
       }
     }
 
-    if (nextProductId && !selectedFile) {
+    if (currentProductId && !selectedFile) {
       void startCamera();
     } else {
       stopCamera();
@@ -187,7 +239,7 @@ export function CapturePage() {
       isCancelled = true;
       stopCamera();
     };
-  }, [nextProductId, selectedFile, stopCamera]);
+  }, [currentProductId, selectedFile, stopCamera]);
 
   const containerClass = cn(
     "mx-auto flex w-full max-w-2xl flex-col",
@@ -202,12 +254,12 @@ export function CapturePage() {
     return typedGroupId;
   }
 
-  function handleSave(withPhoto: boolean) {
-    if (!nextProduct) {
+  async function handleSave(withPhoto: boolean) {
+    if (!currentProduct || isSaving) {
       return;
     }
 
-    const captureGroupId = resolveCaptureGroupId(nextProduct);
+    const captureGroupId = resolveCaptureGroupId(currentProduct);
 
     if (!captureGroupId) {
       return;
@@ -217,27 +269,59 @@ export function CapturePage() {
       return;
     }
 
-    const capturedProductId = nextProduct._id;
+    const capturedProductId = currentProduct._id;
     const fileToUpload = withPhoto ? selectedFile : undefined;
+    const countBeforeSave = originalCount;
 
     triggerHaptic();
     setUploadError(null);
     setSelectedFile(null);
+    setIsSaving(true);
 
-    void submitCapture({
-      groupId: captureGroupId,
-      productId: capturedProductId,
-      file: fileToUpload ?? undefined,
-    });
+    try {
+      await submitCapture({
+        groupId: captureGroupId,
+        productId: capturedProductId,
+        file: fileToUpload ?? undefined,
+      });
 
+      if (withPhoto) {
+        const nextCount = countBeforeSave + 1;
+
+        if (nextCount < maxProductPhotos) {
+          setHeldProductId(capturedProductId);
+          setLocalOriginalCount(nextCount);
+        } else {
+          clearHeldProduct();
+        }
+      } else {
+        clearHeldProduct();
+      }
+
+      triggerHaptic();
+    } catch (error) {
+      setUploadError(
+        error instanceof Error
+          ? error.message
+          : "Photo could not be saved. Please try again.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function handleNextProduct() {
     triggerHaptic();
+    setUploadError(null);
+    setSelectedFile(null);
+    clearHeldProduct();
   }
 
   async function handleCaptureFromCamera() {
     const video = videoRef.current;
 
     if (
-      !nextProduct ||
+      !currentProduct ||
       !video ||
       video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
     ) {
@@ -268,7 +352,10 @@ export function CapturePage() {
       );
 
     try {
-      const file = await canvasToFile(canvas, `${nextProduct.sku}-capture.jpg`);
+      const file = await canvasToFile(
+        canvas,
+        `${currentProduct.sku}-capture.jpg`,
+      );
       setSelectedFile(file);
       triggerHaptic();
     } catch (error) {
@@ -329,6 +416,9 @@ export function CapturePage() {
     );
   }
 
+  const saveLabel = saveReachesMax ? "Save photo & next part" : "Save photo";
+  const secondaryIsNext = originalCount > 0;
+
   return (
     <div className={containerClass}>
       <header
@@ -360,26 +450,31 @@ export function CapturePage() {
         />
       </div>
 
-      {nextProduct ? (
+      {currentProduct ? (
         <div className="flex flex-1 flex-col gap-4 pt-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Next part
-            </p>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                {originalCount > 0 ? "Current part" : "Next part"}
+              </p>
+              <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-slate-700">
+                {originalCount}/{maxProductPhotos} photos
+              </span>
+            </div>
             <h3 className="mt-1 text-lg font-semibold leading-snug">
-              {nextProduct.name}
+              {currentProduct.name}
             </h3>
             <div className="mt-3 flex items-end justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-xs text-slate-500">SKU</p>
                 <p className="select-text truncate font-mono text-xl font-semibold tabular-nums">
-                  {nextProduct.sku}
+                  {currentProduct.sku}
                 </p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-slate-500">Price</p>
                 <p className="text-xl font-semibold tabular-nums">
-                  ${nextProduct.price.toFixed(2)}
+                  ${currentProduct.price.toFixed(2)}
                 </p>
               </div>
             </div>
@@ -404,7 +499,7 @@ export function CapturePage() {
               accept="image/*"
               capture="environment"
               className="sr-only"
-              key={nextProduct._id}
+              key={`${currentProduct._id}-${originalCount}`}
               onChange={handleFileChange}
               ref={fileInputRef}
               type="file"
@@ -412,7 +507,7 @@ export function CapturePage() {
             {previewUrl ? (
               <>
                 <img
-                  alt={`Captured photo for ${nextProduct.sku}`}
+                  alt={`Captured photo for ${currentProduct.sku}`}
                   className="absolute inset-0 h-full w-full object-cover"
                   src={previewUrl}
                 />
@@ -473,10 +568,15 @@ export function CapturePage() {
                     {zoom.toFixed(1)}x
                   </span>
                 ) : null}
+                {originalCount > 0 ? (
+                  <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-semibold tabular-nums text-white backdrop-blur">
+                    {originalCount}/{maxProductPhotos}
+                  </span>
+                ) : null}
                 <Button
                   aria-label="Capture photo"
                   className="absolute bottom-4 left-1/2 h-16 w-16 -translate-x-1/2 rounded-full p-0 shadow-lg"
-                  disabled={!isCameraReady}
+                  disabled={!isCameraReady || isSaving}
                   onClick={() => void handleCaptureFromCamera()}
                   type="button"
                 >
@@ -497,22 +597,36 @@ export function CapturePage() {
           >
             <Button
               className="h-14 w-full rounded-xl text-base"
-              disabled={!selectedFile}
-              onClick={() => handleSave(true)}
+              disabled={!selectedFile || isSaving}
+              onClick={() => void handleSave(true)}
               size="lg"
               type="button"
             >
               <Check className="h-5 w-5" />
-              Save photo &amp; next part
+              {saveLabel}
             </Button>
-            <Button
-              className="h-11 w-full text-slate-500"
-              onClick={() => handleSave(false)}
-              type="button"
-              variant="ghost"
-            >
-              Skip photo for this part
-            </Button>
+            {secondaryIsNext ? (
+              <Button
+                className="h-11 w-full text-slate-500"
+                disabled={isSaving}
+                onClick={handleNextProduct}
+                type="button"
+                variant="ghost"
+              >
+                Next product
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                className="h-11 w-full text-slate-500"
+                disabled={isSaving}
+                onClick={() => void handleSave(false)}
+                type="button"
+                variant="ghost"
+              >
+                Skip photo for this part
+              </Button>
+            )}
           </div>
         </div>
       ) : (

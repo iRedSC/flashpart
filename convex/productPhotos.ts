@@ -1,13 +1,23 @@
 import { ConvexError, v } from "convex/values";
+import { makeFunctionReference } from "convex/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { mutation, query } from "./_generated/server";
+import {
+  internalMutation,
+  mutation,
+  query,
+} from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import { photoKind, shopifyFileStatus } from "./schema";
 import {
   getSettingsDocument,
   resolveMaxProductPhotos,
 } from "./settings";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const processProductPhotoRef = makeFunctionReference(
+  "photoAi.js:processProductPhoto",
+) as any;
 
 type DbCtx = QueryCtx | MutationCtx;
 
@@ -170,6 +180,154 @@ async function resolveAiPhotoRow(
   throw new ConvexError("Provide aiPhotoId or originalPhotoId.");
 }
 
+export async function applyMarkAiGenerating(
+  ctx: MutationCtx,
+  args: {
+    productId: Id<"products">;
+    originalPhotoId: Id<"productPhotos">;
+    prompt?: string;
+  },
+) {
+  const product = await ctx.db.get(args.productId);
+
+  if (!product) {
+    throw new ConvexError("Product not found.");
+  }
+
+  const original = await ctx.db.get(args.originalPhotoId);
+
+  if (
+    !original ||
+    original.productId !== args.productId ||
+    original.kind !== "original"
+  ) {
+    throw new ConvexError("Original photo not found.");
+  }
+
+  const now = Date.now();
+  const existingAi = await getAiForOriginal(ctx, args.originalPhotoId);
+  const prompt = args.prompt?.trim();
+
+  let aiPhotoId: Id<"productPhotos">;
+
+  if (existingAi) {
+    await ctx.db.patch(existingAi._id, {
+      aiError: undefined,
+      aiPrompt: prompt || existingAi.aiPrompt,
+      aiStatus: "generating",
+      approvedAt: undefined,
+      sortOrder: original.sortOrder,
+      status: "uploading",
+      updatedAt: now,
+    });
+    aiPhotoId = existingAi._id;
+  } else {
+    aiPhotoId = await ctx.db.insert("productPhotos", {
+      productId: args.productId,
+      kind: "ai",
+      status: "uploading",
+      sortOrder: original.sortOrder,
+      sourcePhotoId: args.originalPhotoId,
+      aiStatus: "generating",
+      aiPrompt: prompt || undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  await ctx.db.patch(args.productId, {
+    needsPhotoReview: undefined,
+    pendingOperation: "aiImageGenerating",
+    updatedAt: now,
+  });
+
+  return aiPhotoId;
+}
+
+export async function applyMarkAiReady(
+  ctx: MutationCtx,
+  args: {
+    storageId: Id<"_storage">;
+    url?: string;
+    aiPhotoId?: Id<"productPhotos">;
+    originalPhotoId?: Id<"productPhotos">;
+  },
+) {
+  const aiPhoto = await resolveAiPhotoRow(ctx, args);
+  const now = Date.now();
+  const url = args.url ?? (await ctx.storage.getUrl(args.storageId));
+
+  await ctx.db.patch(aiPhoto._id, {
+    aiError: undefined,
+    aiStatus: "ready",
+    approvedAt: undefined,
+    storageId: args.storageId,
+    status: "ready",
+    url: url ?? undefined,
+    updatedAt: now,
+  });
+
+  await recomputeProductPhotoFlags(ctx, aiPhoto.productId, now, {
+    clearPendingIfIdle: true,
+  });
+
+  return aiPhoto._id;
+}
+
+export async function applyMarkAiFailed(
+  ctx: MutationCtx,
+  args: {
+    error: string;
+    aiPhotoId?: Id<"productPhotos">;
+    originalPhotoId?: Id<"productPhotos">;
+  },
+) {
+  const aiPhoto = await resolveAiPhotoRow(ctx, args);
+  const now = Date.now();
+
+  await ctx.db.patch(aiPhoto._id, {
+    aiError: args.error,
+    aiStatus: "failed",
+    status: "failed",
+    updatedAt: now,
+  });
+
+  await recomputeProductPhotoFlags(ctx, aiPhoto.productId, now, {
+    clearPendingIfIdle: true,
+  });
+
+  return aiPhoto._id;
+}
+
+export async function applyApproveAiPhoto(
+  ctx: MutationCtx,
+  photoId: Id<"productPhotos">,
+) {
+  const photo = await ctx.db.get(photoId);
+
+  if (!photo || photo.kind !== "ai") {
+    throw new ConvexError("AI photo not found.");
+  }
+
+  if (photo.aiStatus !== "ready") {
+    throw new ConvexError("Approve the AI photo after generation finishes.");
+  }
+
+  const now = Date.now();
+
+  await ctx.db.patch(photoId, {
+    approvedAt: now,
+    updatedAt: now,
+  });
+
+  const stillNeedsReview = await hasUnapprovedReadyAi(ctx, photo.productId);
+
+  await ctx.db.patch(photo.productId, {
+    needsPhotoReview: stillNeedsReview ? true : undefined,
+    updatedAt: now,
+  });
+}
+
 export const listByProduct = query({
   args: {
     sessionToken: v.string(),
@@ -270,7 +428,10 @@ export const createOriginalFromUpload = mutation({
 
     await ctx.db.patch(args.productId, productPatch);
 
-    // TODO(B2): schedule AI generation for this original photo after upload.
+    await ctx.scheduler.runAfter(0, processProductPhotoRef, {
+      productId: args.productId,
+      originalPhotoId: photoId,
+    });
 
     return photoId;
   },
@@ -362,60 +523,11 @@ export const markAiGenerating = mutation({
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const product = await ctx.db.get(args.productId);
-
-    if (!product) {
-      throw new ConvexError("Product not found.");
-    }
-
-    const original = await ctx.db.get(args.originalPhotoId);
-
-    if (
-      !original ||
-      original.productId !== args.productId ||
-      original.kind !== "original"
-    ) {
-      throw new ConvexError("Original photo not found.");
-    }
-
-    const now = Date.now();
-    const existingAi = await getAiForOriginal(ctx, args.originalPhotoId);
-    const prompt = args.prompt?.trim();
-
-    let aiPhotoId: Id<"productPhotos">;
-
-    if (existingAi) {
-      await ctx.db.patch(existingAi._id, {
-        aiError: undefined,
-        aiPrompt: prompt || existingAi.aiPrompt,
-        aiStatus: "generating",
-        approvedAt: undefined,
-        sortOrder: original.sortOrder,
-        status: "uploading",
-        updatedAt: now,
-      });
-      aiPhotoId = existingAi._id;
-    } else {
-      aiPhotoId = await ctx.db.insert("productPhotos", {
-        productId: args.productId,
-        kind: "ai",
-        status: "uploading",
-        sortOrder: original.sortOrder,
-        sourcePhotoId: args.originalPhotoId,
-        aiStatus: "generating",
-        aiPrompt: prompt || undefined,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-
-    await ctx.db.patch(args.productId, {
-      needsPhotoReview: undefined,
-      pendingOperation: "aiImageGenerating",
-      updatedAt: now,
+    return await applyMarkAiGenerating(ctx, {
+      productId: args.productId,
+      originalPhotoId: args.originalPhotoId,
+      prompt: args.prompt,
     });
-
-    return aiPhotoId;
   },
 });
 
@@ -429,25 +541,12 @@ export const markAiReady = mutation({
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const aiPhoto = await resolveAiPhotoRow(ctx, args);
-    const now = Date.now();
-    const url = args.url ?? (await ctx.storage.getUrl(args.storageId));
-
-    await ctx.db.patch(aiPhoto._id, {
-      aiError: undefined,
-      aiStatus: "ready",
-      approvedAt: undefined,
+    return await applyMarkAiReady(ctx, {
       storageId: args.storageId,
-      status: "ready",
-      url: url ?? undefined,
-      updatedAt: now,
+      url: args.url,
+      aiPhotoId: args.aiPhotoId,
+      originalPhotoId: args.originalPhotoId,
     });
-
-    await recomputeProductPhotoFlags(ctx, aiPhoto.productId, now, {
-      clearPendingIfIdle: true,
-    });
-
-    return aiPhoto._id;
   },
 });
 
@@ -460,21 +559,11 @@ export const markAiFailed = mutation({
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const aiPhoto = await resolveAiPhotoRow(ctx, args);
-    const now = Date.now();
-
-    await ctx.db.patch(aiPhoto._id, {
-      aiError: args.error,
-      aiStatus: "failed",
-      status: "failed",
-      updatedAt: now,
+    return await applyMarkAiFailed(ctx, {
+      error: args.error,
+      aiPhotoId: args.aiPhotoId,
+      originalPhotoId: args.originalPhotoId,
     });
-
-    await recomputeProductPhotoFlags(ctx, aiPhoto.productId, now, {
-      clearPendingIfIdle: true,
-    });
-
-    return aiPhoto._id;
   },
 });
 
@@ -485,29 +574,42 @@ export const approveAiPhoto = mutation({
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const photo = await ctx.db.get(args.photoId);
+    await applyApproveAiPhoto(ctx, args.photoId);
+  },
+});
 
-    if (!photo || photo.kind !== "ai") {
-      throw new ConvexError("AI photo not found.");
-    }
+/** Internal variants for photoAi actions (no session). */
+export const markAiGeneratingInternal = internalMutation({
+  args: {
+    productId: v.id("products"),
+    originalPhotoId: v.id("productPhotos"),
+    prompt: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    return await applyMarkAiGenerating(ctx, args);
+  },
+});
 
-    if (photo.aiStatus !== "ready") {
-      throw new ConvexError("Approve the AI photo after generation finishes.");
-    }
+export const markAiReadyInternal = internalMutation({
+  args: {
+    storageId: v.id("_storage"),
+    url: v.optional(v.string()),
+    aiPhotoId: v.optional(v.id("productPhotos")),
+    originalPhotoId: v.optional(v.id("productPhotos")),
+  },
+  handler: async (ctx, args) => {
+    return await applyMarkAiReady(ctx, args);
+  },
+});
 
-    const now = Date.now();
-
-    await ctx.db.patch(args.photoId, {
-      approvedAt: now,
-      updatedAt: now,
-    });
-
-    const stillNeedsReview = await hasUnapprovedReadyAi(ctx, photo.productId);
-
-    await ctx.db.patch(photo.productId, {
-      needsPhotoReview: stillNeedsReview ? true : undefined,
-      updatedAt: now,
-    });
+export const markAiFailedInternal = internalMutation({
+  args: {
+    error: v.string(),
+    aiPhotoId: v.optional(v.id("productPhotos")),
+    originalPhotoId: v.optional(v.id("productPhotos")),
+  },
+  handler: async (ctx, args) => {
+    return await applyMarkAiFailed(ctx, args);
   },
 });
 

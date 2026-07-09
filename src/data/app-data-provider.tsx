@@ -26,11 +26,8 @@ type Settings = Omit<
   shopifyPublishTarget: ShopifyPublishTarget;
 };
 type ShopifyConnection = FunctionReturnType<typeof convexApi.shopify.currentConnection>;
-type ShopifyFileUpload = {
-  shopifyFileId: string;
-  shopifyFileStatus: "uploaded" | "processing" | "ready" | "failed";
-  shopifyFileUrl?: string;
-  shopifyStagedResourceUrl: string;
+type ConvexCaptureUpload = {
+  storageId: Id<"_storage">;
 };
 
 type ImportedProduct = {
@@ -158,20 +155,19 @@ type AppDataContextValue = {
   deleteGroup: (
     groupId: Id<"groups">,
   ) => Promise<{ deleted: boolean; ungrouped: number } | null>;
-  uploadCaptureImage: (file: File) => Promise<ShopifyFileUpload>;
+  /** Uploads a capture image to Convex storage (not Shopify). */
+  uploadCaptureImage: (file: File) => Promise<ConvexCaptureUpload>;
   recordCapture: (args: {
     productId: Id<"products">;
     groupId: Id<"groups">;
-    shopifyFileId?: string;
-    shopifyFileStatus?: ShopifyFileUpload["shopifyFileStatus"];
-    shopifyFileUrl?: string;
-    shopifyStagedResourceUrl?: string;
+    /** When set, links the uploaded Convex blob as a productPhotos original. */
+    storageId?: Id<"_storage">;
   }) => Promise<Id<"captures">>;
   submitCapture: (args: {
     productId: Id<"products">;
     groupId: Id<"groups">;
     file?: File;
-  }) => Promise<Id<"captures">>;
+  }) => Promise<{ captureId: Id<"captures">; photoId?: Id<"productPhotos"> }>;
   regenerateAiImage: (args: {
     productId: Id<"products">;
     prompt: string;
@@ -334,15 +330,21 @@ export function AppDataProvider({
     convexApi.settings.setMaxProductPhotos,
   );
   const disconnectShopifyMutation = useMutation(convexApi.shopify.disconnect);
-  const prepareFileUploadAction = useAction(convexApi.shopify.prepareFileUpload);
-  const finalizeFileUploadAction = useAction(convexApi.shopify.finalizeFileUpload);
   const deleteProductFileAction = useAction(convexApi.shopify.deleteProductFile);
   const createGroupMutation = useMutation(convexApi.groups.create);
   const assignFirstUngroupedMutation = useMutation(
     convexApi.groups.assignFirstUngrouped,
   );
   const deleteGroupMutation = useMutation(convexApi.groups.remove);
-  const recordCaptureMutation = useMutation(convexApi.captures.record);
+  const recordConvexCaptureMutation = useMutation(
+    convexApi.captures.recordConvexCapture,
+  );
+  const generateUploadUrlMutation = useMutation(
+    convexApi.productPhotos.generateUploadUrl,
+  );
+  const createOriginalFromUploadMutation = useMutation(
+    convexApi.productPhotos.createOriginalFromUpload,
+  );
   const regenerateAiImageMutation = useMutation(convexApi.photoAi.regenerate);
   const approvePhotoMutation = useMutation(convexApi.photoAi.approvePhoto);
   const operationIdRef = React.useRef(0);
@@ -425,45 +427,34 @@ export function AppDataProvider({
     }
   }, [listingJobs]);
   const uploadCaptureFile = React.useCallback(
-    async (file: File): Promise<ShopifyFileUpload> => {
-      const target = await prepareFileUploadAction({
-        fileSize: file.size,
-        filename: file.name || "capture.jpg",
-        mimeType: file.type || "image/jpeg",
+    async (file: File): Promise<ConvexCaptureUpload> => {
+      const uploadUrl = await generateUploadUrlMutation({
         sessionToken: session.sessionToken,
       });
 
-      const body = new FormData();
-
-      for (const parameter of target.parameters) {
-        body.append(parameter.name, parameter.value);
-      }
-
-      body.append("file", file);
-
-      const response = await fetch(target.url, {
+      const response = await fetch(uploadUrl, {
         method: "POST",
-        body,
+        headers: {
+          "Content-Type": file.type || "image/jpeg",
+        },
+        body: file,
       });
 
       if (!response.ok) {
-        throw new Error("Shopify photo upload failed. Check your connection and retry.");
+        throw new Error("Photo upload failed. Check your connection and retry.");
       }
 
-      const fileRecord = await finalizeFileUploadAction({
-        alt: file.name || "Product photo",
-        originalSource: target.resourceUrl,
-        sessionToken: session.sessionToken,
-      });
+      const result = (await response.json()) as { storageId?: string };
+
+      if (!result.storageId) {
+        throw new Error("Photo upload failed. Missing storage id.");
+      }
 
       return {
-        shopifyFileId: fileRecord.id,
-        shopifyFileStatus: fileRecord.status,
-        shopifyFileUrl: fileRecord.url,
-        shopifyStagedResourceUrl: target.resourceUrl,
+        storageId: result.storageId as Id<"_storage">,
       };
     },
-    [finalizeFileUploadAction, prepareFileUploadAction, session.sessionToken],
+    [generateUploadUrlMutation, session.sessionToken],
   );
   const runOptimistic = React.useCallback(
     async <T,>({
@@ -1097,18 +1088,33 @@ export function AppDataProvider({
           apply: (state) => ({
             ...state,
             products: updateProductFields(state.products, args.productId, {
-              aiImageStatus: args.shopifyFileId ? "generating" : undefined,
-              aiShopifyFileUrl: undefined,
               lastError: undefined,
               needsPhotoReview: undefined,
-              pendingOperation: args.shopifyFileId
+              // B2 will schedule AI per original; leave generating pending when a photo was uploaded.
+              pendingOperation: args.storageId
                 ? "aiImageGenerating"
                 : undefined,
               phase: "captured",
             }),
           }),
-          commit: () =>
-            recordCaptureMutation({ ...args, sessionToken: session.sessionToken }),
+          commit: async () => {
+            const captureId = await recordConvexCaptureMutation({
+              groupId: args.groupId,
+              productId: args.productId,
+              sessionToken: session.sessionToken,
+            });
+
+            if (args.storageId) {
+              await createOriginalFromUploadMutation({
+                captureId,
+                productId: args.productId,
+                sessionToken: session.sessionToken,
+                storageId: args.storageId,
+              });
+            }
+
+            return captureId;
+          },
           label: "Recording capture",
           productIds: [args.productId],
         }),
@@ -1117,8 +1123,6 @@ export function AppDataProvider({
           apply: (state) => ({
             ...state,
             products: updateProductFields(state.products, args.productId, {
-              aiImageStatus: args.file ? "generating" : undefined,
-              aiShopifyFileUrl: undefined,
               lastError: undefined,
               needsPhotoReview: undefined,
               pendingOperation: args.file ? "aiImageGenerating" : undefined,
@@ -1126,16 +1130,28 @@ export function AppDataProvider({
             }),
           }),
           commit: async () => {
-            const shopifyFile = args.file
+            const uploaded = args.file
               ? await uploadCaptureFile(args.file)
               : undefined;
 
-            return recordCaptureMutation({
+            const captureId = await recordConvexCaptureMutation({
               groupId: args.groupId,
               productId: args.productId,
               sessionToken: session.sessionToken,
-              ...shopifyFile,
             });
+
+            let photoId: Id<"productPhotos"> | undefined;
+
+            if (uploaded) {
+              photoId = await createOriginalFromUploadMutation({
+                captureId,
+                productId: args.productId,
+                sessionToken: session.sessionToken,
+                storageId: uploaded.storageId,
+              });
+            }
+
+            return { captureId, photoId };
           },
           label: args.file ? "Uploading capture photo" : "Recording capture",
           productIds: [args.productId],
@@ -1190,7 +1206,6 @@ export function AppDataProvider({
       unarchiveProductsMutation,
       deleteProductsMutation,
       deleteProductFileAction,
-      finalizeFileUploadAction,
       importProductsMutation,
       groups,
       listingJobs,
@@ -1202,12 +1217,13 @@ export function AppDataProvider({
       optimisticData.shopifyConnection,
       optimisticOperations,
       pendingProductIds,
-      prepareFileUploadAction,
       products,
       publishProductsMutation,
       queryArgs,
       approvePhotoMutation,
-      recordCaptureMutation,
+      createOriginalFromUploadMutation,
+      generateUploadUrlMutation,
+      recordConvexCaptureMutation,
       regenerateAiImageMutation,
       reorderProductsMutation,
       runOptimistic,
