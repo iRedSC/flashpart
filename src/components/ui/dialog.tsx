@@ -2,6 +2,7 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { useIsMobile } from "../../lib/use-is-mobile";
+import { useVisualViewportKeyboard } from "../../lib/use-visual-viewport-keyboard";
 import { cn } from "../../lib/utils";
 
 export const Dialog = DialogPrimitive.Root;
@@ -39,21 +40,32 @@ function scrollFocusedFieldIntoView(target: EventTarget | null) {
     return;
   }
 
-  // Let the keyboard animation settle, then keep the field above it.
+  // Wait for the keyboard + visualViewport inset to settle, then keep the field visible.
   window.setTimeout(() => {
     target.scrollIntoView({
       block: "nearest",
       inline: "nearest",
       behavior: "smooth",
     });
-  }, 100);
+  }, 300);
 }
 
 export const DialogContent = React.forwardRef<
   React.ComponentRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, onFocusCapture, ...props }, ref) => {
+>(({ className, children, onFocusCapture, style, ...props }, ref) => {
   const isMobile = useIsMobile();
+  const keyboard = useVisualViewportKeyboard(isMobile);
+  const keyboardOpen = keyboard.inset > 0;
+
+  const mobileStyle = isMobile
+    ? {
+        bottom: keyboard.inset,
+        maxHeight: keyboard.visibleHeight
+          ? `${Math.min(keyboard.visibleHeight * 0.9, keyboard.visibleHeight)}px`
+          : undefined,
+      }
+    : undefined;
 
   return (
     <DialogPortal>
@@ -63,10 +75,12 @@ export const DialogContent = React.forwardRef<
           "z-50 grid w-full gap-4 border border-slate-200 bg-white p-6 shadow-lg",
           isMobile
             ? [
-                "fixed inset-x-0 bottom-0 top-auto max-h-[min(90dvh,100%)]",
+                "fixed inset-x-0 bottom-0 top-auto",
                 "translate-x-0 translate-y-0 overflow-y-auto overscroll-contain",
                 "rounded-t-2xl rounded-b-none",
-                "pb-[max(1.5rem,env(safe-area-inset-bottom))]",
+                keyboardOpen
+                  ? "pb-6"
+                  : "pb-[max(1.5rem,env(safe-area-inset-bottom))]",
               ]
             : [
                 "fixed left-1/2 top-1/2 max-h-[min(85dvh,100%)] max-w-lg",
@@ -84,6 +98,7 @@ export const DialogContent = React.forwardRef<
           }
         }}
         ref={ref}
+        style={{ ...mobileStyle, ...style }}
         {...props}
       >
         {children}
