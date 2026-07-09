@@ -29,6 +29,13 @@ export type ProductStateFields = {
   aiShopifyFileId?: string;
 };
 
+/** Minimal photo shape for dual-read helpers (avoids importing product-photo). */
+export type ProductPhotoCaptureFields = {
+  kind: "original" | "ai";
+  approvedAt?: number;
+  aiStatus?: "pending" | "generating" | "ready" | "failed";
+};
+
 export type GroupProductProgress = {
   pending: number;
   captured: number;
@@ -37,7 +44,23 @@ export type GroupProductProgress = {
   total: number;
 };
 
-export function isPendingCapture(product: { phase: ProductPhase }): boolean {
+export function hasCapturedPhoto(
+  product: { shopifyFileId?: string },
+  photos?: ProductPhotoCaptureFields[] | null,
+): boolean {
+  const hasOriginal =
+    photos != null && photos.some((photo) => photo.kind === "original");
+  return hasOriginal || Boolean(product.shopifyFileId);
+}
+
+export function isPendingCapture(
+  product: { phase: ProductPhase; shopifyFileId?: string },
+  photos?: ProductPhotoCaptureFields[] | null,
+): boolean {
+  if (photos != null) {
+    return !hasCapturedPhoto(product, photos);
+  }
+
   return product.phase === "imported";
 }
 
@@ -45,7 +68,27 @@ export function isGroupCaptureComplete(product: { phase: ProductPhase }): boolea
   return product.phase === "captured" || product.phase === "published";
 }
 
-export function isPublishable(product: ProductStateFields): boolean {
+export function isPublishable(
+  product: ProductStateFields,
+  photos?: ProductPhotoCaptureFields[] | null,
+): boolean {
+  if (photos?.length) {
+    const originals = photos.filter((photo) => photo.kind === "original");
+    const ais = photos.filter((photo) => photo.kind === "ai");
+    const hasApprovedAi = ais.some((photo) => photo.approvedAt != null);
+    const hasGeneratingAi = ais.some(
+      (photo) => photo.aiStatus === "generating",
+    );
+
+    return (
+      product.phase === "captured" &&
+      originals.length >= 1 &&
+      hasApprovedAi &&
+      !hasGeneratingAi &&
+      !product.pendingOperation
+    );
+  }
+
   return (
     product.phase === "captured" &&
     Boolean(product.shopifyFileId) &&
@@ -84,20 +127,30 @@ export function compareProductDisplayOrder<
 
 export function nextUncapturedGroupProduct<
   T extends {
+    _id: string;
     phase: ProductPhase;
     groupId?: string;
     archivedAt?: number;
     sortOrder?: number;
     createdAt: number;
+    shopifyFileId?: string;
   },
->(products: T[], groupId: string): T | null {
+>(
+  products: T[],
+  groupId: string,
+  photosByProductId?: Record<string, ProductPhotoCaptureFields[]>,
+): T | null {
   return (
     products
       .filter(
         (product) => product.groupId === groupId && !isArchived(product),
       )
       .sort(compareProductDisplayOrder)
-      .find(isPendingCapture) ?? null
+      .find((product) =>
+        photosByProductId
+          ? isPendingCapture(product, photosByProductId[product._id] ?? [])
+          : isPendingCapture(product),
+      ) ?? null
   );
 }
 
@@ -108,15 +161,24 @@ export function nextUncapturedSelectionProduct<
     archivedAt?: number;
     sortOrder?: number;
     createdAt: number;
+    shopifyFileId?: string;
   },
->(products: T[], productIds: string[]): T | null {
+>(
+  products: T[],
+  productIds: string[],
+  photosByProductId?: Record<string, ProductPhotoCaptureFields[]>,
+): T | null {
   const idSet = new Set(productIds);
 
   return (
     products
       .filter((product) => idSet.has(product._id) && !isArchived(product))
       .sort(compareProductDisplayOrder)
-      .find(isPendingCapture) ?? null
+      .find((product) =>
+        photosByProductId
+          ? isPendingCapture(product, photosByProductId[product._id] ?? [])
+          : isPendingCapture(product),
+      ) ?? null
   );
 }
 
