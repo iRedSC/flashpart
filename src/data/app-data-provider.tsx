@@ -136,6 +136,9 @@ type AppDataContextValue = {
   setAiImageEditStrength: (
     aiImageEditStrength: AiImageEditStrength,
   ) => Promise<{ aiImageEditStrength: AiImageEditStrength } | null>;
+  setAiImageUpgradeModelOnRegen: (
+    aiImageUpgradeModelOnRegen: boolean,
+  ) => Promise<{ aiImageUpgradeModelOnRegen: boolean } | null>;
   setMaxProductPhotos: (
     maxProductPhotos: number,
   ) => Promise<{ maxProductPhotos: number } | null>;
@@ -428,6 +431,9 @@ export function AppDataProvider({
   const setAiImageModelMutation = useMutation(convexApi.settings.setAiImageModel);
   const setAiImageEditStrengthMutation = useMutation(
     convexApi.settings.setAiImageEditStrength,
+  );
+  const setAiImageUpgradeModelOnRegenMutation = useMutation(
+    convexApi.settings.setAiImageUpgradeModelOnRegen,
   );
   const setMaxProductPhotosMutation = useMutation(
     convexApi.settings.setMaxProductPhotos,
@@ -1070,6 +1076,25 @@ export function AppDataProvider({
             }),
           label: "Saving AI edit strength",
         }),
+      setAiImageUpgradeModelOnRegen: (aiImageUpgradeModelOnRegen) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  aiImageUpgradeModelOnRegen,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setAiImageUpgradeModelOnRegenMutation({
+              aiImageUpgradeModelOnRegen,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving upgrade model on regen",
+        }),
       setMaxProductPhotos: (maxProductPhotos) =>
         runOptimistic({
           apply: (state) => ({
@@ -1605,6 +1630,7 @@ export function AppDataProvider({
       setAiImageDefaultPromptMutation,
       setAiImageEditStrengthMutation,
       setAiImageModelMutation,
+      setAiImageUpgradeModelOnRegenMutation,
       setMaxProductPhotosMutation,
       setDuplicatePolicyMutation,
       setAutoArchiveCompleteMutation,

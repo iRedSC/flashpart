@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as authModel from "../authModel.js";
 import type * as authUtils from "../authUtils.js";
 import type * as captures from "../captures.js";
+import type * as crons from "../crons.js";
 import type * as groups from "../groups.js";
 import type * as http from "../http.js";
 import type * as listingJobs from "../listingJobs.js";
@@ -26,6 +27,7 @@ import type * as settings from "../settings.js";
 import type * as shopify from "../shopify.js";
 import type * as shopifyClient from "../shopifyClient.js";
 import type * as shopifyModel from "../shopifyModel.js";
+import type * as tags from "../tags.js";
 
 import type {
   ApiFromModules,
@@ -38,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   authModel: typeof authModel;
   authUtils: typeof authUtils;
   captures: typeof captures;
+  crons: typeof crons;
   groups: typeof groups;
   http: typeof http;
   listingJobs: typeof listingJobs;
@@ -52,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   shopify: typeof shopify;
   shopifyClient: typeof shopifyClient;
   shopifyModel: typeof shopifyModel;
+  tags: typeof tags;
 }>;
 
 /**

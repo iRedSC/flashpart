@@ -30,6 +30,7 @@ export function SettingsPage() {
     setAiImageDefaultPrompt,
     setAiImageEditStrength,
     setAiImageModel,
+    setAiImageUpgradeModelOnRegen,
     setAutoArchiveComplete,
     setAutoArchiveCompleteGroups,
     setDuplicatePolicy,
@@ -84,6 +85,8 @@ export function SettingsPage() {
   const autoArchiveComplete = settings?.autoArchiveComplete === true;
   const autoArchiveCompleteGroups =
     settings?.autoArchiveCompleteGroups === true;
+  const aiImageUpgradeModelOnRegen =
+    settings?.aiImageUpgradeModelOnRegen === true;
 
   React.useEffect(() => {
     setProductType(settings?.shopifyProductType ?? "Part");
@@ -322,6 +325,25 @@ export function SettingsPage() {
               {selectedModel?.description ??
                 "Applies to new captures and regenerations."}
             </p>
+          </div>
+          <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
+            <div>
+              <p className="font-medium">Upgrade model on regen</p>
+              <p className="text-sm text-slate-500">
+                When regenerating, use the next better model than the default
+                (2.5 → 3.1 Lite → 3.1). New captures still use the selected
+                model.
+              </p>
+            </div>
+            <Switch
+              aria-label="Upgrade model on regen"
+              checked={aiImageUpgradeModelOnRegen}
+              onCheckedChange={(checked) =>
+                void setAiImageUpgradeModelOnRegen(checked).catch(
+                  () => undefined,
+                )
+              }
+            />
           </div>
           <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
             <label

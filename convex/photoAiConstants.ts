@@ -104,3 +104,16 @@ export function buildAiGenerationRequest(
 export function imageSizeForModel(model: AiImageModelId) {
   return model === "gemini-3.1-flash-lite-image" ? "1K" : "1K";
 }
+
+/** One step up the quality ladder for regen: 2.5 → 3.1 Lite → 3.1. */
+export function upgradeAiImageModel(model: AiImageModelId): AiImageModelId {
+  if (model === "gemini-2.5-flash-image") {
+    return "gemini-3.1-flash-lite-image";
+  }
+
+  if (model === "gemini-3.1-flash-lite-image") {
+    return "gemini-3.1-flash-image";
+  }
+
+  return model;
+}

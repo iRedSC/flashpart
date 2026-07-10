@@ -14,6 +14,7 @@ import {
   imageSizeForModel,
   isAiImageEditStrength,
   isAiImageModel,
+  upgradeAiImageModel,
 } from "./photoAiConstants";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
 import {
@@ -264,6 +265,7 @@ export const processingPayload = internalQuery({
   args: {
     productId: v.id("products"),
     originalPhotoId: v.optional(v.id("productPhotos")),
+    isRegeneration: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const product = await ctx.db.get(args.productId);
@@ -277,6 +279,10 @@ export const processingPayload = internalQuery({
       .withIndex("by_key", (q) => q.eq("key", "singleton"))
       .unique();
     const aiSettings = resolveAiImageSettings(settings);
+    const aiImageModel =
+      args.isRegeneration && aiSettings.aiImageUpgradeModelOnRegen
+        ? upgradeAiImageModel(aiSettings.aiImageModel)
+        : aiSettings.aiImageModel;
 
     if (args.originalPhotoId) {
       const original = await ctx.db.get(args.originalPhotoId);
@@ -298,7 +304,7 @@ export const processingPayload = internalQuery({
       return {
         mode: "convex" as const,
         aiImageEditStrength: aiSettings.aiImageEditStrength,
-        aiImageModel: aiSettings.aiImageModel,
+        aiImageModel,
         aiImagePrompt:
           existingAi?.aiPrompt ??
           product.aiImagePrompt ??
@@ -319,7 +325,7 @@ export const processingPayload = internalQuery({
     return {
       mode: "shopify" as const,
       aiImageEditStrength: aiSettings.aiImageEditStrength,
-      aiImageModel: aiSettings.aiImageModel,
+      aiImageModel,
       aiImagePrompt:
         product.aiImagePrompt ?? aiSettings.aiImageDefaultPrompt,
       aiShopifyFileId: product.aiShopifyFileId,
@@ -484,6 +490,8 @@ export const processProductPhoto = internalAction({
     originalPhotoId: v.optional(v.id("productPhotos")),
     /** Required for multi-photo path when caller already bumped via applyMarkAiGenerating. */
     aiGeneration: v.optional(v.number()),
+    /** True when triggered by an explicit regen (may upgrade model). */
+    isRegeneration: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     if (args.originalPhotoId) {
@@ -512,6 +520,7 @@ export const processProductPhoto = internalAction({
         const payload = await ctx.runQuery(photoAiModel.processingPayload, {
           productId: args.productId,
           originalPhotoId: args.originalPhotoId,
+          isRegeneration: args.isRegeneration,
         });
 
         if (!payload || payload.mode !== "convex") {
@@ -615,6 +624,7 @@ export const processProductPhoto = internalAction({
       const [payload, connection] = await Promise.all([
         ctx.runQuery(photoAiModel.processingPayload, {
           productId: args.productId,
+          isRegeneration: args.isRegeneration,
         }),
         ctx.runQuery(shopifyModel.firstActiveConnection, {}),
       ]);
@@ -730,6 +740,7 @@ export const regenerate = mutation({
         productId: args.productId,
         originalPhotoId: args.originalPhotoId,
         aiGeneration,
+        isRegeneration: true,
         previousShopifyFileIds:
           previousShopifyFileIds.length > 0
             ? previousShopifyFileIds
@@ -768,6 +779,7 @@ export const regenerate = mutation({
     await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
       previousAiShopifyFileId,
       productId: args.productId,
+      isRegeneration: true,
     });
   },
 });
@@ -820,6 +832,7 @@ export const regenerateForPhoto = mutation({
       productId: original.productId,
       originalPhotoId: args.originalPhotoId,
       aiGeneration,
+      isRegeneration: true,
       previousShopifyFileIds:
         previousShopifyFileIds.length > 0
           ? previousShopifyFileIds
