@@ -128,6 +128,34 @@ const desktopHeadClass =
 const desktopEditableHeadClass =
   "flex items-center px-2 text-[11px] font-medium uppercase tracking-wide text-slate-500";
 
+type EditableColumnId =
+  | "sku"
+  | "name"
+  | "description"
+  | "price"
+  | "vendor"
+  | "tags";
+
+function productCellSelector(
+  productId: Id<"products">,
+  columnId: EditableColumnId,
+) {
+  return `[data-product-cell="${productId}:${columnId}"]`;
+}
+
+function handleEditableInputEnter(
+  event: React.KeyboardEvent<HTMLInputElement>,
+  navigateNext: () => void,
+) {
+  if (event.key !== "Enter") {
+    return;
+  }
+
+  event.preventDefault();
+  event.currentTarget.blur();
+  navigateNext();
+}
+
 const columnHelper = createColumnHelper<Product>();
 
 // By default dnd-kit ignores an element's own CSS transform when measuring
@@ -753,13 +781,17 @@ export function ProductsPage() {
     React.useState<Id<"products"> | null>(null);
   const [activeDescriptionId, setActiveDescriptionId] =
     React.useState<Id<"products"> | null>(null);
+  const [pendingCellFocus, setPendingCellFocus] = React.useState<{
+    columnId: EditableColumnId;
+    productId: Id<"products">;
+  } | null>(null);
   const [desktopRowMenu, setDesktopRowMenu] = React.useState<{
     product: Product;
     x: number;
     y: number;
   } | null>(null);
-  const focusNextDescriptionRef = React.useRef<
-    (currentId: Id<"products">) => void
+  const focusNextCellRef = React.useRef<
+    (currentId: Id<"products">, columnId: EditableColumnId) => void
   >(() => {});
   const photoProduct = React.useMemo(
     () =>
@@ -803,6 +835,7 @@ export function ProductsPage() {
           <Input
             aria-label={`SKU for ${row.original.name}`}
             className={cn(desktopTableInputClass, "font-mono text-[13px]")}
+            data-product-cell={`${row.original._id}:sku`}
             defaultValue={row.original.sku}
             title={row.original.sku}
             variant="ghost"
@@ -814,6 +847,11 @@ export function ProductsPage() {
                 }).catch(() => undefined);
               }
             }}
+            onKeyDown={(event) =>
+              handleEditableInputEnter(event, () =>
+                focusNextCellRef.current(row.original._id, "sku"),
+              )
+            }
           />
         ),
       }),
@@ -835,6 +873,7 @@ export function ProductsPage() {
               <Input
                 aria-label={`Name for ${row.original.sku}`}
                 className={cn(desktopTableInputClass, "min-w-0 flex-1")}
+                data-product-cell={`${row.original._id}:name`}
                 defaultValue={row.original.name}
                 title={row.original.name}
                 variant="ghost"
@@ -846,6 +885,11 @@ export function ProductsPage() {
                     }).catch(() => undefined);
                   }
                 }}
+                onKeyDown={(event) =>
+                  handleEditableInputEnter(event, () =>
+                    focusNextCellRef.current(row.original._id, "name"),
+                  )
+                }
               />
             </div>
           );
@@ -859,7 +903,7 @@ export function ProductsPage() {
             aria-label={`Description for ${row.original.sku}`}
             className="w-full"
             onNavigateNext={() =>
-              focusNextDescriptionRef.current(row.original._id)
+              focusNextCellRef.current(row.original._id, "description")
             }
             onOpenChange={(open) => {
               if (open) {
@@ -895,6 +939,7 @@ export function ProductsPage() {
               desktopTableInputClass,
               "text-right tabular-nums",
             )}
+            data-product-cell={`${row.original._id}:price`}
             defaultValue={row.original.price.toFixed(2)}
             inputMode="decimal"
             variant="ghost"
@@ -908,6 +953,11 @@ export function ProductsPage() {
                 }).catch(() => undefined);
               }
             }}
+            onKeyDown={(event) =>
+              handleEditableInputEnter(event, () =>
+                focusNextCellRef.current(row.original._id, "price"),
+              )
+            }
           />
         ),
       }),
@@ -918,6 +968,7 @@ export function ProductsPage() {
           <Input
             aria-label={`Vendor for ${row.original.sku}`}
             className={desktopTableInputClass}
+            data-product-cell={`${row.original._id}:vendor`}
             // Remount when CSV import / remote updates change vendor so the
             // uncontrolled input does not keep a stale empty defaultValue.
             key={`${row.original._id}:vendor:${row.original.vendor ?? ""}`}
@@ -935,6 +986,11 @@ export function ProductsPage() {
                 }).catch(() => undefined);
               }
             }}
+            onKeyDown={(event) =>
+              handleEditableInputEnter(event, () =>
+                focusNextCellRef.current(row.original._id, "vendor"),
+              )
+            }
           />
         ),
       }),
@@ -945,6 +1001,7 @@ export function ProductsPage() {
           <Input
             aria-label={`Tags for ${row.original.sku}`}
             className={desktopTableInputClass}
+            data-product-cell={`${row.original._id}:tags`}
             key={`${row.original._id}:tags:${row.original.tags ?? ""}`}
             defaultValue={row.original.tags ?? ""}
             placeholder="tag-one, tag-two"
@@ -961,6 +1018,11 @@ export function ProductsPage() {
                 }).catch(() => undefined);
               }
             }}
+            onKeyDown={(event) =>
+              handleEditableInputEnter(event, () =>
+                focusNextCellRef.current(row.original._id, "tags"),
+              )
+            }
           />
         ),
       }),
@@ -1060,21 +1122,77 @@ export function ProductsPage() {
   });
 
   React.useEffect(() => {
-    focusNextDescriptionRef.current = (currentId) => {
+    focusNextCellRef.current = (currentId, columnId) => {
       const index = rows.findIndex((row) => row.original._id === currentId);
 
       if (index === -1 || index >= rows.length - 1) {
-        setActiveDescriptionId(null);
+        if (columnId === "description") {
+          setActiveDescriptionId(null);
+        }
+        setPendingCellFocus(null);
         return;
       }
 
       const nextIndex = index + 1;
+      const nextProductId = rows[nextIndex].original._id;
       rowVirtualizer.scrollToIndex(nextIndex, { align: "auto" });
       window.requestAnimationFrame(() => {
-        setActiveDescriptionId(rows[nextIndex].original._id);
+        if (columnId === "description") {
+          setActiveDescriptionId(nextProductId);
+          setPendingCellFocus(null);
+          return;
+        }
+
+        setPendingCellFocus({
+          columnId,
+          productId: nextProductId,
+        });
       });
     };
   }, [rows, rowVirtualizer]);
+
+  React.useEffect(() => {
+    if (!pendingCellFocus) {
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+
+    function tryFocus() {
+      if (cancelled || !pendingCellFocus) {
+        return;
+      }
+
+      const element = document.querySelector<HTMLInputElement>(
+        productCellSelector(
+          pendingCellFocus.productId,
+          pendingCellFocus.columnId,
+        ),
+      );
+
+      if (element) {
+        element.focus();
+        element.select();
+        setPendingCellFocus(null);
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < 30) {
+        window.requestAnimationFrame(tryFocus);
+        return;
+      }
+
+      setPendingCellFocus(null);
+    }
+
+    tryFocus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingCellFocus]);
   const cardVirtualizer = useVirtualizer({
     count: rows.length,
     estimateSize: () => 136,
