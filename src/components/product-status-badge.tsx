@@ -1,4 +1,5 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import {
   AlertCircle,
   Camera,
@@ -24,7 +25,7 @@ const phaseIconClass: Record<ProductPhase, string> = {
   published: "bg-green-100 text-green-600",
 };
 
-function StatusIcon({
+export function StatusIcon({
   className,
   icon,
   label,
@@ -38,29 +39,94 @@ function StatusIcon({
   toneClass: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [position, setPosition] = React.useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const containerRef = React.useRef<HTMLSpanElement>(null);
+  const tooltipRef = React.useRef<HTMLSpanElement>(null);
   const hoverCapable = React.useMemo(
     () =>
       typeof window !== "undefined" &&
       window.matchMedia("(hover: hover)").matches,
     [],
   );
-  const interactive = Boolean(reason);
+  // Touch devices need a tap target; keyboard focus is only useful there.
+  // Hover-capable pointers use mouse enter/leave and should not add tab stops.
+  const tapToggle = !hoverCapable;
+  const tooltipText = reason ? `${label} — ${reason}` : label;
+
+  const updatePosition = React.useCallback(() => {
+    const trigger = containerRef.current?.getBoundingClientRect();
+    if (!trigger) {
+      return;
+    }
+
+    const tooltip = tooltipRef.current?.getBoundingClientRect();
+    const tooltipWidth = tooltip?.width ?? 240;
+    const tooltipHeight = tooltip?.height ?? 40;
+    const gap = 6;
+    const padding = 8;
+
+    let left = trigger.left + trigger.width / 2 - tooltipWidth / 2;
+    left = Math.max(
+      padding,
+      Math.min(left, window.innerWidth - tooltipWidth - padding),
+    );
+
+    const spaceAbove = trigger.top - padding;
+    const placeBelow =
+      spaceAbove < tooltipHeight + gap &&
+      window.innerHeight - trigger.bottom > spaceAbove;
+    const top = placeBelow
+      ? trigger.bottom + gap
+      : trigger.top - tooltipHeight - gap;
+
+    setPosition({ left, top });
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+
+    updatePosition();
+    // Re-measure after the tooltip has its real size.
+    const frame = window.requestAnimationFrame(() => updatePosition());
+
+    function handleScrollOrResize() {
+      updatePosition();
+    }
+
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [open, updatePosition, tooltipText]);
 
   React.useEffect(() => {
-    if (!open || hoverCapable) {
+    if (!open || !tapToggle) {
       return;
     }
 
     function handlePointerDown(event: PointerEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setOpen(false);
+      const target = event.target as Node;
+      if (
+        containerRef.current?.contains(target) ||
+        tooltipRef.current?.contains(target)
+      ) {
+        return;
       }
+      setOpen(false);
     }
 
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [hoverCapable, open]);
+  }, [open, tapToggle]);
 
   return (
     <span
@@ -70,22 +136,26 @@ function StatusIcon({
       ref={containerRef}
     >
       <span
-        aria-label={reason ? `${label}: ${reason}` : label}
+        aria-label={tooltipText}
         className={cn(
           "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
           toneClass,
-          interactive && "cursor-default",
+          tapToggle && "cursor-default",
         )}
+        onBlur={() => {
+          if (tapToggle) {
+            setOpen(false);
+          }
+        }}
         onClick={() => {
-          if (interactive && !hoverCapable) {
+          if (tapToggle) {
             setOpen((value) => !value);
           }
         }}
-        role={interactive ? "button" : undefined}
-        tabIndex={interactive ? 0 : undefined}
-        title={reason ? `${label} — ${reason}` : label}
+        role={tapToggle ? "button" : undefined}
+        tabIndex={tapToggle ? 0 : undefined}
         onKeyDown={
-          interactive
+          tapToggle
             ? (event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
@@ -97,14 +167,26 @@ function StatusIcon({
       >
         {icon}
       </span>
-      {open && reason ? (
-        <span
-          className="absolute bottom-full left-1/2 z-50 mb-1.5 max-w-[240px] -translate-x-1/2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-normal text-slate-950 shadow-md"
-          role="tooltip"
-        >
-          {reason}
-        </span>
-      ) : null}
+      {open
+        ? createPortal(
+            <span
+              className={cn(
+                "pointer-events-none fixed z-50 max-w-[240px] rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-normal text-slate-950 shadow-md",
+                !position && "invisible",
+              )}
+              ref={tooltipRef}
+              role="tooltip"
+              style={
+                position
+                  ? { left: position.left, top: position.top }
+                  : { left: 0, top: 0 }
+              }
+            >
+              {tooltipText}
+            </span>,
+            document.body,
+          )
+        : null}
     </span>
   );
 }
@@ -166,12 +248,11 @@ export function ProductStatusIcons({
         />
       ) : null}
       {saving ? (
-        <span
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-amber-50 text-amber-800"
-          title="Saving changes"
-        >
-          <Cloud className="h-3.5 w-3.5" />
-        </span>
+        <StatusIcon
+          icon={<Cloud className="h-3.5 w-3.5" />}
+          label="Saving changes"
+          toneClass="bg-amber-50 text-amber-800"
+        />
       ) : null}
     </div>
   );
