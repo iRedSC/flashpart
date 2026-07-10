@@ -541,6 +541,11 @@ export function ProductPhotoDialog({
     triggerHaptic();
   }
 
+  function applyDefaultPrompt() {
+    setDraftPrompt(defaultPrompt);
+    triggerHaptic();
+  }
+
   function handleTouchStart(event: React.TouchEvent<HTMLDivElement>) {
     touchStartXRef.current = event.changedTouches[0]?.clientX ?? null;
   }
@@ -1185,6 +1190,18 @@ export function ProductPhotoDialog({
             value={draftPrompt}
           />
           <DialogFooter>
+            <Button
+              className="sm:mr-auto"
+              disabled={
+                isBusy ||
+                aiGenerating ||
+                draftPrompt.trim() === defaultPrompt.trim()
+              }
+              onClick={applyDefaultPrompt}
+              variant="outline"
+            >
+              Use default
+            </Button>
             <Button
               disabled={isBusy || aiGenerating}
               onClick={() => setPromptDialogOpen(false)}
