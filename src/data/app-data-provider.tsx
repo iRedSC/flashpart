@@ -915,10 +915,10 @@ export function AppDataProvider({
           label:
             productIds.length === 1
               ? options?.forceOverwrite
-                ? "Queuing Shopify overwrite"
+                ? "Queuing Shopify republish"
                 : "Queuing Shopify draft"
               : options?.forceOverwrite
-                ? `Queuing ${productIds.length.toLocaleString()} Shopify overwrites`
+                ? `Queuing ${productIds.length.toLocaleString()} Shopify republishes`
                 : `Queuing ${productIds.length.toLocaleString()} Shopify drafts`,
           productIds,
         }),

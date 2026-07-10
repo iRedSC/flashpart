@@ -85,6 +85,7 @@ import { createCaptureSelection } from "../lib/capture-selection";
 import { convexApi } from "../lib/convex-api";
 import {
   canPublishProduct,
+  canRepublishProduct,
   listOriginals,
   needsAiPhotoApproval,
   type ProductPhoto,
@@ -366,6 +367,7 @@ function MobileProductCard({
   onDeleteShopifyFile,
   onOpenPhoto,
   onPublish,
+  onRepublish,
   onUnarchive,
   photos,
   row,
@@ -386,6 +388,7 @@ function MobileProductCard({
   onDeleteShopifyFile: (product: Product) => void;
   onOpenPhoto: (product: Product) => void;
   onPublish: (product: Product) => void;
+  onRepublish: (product: Product) => void;
   onUnarchive: (product: Product) => void;
   photos?: ProductPhoto[] | null;
   row: Row<Product>;
@@ -493,6 +496,7 @@ function MobileProductCard({
                   onDeleteShopifyFile={() => onDeleteShopifyFile(product)}
                   onOpenPhoto={() => onOpenPhoto(product)}
                   onPublish={() => onPublish(product)}
+                  onRepublish={() => onRepublish(product)}
                   onUnarchive={() => onUnarchive(product)}
                   photos={photos}
                   product={product}
@@ -799,8 +803,10 @@ export function ProductsPage() {
     y: number;
   } | null>(null);
   const [overwritePublish, setOverwritePublish] = React.useState<{
-    productIds: Id<"products">[];
-    skus: string[];
+    mode: "duplicateSku" | "republish";
+    overwriteProductIds: Id<"products">[];
+    overwriteSkus: string[];
+    normalProductIds: Id<"products">[];
   } | null>(null);
   const [isOverwritePublishing, setIsOverwritePublishing] = React.useState(false);
   const focusNextCellRef = React.useRef<
@@ -1299,6 +1305,24 @@ export function ProductsPage() {
         photosByProductId[row.original._id],
       ),
     );
+  const selectedCanRepublish =
+    !photosBatchLoading &&
+    hasSelection &&
+    viewFilter !== VIEW_ARCHIVED &&
+    selectedRows.every((row) =>
+      canRepublishProduct(
+        {
+          aiImageStatus: row.original.aiImageStatus,
+          aiShopifyFileId: row.original.aiShopifyFileId ?? undefined,
+          needsPhotoReview: row.original.needsPhotoReview,
+          pendingOperation: row.original.pendingOperation ?? undefined,
+          phase: row.original.phase,
+          shopifyFileId: row.original.shopifyFileId ?? undefined,
+          shopifyProductId: row.original.shopifyProductId ?? undefined,
+        },
+        photosByProductId[row.original._id],
+      ),
+    );
   const selectedNeedOverwrite = selectedRows.some((row) =>
     isDuplicateSkuError(row.original),
   );
@@ -1541,23 +1565,48 @@ export function ProductsPage() {
     }
   }
 
+  async function handleRepublishSelected() {
+    if (selectedProductIds.length === 0) {
+      return;
+    }
+
+    requestRepublishProducts(selectedRows.map((row) => row.original));
+  }
+
   async function requestPublishProducts(targets: Product[]) {
     if (targets.length === 0) {
       return;
     }
 
-    const productIds = targets.map((product) => product._id);
     const overwriteTargets = targets.filter(isDuplicateSkuError);
+    const normalTargets = targets.filter(
+      (product) => !isDuplicateSkuError(product),
+    );
 
     if (overwriteTargets.length > 0) {
       setOverwritePublish({
-        productIds,
-        skus: overwriteTargets.map((product) => product.sku),
+        mode: "duplicateSku",
+        overwriteProductIds: overwriteTargets.map((product) => product._id),
+        overwriteSkus: overwriteTargets.map((product) => product.sku),
+        normalProductIds: normalTargets.map((product) => product._id),
       });
       return;
     }
 
-    await publishProducts(productIds);
+    await publishProducts(targets.map((product) => product._id));
+  }
+
+  function requestRepublishProducts(targets: Product[]) {
+    if (targets.length === 0) {
+      return;
+    }
+
+    setOverwritePublish({
+      mode: "republish",
+      overwriteProductIds: targets.map((product) => product._id),
+      overwriteSkus: targets.map((product) => product.sku),
+      normalProductIds: [],
+    });
   }
 
   async function confirmOverwritePublish() {
@@ -1567,9 +1616,16 @@ export function ProductsPage() {
 
     setIsOverwritePublishing(true);
     try {
-      await publishProducts(overwritePublish.productIds, {
-        forceOverwrite: true,
-      });
+      if (overwritePublish.overwriteProductIds.length > 0) {
+        await publishProducts(overwritePublish.overwriteProductIds, {
+          forceOverwrite: true,
+        });
+      }
+
+      if (overwritePublish.normalProductIds.length > 0) {
+        await publishProducts(overwritePublish.normalProductIds);
+      }
+
       setOverwritePublish(null);
       clearSelection();
     } catch {
@@ -1924,6 +1980,13 @@ export function ProductsPage() {
             >
               <Send />
               {selectedNeedOverwrite ? "Publish & overwrite" : "Publish"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!selectedCanRepublish}
+              onSelect={() => handleRepublishSelected()}
+            >
+              <RefreshCw />
+              Republish
             </DropdownMenuItem>
             {viewFilter === VIEW_ARCHIVED ? (
               <DropdownMenuItem
@@ -2388,6 +2451,7 @@ export function ProductsPage() {
                   onPublish={(target) =>
                     void requestPublishProducts([target]).catch(() => undefined)
                   }
+                  onRepublish={(target) => requestRepublishProducts([target])}
                   onUnarchive={(target) =>
                     void handleUnarchiveProducts([target._id]).catch(
                       () => undefined,
@@ -2667,6 +2731,9 @@ export function ProductsPage() {
                   () => undefined,
                 )
               }
+              onRepublish={() =>
+                requestRepublishProducts([desktopRowMenu.product])
+              }
               onUnarchive={() =>
                 void handleUnarchiveProducts([
                   desktopRowMenu.product._id,
@@ -2689,13 +2756,44 @@ export function ProductsPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Overwrite existing Shopify product?</DialogTitle>
-            <DialogDescription>
-              {overwritePublish && overwritePublish.skus.length === 1
-                ? `A Shopify product with SKU ${overwritePublish.skus[0]} already exists. Publishing will update that product instead of creating a new one.`
-                : overwritePublish
-                  ? `${overwritePublish.skus.length.toLocaleString()} selected products already exist on Shopify with matching SKUs. Publishing will update those products instead of creating new ones.`
-                  : null}
+            <DialogTitle>
+              {overwritePublish?.mode === "republish"
+                ? overwritePublish.overwriteSkus.length === 1
+                  ? "Republish to Shopify?"
+                  : "Republish products to Shopify?"
+                : overwritePublish?.overwriteSkus.length === 1
+                  ? "Overwrite existing Shopify product?"
+                  : "Overwrite existing Shopify products?"}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3 text-sm text-slate-500">
+                <p>
+                  {overwritePublish?.mode === "republish"
+                    ? "These products are already linked to Shopify. Republishing will overwrite the existing listing data (title, price, tags, and photos)."
+                    : "A Shopify product with a matching SKU already exists. Publishing will overwrite that listing instead of creating a new one."}
+                </p>
+                {overwritePublish ? (
+                  <div className="space-y-1.5">
+                    <p className="font-medium text-slate-700">
+                      The following products will be overwritten:
+                    </p>
+                    <ul className="max-h-40 list-disc space-y-1 overflow-y-auto pl-5 font-mono text-xs text-slate-700">
+                      {overwritePublish.overwriteSkus.map((sku) => (
+                        <li key={sku}>{sku}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {overwritePublish &&
+                overwritePublish.mode === "duplicateSku" &&
+                overwritePublish.normalProductIds.length > 0 ? (
+                  <p>
+                    {overwritePublish.normalProductIds.length === 1
+                      ? "1 other selected product will publish normally."
+                      : `${overwritePublish.normalProductIds.length.toLocaleString()} other selected products will publish normally.`}
+                  </p>
+                ) : null}
+              </div>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -2717,8 +2815,12 @@ export function ProductsPage() {
               {isOverwritePublishing ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Publishing…
+                  {overwritePublish?.mode === "republish"
+                    ? "Republishing…"
+                    : "Publishing…"}
                 </>
+              ) : overwritePublish?.mode === "republish" ? (
+                "Republish"
               ) : (
                 "Publish & overwrite"
               )}

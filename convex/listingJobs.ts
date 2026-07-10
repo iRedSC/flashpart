@@ -91,7 +91,13 @@ export const enqueueCreateDrafts = mutation({
     for (const productId of args.productIds) {
       const product = await ctx.db.get(productId);
 
-      if (!product || product.shopifyProductId) {
+      if (!product) {
+        continue;
+      }
+
+      // Already linked to Shopify: only allow when the caller explicitly
+      // force-overwrites (republish / duplicate-SKU overwrite).
+      if (product.shopifyProductId && args.forceOverwrite !== true) {
         continue;
       }
 
@@ -617,10 +623,19 @@ export const processQueuedJob = internalAction({
         throw new Error("SKU must contain letters or numbers to become a Shopify handle.");
       }
 
-      const existing = await findProductBySku(
+      const existingBySku = await findProductBySku(
         payload.connection,
         payload.product.sku,
       );
+      // Prefer the linked Shopify product when republishing so a local SKU
+      // change still updates the same listing instead of creating a duplicate.
+      const existing = payload.product.shopifyProductId
+        ? {
+            productId: payload.product.shopifyProductId,
+            variantId:
+              payload.product.shopifyVariantId ?? existingBySku?.variantId,
+          }
+        : existingBySku;
 
       if (existing && payload.settings.duplicatePolicy === "blockExisting") {
         await ctx.runMutation(listingJobModel.markJobBlockedExistingSku, {

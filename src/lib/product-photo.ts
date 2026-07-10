@@ -293,6 +293,51 @@ export function canPublishProduct(
   },
   photos?: ProductPhoto[] | null,
 ) {
+  return canQueueShopifyListing(product, photos, "captured");
+}
+
+/** Already-published products that still have publish-ready photos. */
+export function canRepublishProduct(
+  product: {
+    aiImageStatus?: ProductPhotoFields["aiImageStatus"];
+    aiShopifyFileId?: string;
+    needsPhotoReview?: boolean;
+    pendingOperation?: string;
+    phase: "imported" | "captured" | "published";
+    shopifyFileId?: string;
+    shopifyProductId?: string | null;
+  },
+  photos?: ProductPhoto[] | null,
+) {
+  const isPublished =
+    product.phase === "published" || Boolean(product.shopifyProductId);
+
+  if (!isPublished) {
+    return false;
+  }
+
+  return canQueueShopifyListing(
+    {
+      ...product,
+      phase: "published",
+    },
+    photos,
+    "published",
+  );
+}
+
+function canQueueShopifyListing(
+  product: {
+    aiImageStatus?: ProductPhotoFields["aiImageStatus"];
+    aiShopifyFileId?: string;
+    needsPhotoReview?: boolean;
+    pendingOperation?: string;
+    phase: "imported" | "captured" | "published";
+    shopifyFileId?: string;
+  },
+  photos: ProductPhoto[] | null | undefined,
+  requiredPhase: "captured" | "published",
+) {
   // undefined/null = batch still loading — do not treat as publishable yet.
   if (photos == null) {
     return false;
@@ -315,7 +360,7 @@ export function canPublishProduct(
       );
 
     return (
-      product.phase === "captured" &&
+      product.phase === requiredPhase &&
       everyOriginalHasApprovedReadyAi &&
       !product.pendingOperation
     );
@@ -323,7 +368,7 @@ export function canPublishProduct(
 
   // photos === [] — legacy product-level fields.
   return (
-    product.phase === "captured" &&
+    product.phase === requiredPhase &&
     Boolean(product.shopifyFileId) &&
     product.aiImageStatus === "ready" &&
     Boolean(product.aiShopifyFileId) &&
