@@ -12,7 +12,7 @@ import { requireSessionUser } from "./authUtils";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
 import type { AiImageModelId } from "./photoAiConstants";
 import { aiImageModel } from "./photoAiConstants";
-import { productErrorFields } from "./productState";
+import { productErrorFields, isLinkedToShopify, needsRepublishPatch } from "./productState";
 import { photoKind, shopifyFileStatus } from "./schema";
 import {
   getSettingsDocument,
@@ -367,6 +367,11 @@ export async function syncProductPhotoFlags(
     (product.phase === "imported" || product.phase === undefined)
   ) {
     patch.phase = "captured";
+  }
+
+  // Photo work on a live Shopify listing means local media differs until republish.
+  if (isLinkedToShopify(product) && (anyGenerating || anyReadyUnapproved)) {
+    patch.needsRepublish = true;
   }
 
   await ctx.db.patch(productId, patch);
@@ -829,6 +834,7 @@ export async function applyDeletePhoto(
     throw new ConvexError("Photo not found.");
   }
 
+  const product = await ctx.db.get(photo.productId);
   const toDelete: Doc<"productPhotos">[] = [photo];
 
   if (photo.kind === "original") {
@@ -843,6 +849,13 @@ export async function applyDeletePhoto(
     await deleteStorageBlob(ctx, row.storageId);
     // Shopify Files are deleted by shopify.deleteProductPhoto when present.
     await ctx.db.delete(row._id);
+  }
+
+  if (product && isLinkedToShopify(product)) {
+    await ctx.db.patch(photo.productId, {
+      needsRepublish: true,
+      updatedAt: Date.now(),
+    });
   }
 
   await syncProductPhotoFlags(ctx, photo.productId);
@@ -1235,6 +1248,7 @@ export const replaceOriginalFromUpload = mutation({
     const productPatch: Partial<Doc<"products">> = {
       lastError: undefined,
       updatedAt: now,
+      ...needsRepublishPatch(product),
     };
 
     if (args.captureId) {
@@ -1279,6 +1293,7 @@ export const setSortOrder = mutation({
     }
 
     const now = Date.now();
+    const product = await ctx.db.get(photo.productId);
 
     await ctx.db.patch(args.photoId, {
       sortOrder: args.sortOrder,
@@ -1294,7 +1309,10 @@ export const setSortOrder = mutation({
       });
     }
 
-    await ctx.db.patch(photo.productId, { updatedAt: now });
+    await ctx.db.patch(photo.productId, {
+      updatedAt: now,
+      ...(product ? needsRepublishPatch(product) : {}),
+    });
   },
 });
 

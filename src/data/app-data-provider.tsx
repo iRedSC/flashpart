@@ -693,10 +693,22 @@ export function AppDataProvider({
         const { id, ...patch } = args;
 
         return runOptimistic({
-          apply: (state) => ({
-            ...state,
-            products: updateProductFields(state.products, id, patch),
-          }),
+          apply: (state) => {
+            const existing = state.products.find((product) => product._id === id);
+            const needsRepublish =
+              existing?.phase === "published" ||
+              Boolean(existing?.shopifyProductId)
+                ? true
+                : existing?.needsRepublish;
+
+            return {
+              ...state,
+              products: updateProductFields(state.products, id, {
+                ...patch,
+                needsRepublish,
+              }),
+            };
+          },
           commit: () =>
             updateProductMutation({
               ...args,
@@ -850,6 +862,7 @@ export function AppDataProvider({
                 description,
                 lastError: undefined,
                 needsPhotoReview: undefined,
+                needsRepublish: undefined,
                 name,
                 pendingOperation: undefined,
                 phase: "imported",
@@ -1164,6 +1177,7 @@ export function AppDataProvider({
                       shopifyStagedResourceUrl: undefined,
                       captureId: undefined,
                       needsPhotoReview: undefined,
+                      needsRepublish: undefined,
                       pendingOperation: undefined,
                       phase: "imported",
                       updatedAt: now,
@@ -1549,7 +1563,28 @@ export function AppDataProvider({
         );
 
         return runOptimistic({
-          apply: (state) => state,
+          apply: (state) => {
+            if (!productId) {
+              return state;
+            }
+
+            const existing = state.products.find(
+              (product) => product._id === productId,
+            );
+            const needsRepublish =
+              existing?.phase === "published" ||
+              Boolean(existing?.shopifyProductId)
+                ? true
+                : existing?.needsRepublish;
+
+            return {
+              ...state,
+              products: updateProductFields(state.products, productId, {
+                needsRepublish,
+                pendingOperation: "aiImageGenerating",
+              }),
+            };
+          },
           commit: async () => {
             await regenerateAiImageForPhotoMutation({
               originalPhotoId,
@@ -1565,16 +1600,28 @@ export function AppDataProvider({
       },
       regenerateAiImage: ({ productId, prompt, model }) =>
         runOptimistic({
-          apply: (state) => ({
-            ...state,
-            products: updateProductFields(state.products, productId, {
-              aiImageStatus: "generating",
-              aiShopifyFileUrl: undefined,
-              lastError: undefined,
-              needsPhotoReview: undefined,
-              pendingOperation: "aiImageGenerating",
-            }),
-          }),
+          apply: (state) => {
+            const existing = state.products.find(
+              (product) => product._id === productId,
+            );
+            const needsRepublish =
+              existing?.phase === "published" ||
+              Boolean(existing?.shopifyProductId)
+                ? true
+                : existing?.needsRepublish;
+
+            return {
+              ...state,
+              products: updateProductFields(state.products, productId, {
+                aiImageStatus: "generating",
+                aiShopifyFileUrl: undefined,
+                lastError: undefined,
+                needsPhotoReview: undefined,
+                needsRepublish,
+                pendingOperation: "aiImageGenerating",
+              }),
+            };
+          },
           commit: () =>
             regenerateAiImageMutation({
               productId,

@@ -156,6 +156,8 @@ export default defineSchema({
     phase: v.optional(productPhase),
     pendingOperation: v.optional(pendingOperation),
     needsPhotoReview: v.optional(v.boolean()),
+    /** Local listing data differs from Shopify; clear on successful publish/republish. */
+    needsRepublish: v.optional(v.boolean()),
     lastError: v.optional(lastError),
     archivedAt: v.optional(v.number()),
     groupId: v.optional(v.id("groups")),

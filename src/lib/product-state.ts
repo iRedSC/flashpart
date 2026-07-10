@@ -25,11 +25,20 @@ export type ProductStateFields = {
   phase: ProductPhase;
   pendingOperation?: PendingOperation;
   needsPhotoReview?: boolean;
+  needsRepublish?: boolean;
   lastError?: LastError;
   shopifyFileId?: string;
   aiImageStatus?: "pending" | "generating" | "ready" | "failed";
   aiShopifyFileId?: string;
 };
+
+/** True when the product is (or was) linked to a Shopify listing. */
+export function isLinkedToShopify(product: {
+  phase?: ProductPhase;
+  shopifyProductId?: string;
+}): boolean {
+  return product.phase === "published" || Boolean(product.shopifyProductId);
+}
 
 /** Minimal photo shape for dual-read helpers (avoids importing product-photo). */
 export type ProductPhotoCaptureFields = {
