@@ -293,8 +293,57 @@ export function canPublishProduct(
   },
   photos?: ProductPhoto[] | null,
 ) {
+  return canQueueShopifyListing(product, photos, "captured");
+}
+
+/** Already-published products that still have publish-ready photos. */
+export function canRepublishProduct(
+  product: {
+    aiImageStatus?: ProductPhotoFields["aiImageStatus"];
+    aiShopifyFileId?: string;
+    needsPhotoReview?: boolean;
+    pendingOperation?: string;
+    phase: "imported" | "captured" | "published";
+    shopifyFileId?: string;
+    shopifyProductId?: string | null;
+  },
+  photos?: ProductPhoto[] | null,
+) {
+  const isPublished =
+    product.phase === "published" || Boolean(product.shopifyProductId);
+
+  if (!isPublished) {
+    return false;
+  }
+
+  return canQueueShopifyListing(
+    {
+      ...product,
+      phase: "published",
+    },
+    photos,
+    "published",
+  );
+}
+
+function canQueueShopifyListing(
+  product: {
+    aiImageStatus?: ProductPhotoFields["aiImageStatus"];
+    aiShopifyFileId?: string;
+    needsPhotoReview?: boolean;
+    pendingOperation?: string;
+    phase: "imported" | "captured" | "published";
+    shopifyFileId?: string;
+  },
+  photos: ProductPhoto[] | null | undefined,
+  requiredPhase: "captured" | "published",
+) {
   // undefined/null = batch still loading — do not treat as publishable yet.
   if (photos == null) {
+    return false;
+  }
+
+  if (product.pendingOperation) {
     return false;
   }
 
@@ -314,20 +363,21 @@ export function canPublishProduct(
           pair.original.status !== "failed",
       );
 
-    return (
-      product.phase === "captured" &&
-      everyOriginalHasApprovedReadyAi &&
-      !product.pendingOperation
-    );
+    return product.phase === requiredPhase && everyOriginalHasApprovedReadyAi;
   }
 
   // photos === [] — legacy product-level fields.
+  if (requiredPhase === "published") {
+    // After the first legacy publish, AI fields are cleared and shopifyFileId
+    // points at the already-hosted publish file — that is enough to republish.
+    return Boolean(product.shopifyFileId);
+  }
+
   return (
     product.phase === "captured" &&
     Boolean(product.shopifyFileId) &&
     product.aiImageStatus === "ready" &&
     Boolean(product.aiShopifyFileId) &&
-    !product.needsPhotoReview &&
-    !product.pendingOperation
+    !product.needsPhotoReview
   );
 }

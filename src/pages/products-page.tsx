@@ -85,11 +85,12 @@ import { createCaptureSelection } from "../lib/capture-selection";
 import { convexApi } from "../lib/convex-api";
 import {
   canPublishProduct,
+  canRepublishProduct,
   listOriginals,
   needsAiPhotoApproval,
   type ProductPhoto,
 } from "../lib/product-photo";
-import { canArchive, isArchived, isGroupArchived } from "../lib/product-state";
+import { canArchive, isArchived, isDuplicateSkuError, isGroupArchived, type LastError } from "../lib/product-state";
 import { cn } from "../lib/utils";
 import { normalizeTagString } from "../lib/tags";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -357,6 +358,7 @@ function MobileProductCard({
   groupLabel,
   isDragSource,
   isPending,
+  lastError,
   measureElement,
   onAddToGroup,
   onArchive,
@@ -365,16 +367,19 @@ function MobileProductCard({
   onDeleteShopifyFile,
   onOpenPhoto,
   onPublish,
+  onRepublish,
   onUnarchive,
   photos,
   row,
   shiftY,
+  shopDomain,
   virtualRow,
 }: {
   dragActive: boolean;
   groupLabel: string;
   isDragSource: boolean;
   isPending: boolean;
+  lastError?: LastError;
   measureElement: (node: Element | null) => void;
   onAddToGroup: (product: Product) => void;
   onArchive: (product: Product) => void;
@@ -383,10 +388,12 @@ function MobileProductCard({
   onDeleteShopifyFile: (product: Product) => void;
   onOpenPhoto: (product: Product) => void;
   onPublish: (product: Product) => void;
+  onRepublish: (product: Product) => void;
   onUnarchive: (product: Product) => void;
   photos?: ProductPhoto[] | null;
   row: Row<Product>;
   shiftY: number;
+  shopDomain?: string | null;
   virtualRow: VirtualItem;
 }) {
   const product = row.original;
@@ -457,11 +464,12 @@ function MobileProductCard({
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
             <ShopifyListingIcon shopifyProductId={product.shopifyProductId} />
             <ProductStatusIcons
-              lastError={product.lastError}
+              lastError={lastError ?? product.lastError}
               needsPhotoReview={productNeedsPhotoReview(product, photos)}
               pendingOperation={product.pendingOperation}
               phase={product.phase}
               saving={isPending}
+              shopDomain={shopDomain}
             />
             <span>{groupLabel}</span>
           </div>
@@ -488,6 +496,7 @@ function MobileProductCard({
                   onDeleteShopifyFile={() => onDeleteShopifyFile(product)}
                   onOpenPhoto={() => onOpenPhoto(product)}
                   onPublish={() => onPublish(product)}
+                  onRepublish={() => onRepublish(product)}
                   onUnarchive={() => onUnarchive(product)}
                   photos={photos}
                   product={product}
@@ -682,12 +691,15 @@ export function ProductsPage() {
     isLoading,
     products,
     importProducts,
+    listingJobs,
     publishProducts,
     reorderProducts,
     session,
+    shopifyConnection,
     unarchiveProducts,
     updateProduct,
   } = useAppData();
+  const shopDomain = shopifyConnection?.shopDomain ?? null;
   const navigate = useNavigate();
   const parentRef = React.useRef<HTMLDivElement>(null);
   const desktopBodyRef = React.useRef<HTMLTableSectionElement>(null);
@@ -790,6 +802,14 @@ export function ProductsPage() {
     x: number;
     y: number;
   } | null>(null);
+  const [overwritePublish, setOverwritePublish] = React.useState<{
+    mode: "duplicateSku" | "republish";
+    overwriteProductIds: Id<"products">[];
+    overwriteSkus: string[];
+    normalProductIds: Id<"products">[];
+    clearSelectionOnSuccess: boolean;
+  } | null>(null);
+  const [isOverwritePublishing, setIsOverwritePublishing] = React.useState(false);
   const focusNextCellRef = React.useRef<
     (currentId: Id<"products">, columnId: EditableColumnId) => void
   >(() => {});
@@ -804,6 +824,50 @@ export function ProductsPage() {
     () => new Map(groups.map((group) => [group._id, group.name])),
     [groups],
   );
+  const existingShopifyProductIdByProductId = React.useMemo(() => {
+    const map = new Map<string, string>();
+
+    // listingJobs are ordered newest-first; keep the first match per product.
+    for (const job of listingJobs) {
+      if (job.status !== "failed" || map.has(job.productId)) {
+        continue;
+      }
+
+      const result = job.result as
+        | { existingShopifyProductId?: unknown }
+        | null
+        | undefined;
+      const existingId = result?.existingShopifyProductId;
+
+      if (typeof existingId === "string" && existingId) {
+        map.set(job.productId, existingId);
+      }
+    }
+
+    return map;
+  }, [listingJobs]);
+
+  function resolveLastError(product: Product): LastError | undefined {
+    const lastError = product.lastError;
+    if (!lastError || lastError.code !== "duplicateSku") {
+      return lastError;
+    }
+
+    if (lastError.existingShopifyProductId) {
+      return lastError;
+    }
+
+    const fromJob = existingShopifyProductIdByProductId.get(product._id);
+    if (!fromJob) {
+      return lastError;
+    }
+
+    return {
+      ...lastError,
+      existingShopifyProductId: fromJob,
+    };
+  }
+
   const columns = React.useMemo(
     () => [
       columnHelper.display({
@@ -1030,7 +1094,7 @@ export function ProductsPage() {
         header: "Status",
         cell: ({ row }) => (
           <ProductStatusIcons
-            lastError={row.original.lastError}
+            lastError={resolveLastError(row.original)}
             needsPhotoReview={productNeedsPhotoReview(
               row.original,
               photosByProductId[row.original._id],
@@ -1038,6 +1102,7 @@ export function ProductsPage() {
             pendingOperation={row.original.pendingOperation}
             phase={row.original.phase}
             saving={isProductPending(row.original._id)}
+            shopDomain={shopDomain}
           />
         ),
       }),
@@ -1096,9 +1161,11 @@ export function ProductsPage() {
     ],
     [
       activeDescriptionId,
+      existingShopifyProductIdByProductId,
       groupById,
       isProductPending,
       photosByProductId,
+      shopDomain,
       updateProduct,
     ],
   );
@@ -1222,23 +1289,47 @@ export function ProductsPage() {
   );
   const photosBatchLoading =
     filteredProductIds.length > 0 && photosByProductIdQuery === undefined;
-  const selectedCanPublish =
-    !photosBatchLoading &&
-    hasSelection &&
-    viewFilter !== VIEW_ARCHIVED &&
-    selectedRows.every((row) =>
-      canPublishProduct(
+  const selectedPublishTargets = selectedRows
+    .map((row) => row.original)
+    .filter(
+      (product) =>
+        !isArchived(product) &&
+        canPublishProduct(
+          {
+            aiImageStatus: product.aiImageStatus,
+            aiShopifyFileId: product.aiShopifyFileId ?? undefined,
+            needsPhotoReview: product.needsPhotoReview,
+            pendingOperation: product.pendingOperation ?? undefined,
+            phase: product.phase,
+            shopifyFileId: product.shopifyFileId ?? undefined,
+          },
+          photosByProductId[product._id],
+        ),
+    );
+  const selectedRepublishTargets = selectedRows
+    .map((row) => row.original)
+    .filter((product) =>
+      canRepublishProduct(
         {
-          aiImageStatus: row.original.aiImageStatus,
-          aiShopifyFileId: row.original.aiShopifyFileId ?? undefined,
-          needsPhotoReview: row.original.needsPhotoReview,
-          pendingOperation: row.original.pendingOperation ?? undefined,
-          phase: row.original.phase,
-          shopifyFileId: row.original.shopifyFileId ?? undefined,
+          aiImageStatus: product.aiImageStatus,
+          aiShopifyFileId: product.aiShopifyFileId ?? undefined,
+          needsPhotoReview: product.needsPhotoReview,
+          pendingOperation: product.pendingOperation ?? undefined,
+          phase: product.phase,
+          shopifyFileId: product.shopifyFileId ?? undefined,
+          shopifyProductId: product.shopifyProductId ?? undefined,
         },
-        photosByProductId[row.original._id],
+        photosByProductId[product._id],
       ),
     );
+  // Enable when at least one selected row qualifies; actions only target those.
+  const selectedCanPublish =
+    !photosBatchLoading && selectedPublishTargets.length > 0;
+  const selectedCanRepublish =
+    !photosBatchLoading && selectedRepublishTargets.length > 0;
+  const selectedNeedOverwrite = selectedPublishTargets.some((product) =>
+    isDuplicateSkuError(product),
+  );
   const activeDragIndex = activeDragProductId
     ? visibleIds.indexOf(activeDragProductId)
     : -1;
@@ -1463,12 +1554,114 @@ export function ProductsPage() {
   }
 
   async function handlePublishSelected() {
-    if (selectedProductIds.length === 0) {
+    if (selectedPublishTargets.length === 0) {
       return;
     }
 
-    await publishProducts(selectedProductIds);
-    clearSelection();
+    const needsOverwrite = selectedPublishTargets.some(isDuplicateSkuError);
+
+    await requestPublishProducts(selectedPublishTargets, {
+      clearSelectionOnSuccess: true,
+    });
+
+    // Keep selection while the overwrite confirmation dialog is open.
+    if (!needsOverwrite) {
+      clearSelection();
+    }
+  }
+
+  function handleRepublishSelected() {
+    if (selectedRepublishTargets.length === 0) {
+      return;
+    }
+
+    requestRepublishProducts(selectedRepublishTargets, {
+      clearSelectionOnSuccess: true,
+    });
+  }
+
+  async function requestPublishProducts(
+    targets: Product[],
+    options?: { clearSelectionOnSuccess?: boolean },
+  ) {
+    if (targets.length === 0) {
+      return;
+    }
+
+    const overwriteTargets = targets.filter(isDuplicateSkuError);
+    const normalTargets = targets.filter(
+      (product) => !isDuplicateSkuError(product),
+    );
+
+    if (overwriteTargets.length > 0) {
+      setOverwritePublish({
+        mode: "duplicateSku",
+        overwriteProductIds: overwriteTargets.map((product) => product._id),
+        overwriteSkus: overwriteTargets.map((product) => product.sku),
+        normalProductIds: normalTargets.map((product) => product._id),
+        clearSelectionOnSuccess: options?.clearSelectionOnSuccess === true,
+      });
+      return;
+    }
+
+    await publishProducts(targets.map((product) => product._id));
+  }
+
+  function requestRepublishProducts(
+    targets: Product[],
+    options?: { clearSelectionOnSuccess?: boolean },
+  ) {
+    if (targets.length === 0) {
+      return;
+    }
+
+    setOverwritePublish({
+      mode: "republish",
+      overwriteProductIds: targets.map((product) => product._id),
+      overwriteSkus: targets.map((product) => product.sku),
+      normalProductIds: [],
+      clearSelectionOnSuccess: options?.clearSelectionOnSuccess === true,
+    });
+  }
+
+  async function confirmOverwritePublish() {
+    if (!overwritePublish || isOverwritePublishing) {
+      return;
+    }
+
+    setIsOverwritePublishing(true);
+    try {
+      let remaining = overwritePublish;
+
+      if (remaining.overwriteProductIds.length > 0) {
+        await publishProducts(remaining.overwriteProductIds, {
+          forceOverwrite: true,
+        });
+        // Drop overwrite ids before the normal publish so a later failure
+        // retry does not re-queue products that already succeeded.
+        remaining = {
+          ...remaining,
+          overwriteProductIds: [],
+          overwriteSkus: [],
+        };
+        setOverwritePublish(
+          remaining.normalProductIds.length > 0 ? remaining : null,
+        );
+      }
+
+      if (remaining.normalProductIds.length > 0) {
+        await publishProducts(remaining.normalProductIds);
+      }
+
+      setOverwritePublish(null);
+      if (overwritePublish.clearSelectionOnSuccess) {
+        clearSelection();
+      }
+    } catch {
+      // The shared data provider reports the error and reverts optimistic state.
+    } finally {
+      setIsOverwritePublishing(false);
+    }
   }
 
   async function handleCaptureSelected() {
@@ -1815,7 +2008,14 @@ export function ProductsPage() {
               }
             >
               <Send />
-              Publish
+              {selectedNeedOverwrite ? "Publish & overwrite" : "Publish"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!selectedCanRepublish}
+              onSelect={() => handleRepublishSelected()}
+            >
+              <RefreshCw />
+              Republish
             </DropdownMenuItem>
             {viewFilter === VIEW_ARCHIVED ? (
               <DropdownMenuItem
@@ -2260,6 +2460,7 @@ export function ProductsPage() {
                   isDragSource={product._id === activeDragProductId}
                   isPending={isProductPending(product._id)}
                   key={row.id}
+                  lastError={resolveLastError(product)}
                   measureElement={cardVirtualizer.measureElement}
                   onAddToGroup={(target) => {
                     setRowSelection({ [target._id]: true });
@@ -2277,8 +2478,9 @@ export function ProductsPage() {
                   onDeleteShopifyFile={handleDeleteShopifyFileForProduct}
                   onOpenPhoto={(target) => setPhotoProductId(target._id)}
                   onPublish={(target) =>
-                    void publishProducts([target._id]).catch(() => undefined)
+                    void requestPublishProducts([target]).catch(() => undefined)
                   }
+                  onRepublish={(target) => requestRepublishProducts([target])}
                   onUnarchive={(target) =>
                     void handleUnarchiveProducts([target._id]).catch(
                       () => undefined,
@@ -2292,6 +2494,7 @@ export function ProductsPage() {
                     index: virtualRow.index,
                     projectedIndex,
                   })}
+                  shopDomain={shopDomain}
                   virtualRow={virtualRow}
                 />
               );
@@ -2340,7 +2543,7 @@ export function ProductsPage() {
                     shopifyProductId={activeDragProduct.shopifyProductId}
                   />
                   <ProductStatusIcons
-                    lastError={activeDragProduct.lastError}
+                    lastError={resolveLastError(activeDragProduct)}
                     needsPhotoReview={productNeedsPhotoReview(
                       activeDragProduct,
                       photosByProductId[activeDragProduct._id],
@@ -2348,6 +2551,7 @@ export function ProductsPage() {
                     pendingOperation={activeDragProduct.pendingOperation}
                     phase={activeDragProduct.phase}
                     saving={isProductPending(activeDragProduct._id)}
+                    shopDomain={shopDomain}
                   />
                   <span>{activeDragGroupLabel}</span>
                 </div>
@@ -2552,9 +2756,12 @@ export function ProductsPage() {
               }
               onOpenPhoto={() => setPhotoProductId(desktopRowMenu.product._id)}
               onPublish={() =>
-                void publishProducts([desktopRowMenu.product._id]).catch(
+                void requestPublishProducts([desktopRowMenu.product]).catch(
                   () => undefined,
                 )
+              }
+              onRepublish={() =>
+                requestRepublishProducts([desktopRowMenu.product])
               }
               onUnarchive={() =>
                 void handleUnarchiveProducts([
@@ -2567,6 +2774,109 @@ export function ProductsPage() {
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && !isOverwritePublishing) {
+            setOverwritePublish(null);
+          }
+        }}
+        open={overwritePublish !== null}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {overwritePublish?.mode === "republish"
+                ? overwritePublish.overwriteSkus.length === 1
+                  ? "Republish to Shopify?"
+                  : "Republish products to Shopify?"
+                : overwritePublish &&
+                    overwritePublish.overwriteProductIds.length === 0 &&
+                    overwritePublish.normalProductIds.length > 0
+                  ? "Finish publishing remaining products?"
+                  : overwritePublish?.overwriteSkus.length === 1
+                    ? "Overwrite existing Shopify product?"
+                    : "Overwrite existing Shopify products?"}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3 text-sm text-slate-500">
+                <p>
+                  {overwritePublish?.mode === "republish"
+                    ? "These products are already linked to Shopify. Republishing updates title, price, and tags on the existing listing, and attaches the current photos (existing Shopify media is kept)."
+                    : overwritePublish &&
+                        overwritePublish.overwriteProductIds.length === 0 &&
+                        overwritePublish.normalProductIds.length > 0
+                      ? "Overwrite publish already queued. Confirm to publish the remaining selected products normally."
+                      : "A Shopify product with a matching SKU already exists. Publishing updates that listing’s title, price, and tags, and attaches the current photos instead of creating a new product."}
+                </p>
+                {overwritePublish &&
+                overwritePublish.overwriteProductIds.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <p className="font-medium text-slate-700">
+                      The following products will be overwritten:
+                    </p>
+                    <ul className="max-h-40 list-disc space-y-1 overflow-y-auto pl-5 font-mono text-xs text-slate-700">
+                      {overwritePublish.overwriteProductIds.map(
+                        (productId, index) => (
+                          <li key={productId}>
+                            {overwritePublish.overwriteSkus[index] ?? productId}
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  </div>
+                ) : null}
+                {overwritePublish &&
+                overwritePublish.mode === "duplicateSku" &&
+                overwritePublish.normalProductIds.length > 0 ? (
+                  <p>
+                    {overwritePublish.overwriteProductIds.length === 0
+                      ? overwritePublish.normalProductIds.length === 1
+                        ? "1 product still needs to publish normally."
+                        : `${overwritePublish.normalProductIds.length.toLocaleString()} products still need to publish normally.`
+                      : overwritePublish.normalProductIds.length === 1
+                        ? "1 other selected product will publish normally."
+                        : `${overwritePublish.normalProductIds.length.toLocaleString()} other selected products will publish normally.`}
+                  </p>
+                ) : null}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              disabled={isOverwritePublishing}
+              onClick={() => setOverwritePublish(null)}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={isOverwritePublishing}
+              onClick={() =>
+                void confirmOverwritePublish().catch(() => undefined)
+              }
+              type="button"
+            >
+              {isOverwritePublishing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {overwritePublish?.mode === "republish"
+                    ? "Republishing…"
+                    : "Publishing…"}
+                </>
+              ) : overwritePublish?.mode === "republish" ? (
+                "Republish"
+              ) : overwritePublish &&
+                overwritePublish.overwriteProductIds.length === 0 ? (
+                "Publish remaining"
+              ) : (
+                "Publish & overwrite"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,12 +1,14 @@
-import { Archive, ArchiveRestore, FolderPlus, Send, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, FolderPlus, RefreshCw, Send, Trash2 } from "lucide-react";
 import {
   canPublishProduct,
+  canRepublishProduct,
   listOriginals,
   type ProductPhoto,
 } from "../lib/product-photo";
 import {
   canArchive,
   isArchived,
+  isDuplicateSkuError,
   type LastError,
 } from "../lib/product-state";
 import { DropdownMenuItem } from "./ui/dropdown-menu";
@@ -21,6 +23,7 @@ type Product = {
   pendingOperation?: string | null;
   phase: "imported" | "captured" | "published";
   shopifyFileId?: string | null;
+  shopifyProductId?: string | null;
   shopifyStatus?: string | null;
   sku: string;
 };
@@ -33,6 +36,7 @@ export function ProductRowActionItems({
   onDeleteShopifyFile,
   onOpenPhoto,
   onPublish,
+  onRepublish,
   onUnarchive,
   photos,
   product,
@@ -45,6 +49,7 @@ export function ProductRowActionItems({
   onDeleteShopifyFile: () => void;
   onOpenPhoto?: () => void;
   onPublish: () => void;
+  onRepublish: () => void;
   onUnarchive: () => void;
   photos?: ProductPhoto[] | null;
   product: Product;
@@ -52,24 +57,25 @@ export function ProductRowActionItems({
   const archived = isArchived(product);
   const archiveAllowed = canArchive(product);
   const photosLoading = photos === undefined;
+  const productFields = {
+    aiImageStatus: product.aiImageStatus,
+    aiShopifyFileId: product.aiShopifyFileId ?? undefined,
+    needsPhotoReview: product.needsPhotoReview,
+    pendingOperation: product.pendingOperation ?? undefined,
+    phase: product.phase,
+    shopifyFileId: product.shopifyFileId ?? undefined,
+    shopifyProductId: product.shopifyProductId ?? undefined,
+  };
   const canPublish =
-    !photosLoading &&
-    canPublishProduct(
-      {
-        aiImageStatus: product.aiImageStatus,
-        aiShopifyFileId: product.aiShopifyFileId ?? undefined,
-        needsPhotoReview: product.needsPhotoReview,
-        pendingOperation: product.pendingOperation ?? undefined,
-        phase: product.phase,
-        shopifyFileId: product.shopifyFileId ?? undefined,
-      },
-      photos,
-    );
+    !photosLoading && canPublishProduct(productFields, photos);
+  const canRepublish =
+    !photosLoading && canRepublishProduct(productFields, photos);
   const hasPhotoRows = (photos?.length ?? 0) > 0;
   const originalCount = hasPhotoRows ? listOriginals(photos ?? []).length : 0;
   // Only treat as legacy once photos have resolved to an empty list.
   const isLegacyOnly =
     !photosLoading && !hasPhotoRows && Boolean(product.shopifyFileId);
+  const publishOverwrite = isDuplicateSkuError(product);
 
   return (
     <>
@@ -77,13 +83,23 @@ export function ProductRowActionItems({
         <FolderPlus />
         Add to group
       </DropdownMenuItem>
-      <DropdownMenuItem
-        disabled={!canPublish || archived || photosLoading}
-        onSelect={onPublish}
-      >
-        <Send />
-        Publish
-      </DropdownMenuItem>
+      {canRepublish ? (
+        <DropdownMenuItem
+          disabled={photosLoading}
+          onSelect={onRepublish}
+        >
+          <RefreshCw />
+          Republish
+        </DropdownMenuItem>
+      ) : (
+        <DropdownMenuItem
+          disabled={!canPublish || archived || photosLoading}
+          onSelect={onPublish}
+        >
+          <Send />
+          {publishOverwrite ? "Publish & overwrite" : "Publish"}
+        </DropdownMenuItem>
+      )}
       {archived ? (
         <DropdownMenuItem onSelect={onUnarchive}>
           <ArchiveRestore />

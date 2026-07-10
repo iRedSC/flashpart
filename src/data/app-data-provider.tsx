@@ -108,6 +108,7 @@ type AppDataContextValue = {
   ) => Promise<{ assigned: number } | null>;
   publishProducts: (
     productIds: Id<"products">[],
+    options?: { forceOverwrite?: boolean },
   ) => Promise<{ queued: number } | null>;
   setDuplicatePolicy: (
     duplicatePolicy: DuplicatePolicy,
@@ -896,7 +897,7 @@ export function AppDataProvider({
               : `Assigning ${productIds.length.toLocaleString()} products to group`,
           productIds,
         }),
-      publishProducts: (productIds) =>
+      publishProducts: (productIds, options) =>
         runOptimistic({
           apply: (state) => ({
             ...state,
@@ -907,13 +908,18 @@ export function AppDataProvider({
           }),
           commit: () =>
             publishProductsMutation({
+              forceOverwrite: options?.forceOverwrite === true ? true : undefined,
               productIds,
               sessionToken: session.sessionToken,
             }),
           label:
             productIds.length === 1
-              ? "Queuing Shopify draft"
-              : `Queuing ${productIds.length.toLocaleString()} Shopify drafts`,
+              ? options?.forceOverwrite
+                ? "Queuing Shopify republish"
+                : "Queuing Shopify draft"
+              : options?.forceOverwrite
+                ? `Queuing ${productIds.length.toLocaleString()} Shopify republishes`
+                : `Queuing ${productIds.length.toLocaleString()} Shopify drafts`,
           productIds,
         }),
       setDuplicatePolicy: (duplicatePolicy) =>

@@ -17,6 +17,8 @@ export type LastError = {
   message: string;
   operation?: PendingOperation;
   at: number;
+  /** Shopify product GID/id when code is duplicateSku. */
+  existingShopifyProductId?: string;
 };
 
 export type ProductStateFields = {
@@ -139,6 +141,13 @@ export function isGroupCaptureComplete(
 
 export function hasActiveError(product: { lastError?: LastError }): boolean {
   return product.lastError !== undefined;
+}
+
+/** True when the last publish failed because a Shopify product already has this SKU. */
+export function isDuplicateSkuError(product: {
+  lastError?: LastError;
+}): boolean {
+  return product.lastError?.code === "duplicateSku";
 }
 
 export function isArchived(product: { archivedAt?: number }): boolean {

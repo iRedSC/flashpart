@@ -32,6 +32,8 @@ export const lastError = v.object({
   message: v.string(),
   operation: v.optional(pendingOperation),
   at: v.number(),
+  /** Shopify product GID/id when code is duplicateSku. */
+  existingShopifyProductId: v.optional(v.string()),
 });
 
 export const captureStatus = v.union(
@@ -59,6 +61,8 @@ export type LastError = {
   message: string;
   operation?: PendingOperation;
   at: number;
+  /** Shopify product GID/id when code is duplicateSku. */
+  existingShopifyProductId?: string;
 };
 
 export function isArchived(product: { archivedAt?: number }): boolean {

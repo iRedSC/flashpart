@@ -64,6 +64,8 @@ export const enqueueCreateDrafts = mutation({
   args: {
     sessionToken: v.string(),
     productIds: v.array(v.id("products")),
+    /** Update existing Shopify products with matching SKUs instead of blocking. */
+    forceOverwrite: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const userId = await requireSessionUser(ctx, args.sessionToken);
@@ -89,7 +91,13 @@ export const enqueueCreateDrafts = mutation({
     for (const productId of args.productIds) {
       const product = await ctx.db.get(productId);
 
-      if (!product || product.shopifyProductId) {
+      if (!product) {
+        continue;
+      }
+
+      // Already linked to Shopify: only allow when the caller explicitly
+      // force-overwrites (republish / duplicate-SKU overwrite).
+      if (product.shopifyProductId && args.forceOverwrite !== true) {
         continue;
       }
 
@@ -131,15 +139,22 @@ export const enqueueCreateDrafts = mutation({
         continue;
       }
 
+      // Legacy republish: after the first publish, AI fields are cleared and
+      // shopifyFileId already points at the hosted publish file.
+      const legacyRepublishReady =
+        args.forceOverwrite === true &&
+        Boolean(product.shopifyProductId) &&
+        Boolean(product.shopifyFileId);
+
       if (
-        product.aiImageStatus !== "ready" ||
-        !product.aiShopifyFileId
+        !legacyRepublishReady &&
+        (product.aiImageStatus !== "ready" || !product.aiShopifyFileId)
       ) {
         aiNotReadyProducts.push(product);
         continue;
       }
 
-      if (product.needsPhotoReview) {
+      if (!legacyRepublishReady && product.needsPhotoReview) {
         needsReviewProducts.push(product);
         continue;
       }
@@ -197,6 +212,7 @@ export const enqueueCreateDrafts = mutation({
         type: "createShopifyDraft",
         status: "queued",
         attempts: 0,
+        forceOverwrite: args.forceOverwrite === true ? true : undefined,
         createdAt: now,
         updatedAt: now,
       });
@@ -272,12 +288,17 @@ export const jobPayload = internalQuery({
       }
     }
 
+    const duplicatePolicy =
+      job.forceOverwrite === true
+        ? ("updateExisting" as const)
+        : (settings?.duplicatePolicy ?? "blockExisting");
+
     return {
       connection,
       job,
       product,
       settings: {
-        duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",
+        duplicatePolicy,
         shopifyDefaultTags: settings?.shopifyDefaultTags,
         shopifyProductType: settings?.shopifyProductType ?? "Part",
         shopifyPublishTarget: settings?.shopifyPublishTarget ?? "draft",
@@ -463,6 +484,7 @@ export const markJobBlockedExistingSku = internalMutation({
           message,
           operation: "publishing",
           at: now,
+          existingShopifyProductId: args.existingShopifyProductId,
         },
         now,
       ),
@@ -590,12 +612,21 @@ export const processQueuedJob = internalAction({
           );
         }
       } else {
-        if (!payload.product.aiShopifyFileId) {
+        // First publish needs a ready AI file. Republish of a legacy product
+        // reuses shopifyFileId (already the hosted publish file after success).
+        const legacyPublishFileId =
+          payload.product.aiShopifyFileId ??
+          (payload.job.forceOverwrite === true &&
+          payload.product.shopifyProductId
+            ? payload.product.shopifyFileId
+            : undefined);
+
+        if (!legacyPublishFileId) {
           throw new Error("Generate an AI photo before publishing.");
         }
 
         originalShopifyFileId = payload.product.shopifyFileId;
-        publishFileId = payload.product.aiShopifyFileId;
+        publishFileId = legacyPublishFileId;
 
         if (!originalShopifyFileId) {
           throw new Error("Capture a Shopify-hosted photo before publishing.");
@@ -608,10 +639,24 @@ export const processQueuedJob = internalAction({
         throw new Error("SKU must contain letters or numbers to become a Shopify handle.");
       }
 
-      const existing = await findProductBySku(
+      const existingBySku = await findProductBySku(
         payload.connection,
         payload.product.sku,
       );
+      // Prefer the linked Shopify product when republishing so a local SKU
+      // change still updates the same listing instead of creating a duplicate.
+      // Only reuse a SKU-lookup variantId when it belongs to that same product.
+      const existing = payload.product.shopifyProductId
+        ? {
+            productId: payload.product.shopifyProductId,
+            variantId:
+              payload.product.shopifyVariantId ??
+              (existingBySku != null &&
+              existingBySku.productId === payload.product.shopifyProductId
+                ? existingBySku.variantId
+                : undefined),
+          }
+        : existingBySku;
 
       if (existing && payload.settings.duplicatePolicy === "blockExisting") {
         await ctx.runMutation(listingJobModel.markJobBlockedExistingSku, {
