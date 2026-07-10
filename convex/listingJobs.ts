@@ -655,7 +655,10 @@ export const processQueuedJob = internalAction({
         payload.product.tags,
       );
       const vendor = payload.product.vendor?.trim() || undefined;
+      const descriptionHtml =
+        payload.product.description?.trim() || undefined;
       const shopifyListing = {
+        ...(descriptionHtml ? { descriptionHtml } : {}),
         handle,
         productType,
         publishTarget,
