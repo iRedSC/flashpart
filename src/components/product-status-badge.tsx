@@ -51,6 +51,9 @@ export function StatusIcon({
       window.matchMedia("(hover: hover)").matches,
     [],
   );
+  // Touch devices need a tap target; keyboard focus is only useful there.
+  // Hover-capable pointers use mouse enter/leave and should not add tab stops.
+  const tapToggle = !hoverCapable;
   const tooltipText = reason ? `${label} — ${reason}` : label;
 
   const updatePosition = React.useCallback(() => {
@@ -106,7 +109,7 @@ export function StatusIcon({
   }, [open, updatePosition, tooltipText]);
 
   React.useEffect(() => {
-    if (!open || hoverCapable) {
+    if (!open || !tapToggle) {
       return;
     }
 
@@ -123,7 +126,7 @@ export function StatusIcon({
 
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [hoverCapable, open]);
+  }, [open, tapToggle]);
 
   return (
     <span
@@ -135,22 +138,32 @@ export function StatusIcon({
       <span
         aria-label={tooltipText}
         className={cn(
-          "inline-flex h-6 w-6 shrink-0 cursor-default items-center justify-center rounded-md",
+          "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
           toneClass,
+          tapToggle && "cursor-default",
         )}
+        onBlur={() => {
+          if (tapToggle) {
+            setOpen(false);
+          }
+        }}
         onClick={() => {
-          if (!hoverCapable) {
+          if (tapToggle) {
             setOpen((value) => !value);
           }
         }}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            setOpen((value) => !value);
-          }
-        }}
+        role={tapToggle ? "button" : undefined}
+        tabIndex={tapToggle ? 0 : undefined}
+        onKeyDown={
+          tapToggle
+            ? (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setOpen((value) => !value);
+                }
+              }
+            : undefined
+        }
       >
         {icon}
       </span>
