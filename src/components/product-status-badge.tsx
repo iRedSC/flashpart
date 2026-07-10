@@ -25,7 +25,7 @@ const phaseIconClass: Record<ProductPhase, string> = {
   published: "bg-green-100 text-green-600",
 };
 
-function StatusIcon({
+export function StatusIcon({
   className,
   icon,
   label,
@@ -51,7 +51,6 @@ function StatusIcon({
       window.matchMedia("(hover: hover)").matches,
     [],
   );
-  const interactive = Boolean(reason);
   const tooltipText = reason ? `${label} — ${reason}` : label;
 
   const updatePosition = React.useCallback(() => {
@@ -84,7 +83,7 @@ function StatusIcon({
   }, []);
 
   React.useLayoutEffect(() => {
-    if (!open || !reason) {
+    if (!open) {
       setPosition(null);
       return;
     }
@@ -104,7 +103,7 @@ function StatusIcon({
       window.removeEventListener("scroll", handleScrollOrResize, true);
       window.removeEventListener("resize", handleScrollOrResize);
     };
-  }, [open, reason, updatePosition, tooltipText]);
+  }, [open, updatePosition, tooltipText]);
 
   React.useEffect(() => {
     if (!open || hoverCapable) {
@@ -136,32 +135,26 @@ function StatusIcon({
       <span
         aria-label={tooltipText}
         className={cn(
-          "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
+          "inline-flex h-6 w-6 shrink-0 cursor-default items-center justify-center rounded-md",
           toneClass,
-          interactive && "cursor-default",
         )}
         onClick={() => {
-          if (interactive && !hoverCapable) {
+          if (!hoverCapable) {
             setOpen((value) => !value);
           }
         }}
-        role={interactive ? "button" : undefined}
-        tabIndex={interactive ? 0 : undefined}
-        title={interactive ? undefined : label}
-        onKeyDown={
-          interactive
-            ? (event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  setOpen((value) => !value);
-                }
-              }
-            : undefined
-        }
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setOpen((value) => !value);
+          }
+        }}
       >
         {icon}
       </span>
-      {open && reason
+      {open
         ? createPortal(
             <span
               className={cn(
@@ -242,12 +235,11 @@ export function ProductStatusIcons({
         />
       ) : null}
       {saving ? (
-        <span
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-amber-50 text-amber-800"
-          title="Saving changes"
-        >
-          <Cloud className="h-3.5 w-3.5" />
-        </span>
+        <StatusIcon
+          icon={<Cloud className="h-3.5 w-3.5" />}
+          label="Saving changes"
+          toneClass="bg-amber-50 text-amber-800"
+        />
       ) : null}
     </div>
   );

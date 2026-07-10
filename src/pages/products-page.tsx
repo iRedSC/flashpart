@@ -51,6 +51,7 @@ import { DescriptionField } from "../components/description-field";
 import { ProductRowActionItems } from "../components/product-row-actions";
 import {
   ProductStatusIcons,
+  StatusIcon,
 } from "../components/product-status-badge";
 import { Button } from "../components/ui/button";
 import {
@@ -285,22 +286,20 @@ function ShopifyListingIcon({
 }) {
   if (shopifyProductId) {
     return (
-      <span
-        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-green-100 text-green-600"
-        title={`Published · ${shopifyProductId}`}
-      >
-        <Globe className="h-3.5 w-3.5" />
-      </span>
+      <StatusIcon
+        icon={<Globe className="h-3.5 w-3.5" />}
+        label={`Published · ${shopifyProductId}`}
+        toneClass="bg-green-100 text-green-600"
+      />
     );
   }
 
   return (
-    <span
-      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-100 text-blue-600"
-      title="Draft pending"
-    >
-      <FilePenLine className="h-3.5 w-3.5" />
-    </span>
+    <StatusIcon
+      icon={<FilePenLine className="h-3.5 w-3.5" />}
+      label="Draft pending"
+      toneClass="bg-blue-100 text-blue-600"
+    />
   );
 }
 
