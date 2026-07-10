@@ -17,6 +17,8 @@ export type LastError = {
   message: string;
   operation?: PendingOperation;
   at: number;
+  /** Shopify product GID/id when code is duplicateSku. */
+  existingShopifyProductId?: string;
 };
 
 export type ProductStateFields = {

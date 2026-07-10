@@ -89,7 +89,7 @@ import {
   needsAiPhotoApproval,
   type ProductPhoto,
 } from "../lib/product-photo";
-import { canArchive, isArchived, isDuplicateSkuError, isGroupArchived } from "../lib/product-state";
+import { canArchive, isArchived, isDuplicateSkuError, isGroupArchived, type LastError } from "../lib/product-state";
 import { cn } from "../lib/utils";
 import { normalizeTagString } from "../lib/tags";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -357,6 +357,7 @@ function MobileProductCard({
   groupLabel,
   isDragSource,
   isPending,
+  lastError,
   measureElement,
   onAddToGroup,
   onArchive,
@@ -369,12 +370,14 @@ function MobileProductCard({
   photos,
   row,
   shiftY,
+  shopDomain,
   virtualRow,
 }: {
   dragActive: boolean;
   groupLabel: string;
   isDragSource: boolean;
   isPending: boolean;
+  lastError?: LastError;
   measureElement: (node: Element | null) => void;
   onAddToGroup: (product: Product) => void;
   onArchive: (product: Product) => void;
@@ -387,6 +390,7 @@ function MobileProductCard({
   photos?: ProductPhoto[] | null;
   row: Row<Product>;
   shiftY: number;
+  shopDomain?: string | null;
   virtualRow: VirtualItem;
 }) {
   const product = row.original;
@@ -457,11 +461,12 @@ function MobileProductCard({
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
             <ShopifyListingIcon shopifyProductId={product.shopifyProductId} />
             <ProductStatusIcons
-              lastError={product.lastError}
+              lastError={lastError ?? product.lastError}
               needsPhotoReview={productNeedsPhotoReview(product, photos)}
               pendingOperation={product.pendingOperation}
               phase={product.phase}
               saving={isPending}
+              shopDomain={shopDomain}
             />
             <span>{groupLabel}</span>
           </div>
@@ -682,12 +687,15 @@ export function ProductsPage() {
     isLoading,
     products,
     importProducts,
+    listingJobs,
     publishProducts,
     reorderProducts,
     session,
+    shopifyConnection,
     unarchiveProducts,
     updateProduct,
   } = useAppData();
+  const shopDomain = shopifyConnection?.shopDomain ?? null;
   const navigate = useNavigate();
   const parentRef = React.useRef<HTMLDivElement>(null);
   const desktopBodyRef = React.useRef<HTMLTableSectionElement>(null);
@@ -809,6 +817,50 @@ export function ProductsPage() {
     () => new Map(groups.map((group) => [group._id, group.name])),
     [groups],
   );
+  const existingShopifyProductIdByProductId = React.useMemo(() => {
+    const map = new Map<string, string>();
+
+    // listingJobs are ordered newest-first; keep the first match per product.
+    for (const job of listingJobs) {
+      if (job.status !== "failed" || map.has(job.productId)) {
+        continue;
+      }
+
+      const result = job.result as
+        | { existingShopifyProductId?: unknown }
+        | null
+        | undefined;
+      const existingId = result?.existingShopifyProductId;
+
+      if (typeof existingId === "string" && existingId) {
+        map.set(job.productId, existingId);
+      }
+    }
+
+    return map;
+  }, [listingJobs]);
+
+  function resolveLastError(product: Product): LastError | undefined {
+    const lastError = product.lastError;
+    if (!lastError || lastError.code !== "duplicateSku") {
+      return lastError;
+    }
+
+    if (lastError.existingShopifyProductId) {
+      return lastError;
+    }
+
+    const fromJob = existingShopifyProductIdByProductId.get(product._id);
+    if (!fromJob) {
+      return lastError;
+    }
+
+    return {
+      ...lastError,
+      existingShopifyProductId: fromJob,
+    };
+  }
+
   const columns = React.useMemo(
     () => [
       columnHelper.display({
@@ -1035,7 +1087,7 @@ export function ProductsPage() {
         header: "Status",
         cell: ({ row }) => (
           <ProductStatusIcons
-            lastError={row.original.lastError}
+            lastError={resolveLastError(row.original)}
             needsPhotoReview={productNeedsPhotoReview(
               row.original,
               photosByProductId[row.original._id],
@@ -1043,6 +1095,7 @@ export function ProductsPage() {
             pendingOperation={row.original.pendingOperation}
             phase={row.original.phase}
             saving={isProductPending(row.original._id)}
+            shopDomain={shopDomain}
           />
         ),
       }),
@@ -1101,9 +1154,11 @@ export function ProductsPage() {
     ],
     [
       activeDescriptionId,
+      existingShopifyProductIdByProductId,
       groupById,
       isProductPending,
       photosByProductId,
+      shopDomain,
       updateProduct,
     ],
   );
@@ -2313,6 +2368,7 @@ export function ProductsPage() {
                   isDragSource={product._id === activeDragProductId}
                   isPending={isProductPending(product._id)}
                   key={row.id}
+                  lastError={resolveLastError(product)}
                   measureElement={cardVirtualizer.measureElement}
                   onAddToGroup={(target) => {
                     setRowSelection({ [target._id]: true });
@@ -2345,6 +2401,7 @@ export function ProductsPage() {
                     index: virtualRow.index,
                     projectedIndex,
                   })}
+                  shopDomain={shopDomain}
                   virtualRow={virtualRow}
                 />
               );
@@ -2393,7 +2450,7 @@ export function ProductsPage() {
                     shopifyProductId={activeDragProduct.shopifyProductId}
                   />
                   <ProductStatusIcons
-                    lastError={activeDragProduct.lastError}
+                    lastError={resolveLastError(activeDragProduct)}
                     needsPhotoReview={productNeedsPhotoReview(
                       activeDragProduct,
                       photosByProductId[activeDragProduct._id],
@@ -2401,6 +2458,7 @@ export function ProductsPage() {
                     pendingOperation={activeDragProduct.pendingOperation}
                     phase={activeDragProduct.phase}
                     saving={isProductPending(activeDragProduct._id)}
+                    shopDomain={shopDomain}
                   />
                   <span>{activeDragGroupLabel}</span>
                 </div>

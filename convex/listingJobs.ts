@@ -471,6 +471,7 @@ export const markJobBlockedExistingSku = internalMutation({
           message,
           operation: "publishing",
           at: now,
+          existingShopifyProductId: args.existingShopifyProductId,
         },
         now,
       ),

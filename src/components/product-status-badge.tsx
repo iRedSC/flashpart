@@ -17,6 +17,7 @@ import {
   type PendingOperation,
   type ProductPhase,
 } from "../lib/product-state";
+import { shopifyAdminProductUrl } from "../lib/shopify-admin";
 import { cn } from "../lib/utils";
 
 const phaseIconClass: Record<ProductPhase, string> = {
@@ -27,12 +28,14 @@ const phaseIconClass: Record<ProductPhase, string> = {
 
 export function StatusIcon({
   className,
+  href,
   icon,
   label,
   reason,
   toneClass,
 }: {
   className?: string;
+  href?: string | null;
   icon: React.ReactNode;
   label: string;
   reason?: string;
@@ -53,8 +56,15 @@ export function StatusIcon({
   );
   // Touch devices need a tap target; keyboard focus is only useful there.
   // Hover-capable pointers use mouse enter/leave and should not add tab stops.
-  const tapToggle = !hoverCapable;
-  const tooltipText = reason ? `${label} — ${reason}` : label;
+  // Links are always focusable for keyboard access to the admin URL.
+  const tapToggle = !hoverCapable && !href;
+  const tooltipText = href
+    ? reason
+      ? `${label} — ${reason} Open in Shopify admin.`
+      : `${label} — Open in Shopify admin`
+    : reason
+      ? `${label} — ${reason}`
+      : label;
 
   const updatePosition = React.useCallback(() => {
     const trigger = containerRef.current?.getBoundingClientRect();
@@ -128,6 +138,12 @@ export function StatusIcon({
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [open, tapToggle]);
 
+  const iconClassName = cn(
+    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
+    toneClass,
+    href ? "cursor-pointer" : tapToggle && "cursor-default",
+  );
+
   return (
     <span
       className={cn("relative inline-flex", className)}
@@ -135,38 +151,55 @@ export function StatusIcon({
       onMouseLeave={() => hoverCapable && setOpen(false)}
       ref={containerRef}
     >
-      <span
-        aria-label={tooltipText}
-        className={cn(
-          "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
-          toneClass,
-          tapToggle && "cursor-default",
-        )}
-        onBlur={() => {
-          if (tapToggle) {
-            setOpen(false);
-          }
-        }}
-        onClick={() => {
-          if (tapToggle) {
-            setOpen((value) => !value);
-          }
-        }}
-        role={tapToggle ? "button" : undefined}
-        tabIndex={tapToggle ? 0 : undefined}
-        onKeyDown={
-          tapToggle
-            ? (event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  setOpen((value) => !value);
+      {href ? (
+        <a
+          aria-label={tooltipText}
+          className={iconClassName}
+          href={href}
+          onClick={(event) => {
+            // Keep row/card click handlers from treating this as a selection.
+            event.stopPropagation();
+          }}
+          onContextMenu={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          rel="noreferrer"
+          target="_blank"
+          title={tooltipText}
+        >
+          {icon}
+        </a>
+      ) : (
+        <span
+          aria-label={tooltipText}
+          className={iconClassName}
+          onBlur={() => {
+            if (tapToggle) {
+              setOpen(false);
+            }
+          }}
+          onClick={() => {
+            if (tapToggle) {
+              setOpen((value) => !value);
+            }
+          }}
+          role={tapToggle ? "button" : undefined}
+          tabIndex={tapToggle ? 0 : undefined}
+          title={tooltipText}
+          onKeyDown={
+            tapToggle
+              ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setOpen((value) => !value);
+                  }
                 }
-              }
-            : undefined
-        }
-      >
-        {icon}
-      </span>
+              : undefined
+          }
+        >
+          {icon}
+        </span>
+      )}
       {open
         ? createPortal(
             <span
@@ -213,6 +246,7 @@ export function ProductStatusIcons({
   lastError,
   needsPhotoReview,
   saving,
+  shopDomain,
   className,
 }: {
   phase: ProductPhase;
@@ -220,8 +254,17 @@ export function ProductStatusIcons({
   lastError?: LastError;
   needsPhotoReview?: boolean;
   saving?: boolean;
+  shopDomain?: string | null;
   className?: string;
 }) {
+  const duplicateSkuAdminUrl =
+    lastError?.code === "duplicateSku"
+      ? shopifyAdminProductUrl(
+          shopDomain,
+          lastError.existingShopifyProductId,
+        )
+      : null;
+
   return (
     <div className={cn("flex items-center gap-1", className)}>
       <PhaseIcon phase={phase} />
@@ -241,6 +284,7 @@ export function ProductStatusIcons({
       ) : null}
       {lastError ? (
         <StatusIcon
+          href={duplicateSkuAdminUrl}
           icon={<AlertCircle className="h-3.5 w-3.5" />}
           label="Couldn't complete last action"
           reason={lastError.message}
