@@ -9,6 +9,7 @@ import {
 import type { Id } from "./_generated/dataModel";
 import { requireSessionUser } from "./authUtils";
 import {
+  aiImageModel,
   buildAiGenerationRequest,
   GEMINI_IMAGE_MODEL,
   imageSizeForModel,
@@ -266,6 +267,7 @@ export const processingPayload = internalQuery({
     productId: v.id("products"),
     originalPhotoId: v.optional(v.id("productPhotos")),
     isRegeneration: v.optional(v.boolean()),
+    modelOverride: v.optional(aiImageModel),
   },
   handler: async (ctx, args) => {
     const product = await ctx.db.get(args.productId);
@@ -279,8 +281,9 @@ export const processingPayload = internalQuery({
       .withIndex("by_key", (q) => q.eq("key", "singleton"))
       .unique();
     const aiSettings = resolveAiImageSettings(settings);
-    const aiImageModel =
-      args.isRegeneration && aiSettings.aiImageUpgradeModelOnRegen
+    const aiImageModelId = args.modelOverride
+      ? args.modelOverride
+      : args.isRegeneration && aiSettings.aiImageUpgradeModelOnRegen
         ? upgradeAiImageModel(aiSettings.aiImageModel)
         : aiSettings.aiImageModel;
 
@@ -304,7 +307,7 @@ export const processingPayload = internalQuery({
       return {
         mode: "convex" as const,
         aiImageEditStrength: aiSettings.aiImageEditStrength,
-        aiImageModel,
+        aiImageModel: aiImageModelId,
         aiImagePrompt:
           existingAi?.aiPrompt ??
           product.aiImagePrompt ??
@@ -325,7 +328,7 @@ export const processingPayload = internalQuery({
     return {
       mode: "shopify" as const,
       aiImageEditStrength: aiSettings.aiImageEditStrength,
-      aiImageModel,
+      aiImageModel: aiImageModelId,
       aiImagePrompt:
         product.aiImagePrompt ?? aiSettings.aiImageDefaultPrompt,
       aiShopifyFileId: product.aiShopifyFileId,
@@ -365,12 +368,14 @@ export const markReady = internalMutation({
     ),
     aiShopifyFileUrl: v.optional(v.string()),
     productId: v.id("products"),
+    aiImageModel: v.optional(aiImageModel),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
 
     await ctx.db.patch(args.productId, {
       aiImageError: undefined,
+      aiImageModel: args.aiImageModel,
       aiImageStatus: "ready",
       aiShopifyFileId: args.aiShopifyFileId,
       aiShopifyFileStatus: args.aiShopifyFileStatus,
@@ -492,6 +497,8 @@ export const processProductPhoto = internalAction({
     aiGeneration: v.optional(v.number()),
     /** True when triggered by an explicit regen (may upgrade model). */
     isRegeneration: v.optional(v.boolean()),
+    /** Explicit model choice from regen context menu; skips upgrade ladder. */
+    modelOverride: v.optional(aiImageModel),
   },
   handler: async (ctx, args) => {
     if (args.originalPhotoId) {
@@ -521,6 +528,7 @@ export const processProductPhoto = internalAction({
           productId: args.productId,
           originalPhotoId: args.originalPhotoId,
           isRegeneration: args.isRegeneration,
+          modelOverride: args.modelOverride,
         });
 
         if (!payload || payload.mode !== "convex") {
@@ -592,6 +600,7 @@ export const processProductPhoto = internalAction({
             storageId,
             url: url ?? undefined,
             aiGeneration,
+            aiModel: payload.aiImageModel,
           });
         } catch (markError) {
           // Row missing or mark failed after store: drop the new blob.
@@ -625,6 +634,7 @@ export const processProductPhoto = internalAction({
         ctx.runQuery(photoAiModel.processingPayload, {
           productId: args.productId,
           isRegeneration: args.isRegeneration,
+          modelOverride: args.modelOverride,
         }),
         ctx.runQuery(shopifyModel.firstActiveConnection, {}),
       ]);
@@ -675,6 +685,7 @@ export const processProductPhoto = internalAction({
         aiShopifyFileStatus: aiFile.status,
         aiShopifyFileUrl: aiFile.url,
         productId: args.productId,
+        aiImageModel: payload.aiImageModel,
       });
     } catch (error) {
       await ctx.runMutation(photoAiModel.markFailed, {
@@ -694,6 +705,7 @@ export const regenerate = mutation({
     prompt: v.string(),
     sessionToken: v.string(),
     originalPhotoId: v.optional(v.id("productPhotos")),
+    model: v.optional(aiImageModel),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
@@ -741,6 +753,7 @@ export const regenerate = mutation({
         originalPhotoId: args.originalPhotoId,
         aiGeneration,
         isRegeneration: true,
+        modelOverride: args.model,
         previousShopifyFileIds:
           previousShopifyFileIds.length > 0
             ? previousShopifyFileIds
@@ -780,6 +793,7 @@ export const regenerate = mutation({
       previousAiShopifyFileId,
       productId: args.productId,
       isRegeneration: true,
+      modelOverride: args.model,
     });
   },
 });
@@ -789,6 +803,7 @@ export const regenerateForPhoto = mutation({
     sessionToken: v.string(),
     originalPhotoId: v.id("productPhotos"),
     prompt: v.optional(v.string()),
+    model: v.optional(aiImageModel),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
@@ -833,6 +848,7 @@ export const regenerateForPhoto = mutation({
       originalPhotoId: args.originalPhotoId,
       aiGeneration,
       isRegeneration: true,
+      modelOverride: args.model,
       previousShopifyFileIds:
         previousShopifyFileIds.length > 0
           ? previousShopifyFileIds

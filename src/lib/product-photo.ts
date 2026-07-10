@@ -4,10 +4,12 @@ export {
   DEFAULT_AI_IMAGE_EDIT_STRENGTH,
   DEFAULT_AI_IMAGE_MODEL,
   DEFAULT_AI_IMAGE_PROMPT,
+  aiImageModelShortLabel,
   type AiImageEditStrength,
   type AiImageModelId,
 } from "./ai-image-settings";
 
+import type { AiImageModelId } from "./ai-image-settings";
 import { compareProductDisplayOrder } from "./product-state";
 
 export type ProductPhotoKind = "original" | "ai";
@@ -28,6 +30,7 @@ export type ProductPhoto = {
   aiStatus?: "pending" | "generating" | "ready" | "failed";
   aiPrompt?: string;
   aiError?: string;
+  aiModel?: AiImageModelId;
   captureId?: string;
   createdAt: number;
   updatedAt: number;

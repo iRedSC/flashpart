@@ -10,6 +10,8 @@ import {
 } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
+import type { AiImageModelId } from "./photoAiConstants";
+import { aiImageModel } from "./photoAiConstants";
 import { productErrorFields } from "./productState";
 import { photoKind, shopifyFileStatus } from "./schema";
 import {
@@ -523,6 +525,7 @@ export async function applyMarkAiReady(
     aiGeneration: number;
     aiPhotoId?: Id<"productPhotos">;
     originalPhotoId?: Id<"productPhotos">;
+    aiModel?: AiImageModelId;
   },
 ) {
   let aiPhoto: Doc<"productPhotos">;
@@ -551,6 +554,7 @@ export async function applyMarkAiReady(
   // file id that the next promote would resume.
   await ctx.db.patch(aiPhoto._id, {
     aiError: undefined,
+    aiModel: args.aiModel,
     aiStatus: "ready",
     approvedAt: undefined,
     shopifyFileDeletedAt: undefined,
@@ -1425,6 +1429,7 @@ export const markAiReadyInternal = internalMutation({
     aiGeneration: v.number(),
     aiPhotoId: v.optional(v.id("productPhotos")),
     originalPhotoId: v.optional(v.id("productPhotos")),
+    aiModel: v.optional(aiImageModel),
   },
   handler: async (ctx, args) => {
     return await applyMarkAiReady(ctx, args);
