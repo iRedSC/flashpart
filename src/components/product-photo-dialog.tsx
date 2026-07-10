@@ -1033,7 +1033,7 @@ export function ProductPhotoDialog({
               </span>
             ) : null}
             {activeView === "ai" && aiModelLabel && displayUrl && !previewUrl ? (
-              <span className="absolute bottom-3 left-3 text-[10px] font-medium tracking-wide text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+              <span className="absolute bottom-3 left-3 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium tracking-wide text-white backdrop-blur">
                 {aiModelLabel}
               </span>
             ) : null}
