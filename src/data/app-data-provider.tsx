@@ -1482,15 +1482,22 @@ export function AppDataProvider({
         }
 
         return runOptimistic({
-          apply: (state) => ({
-            ...state,
-            products: updateProductFields(state.products, args.productId, {
-              lastError: undefined,
-              needsPhotoReview: undefined,
-              pendingOperation: "aiImageGenerating",
-              phase: "captured",
-            }),
-          }),
+          apply: (state) => {
+            const linked =
+              product.phase === "published" || Boolean(product.shopifyProductId);
+
+            return {
+              ...state,
+              products: updateProductFields(state.products, args.productId, {
+                lastError: undefined,
+                needsPhotoReview: undefined,
+                pendingOperation: "aiImageGenerating",
+                ...(linked
+                  ? { needsRepublish: true }
+                  : { phase: "captured" as const }),
+              }),
+            };
+          },
           commit: async () => {
             const uploaded = await uploadCaptureFile(args.file);
             try {

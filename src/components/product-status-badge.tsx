@@ -285,7 +285,7 @@ export function ProductStatusIcons({
           toneClass="bg-amber-50 text-amber-800"
         />
       ) : null}
-      {needsRepublish && phase === "published" ? (
+      {needsRepublish ? (
         <StatusIcon
           icon={<Pencil className="h-3.5 w-3.5" />}
           label="Edited"
@@ -331,7 +331,7 @@ export function ProductStatusBadge({
   const modifiers = [
     pendingOperation ? pendingOperationLabels[pendingOperation] : null,
     needsPhotoReview ? "Review photo" : null,
-    needsRepublish && phase === "published" ? "Edited" : null,
+    needsRepublish ? "Edited" : null,
     lastError ? lastError.message : null,
   ].filter(Boolean);
 

@@ -248,19 +248,34 @@ export const importProducts = mutation({
           continue;
         }
 
+        const description =
+          product.description !== undefined
+            ? product.description.trim() || undefined
+            : undefined;
+        const vendor =
+          product.vendor !== undefined
+            ? product.vendor.trim() || undefined
+            : undefined;
+        const tags =
+          product.tags !== undefined
+            ? normalizeTagString(product.tags)
+            : undefined;
+
+        const changed =
+          name !== existing.name ||
+          product.price !== existing.price ||
+          (product.description !== undefined &&
+            description !== existing.description) ||
+          (product.vendor !== undefined && vendor !== existing.vendor) ||
+          (product.tags !== undefined && tags !== existing.tags);
+
         await ctx.db.patch(existing._id, {
           name,
           price: product.price,
-          ...(product.description !== undefined
-            ? { description: product.description.trim() || undefined }
-            : {}),
-          ...(product.vendor !== undefined
-            ? { vendor: product.vendor.trim() || undefined }
-            : {}),
-          ...(product.tags !== undefined
-            ? { tags: normalizeTagString(product.tags) }
-            : {}),
-          ...needsRepublishPatch(existing),
+          ...(product.description !== undefined ? { description } : {}),
+          ...(product.vendor !== undefined ? { vendor } : {}),
+          ...(product.tags !== undefined ? { tags } : {}),
+          ...(changed ? needsRepublishPatch(existing) : {}),
           updatedAt: now,
         });
         overwritten += 1;
