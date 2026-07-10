@@ -1,4 +1,5 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import {
   AlertCircle,
   Camera,
@@ -38,7 +39,12 @@ function StatusIcon({
   toneClass: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [position, setPosition] = React.useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const containerRef = React.useRef<HTMLSpanElement>(null);
+  const tooltipRef = React.useRef<HTMLSpanElement>(null);
   const hoverCapable = React.useMemo(
     () =>
       typeof window !== "undefined" &&
@@ -46,6 +52,59 @@ function StatusIcon({
     [],
   );
   const interactive = Boolean(reason);
+  const tooltipText = reason ? `${label} — ${reason}` : label;
+
+  const updatePosition = React.useCallback(() => {
+    const trigger = containerRef.current?.getBoundingClientRect();
+    if (!trigger) {
+      return;
+    }
+
+    const tooltip = tooltipRef.current?.getBoundingClientRect();
+    const tooltipWidth = tooltip?.width ?? 240;
+    const tooltipHeight = tooltip?.height ?? 40;
+    const gap = 6;
+    const padding = 8;
+
+    let left = trigger.left + trigger.width / 2 - tooltipWidth / 2;
+    left = Math.max(
+      padding,
+      Math.min(left, window.innerWidth - tooltipWidth - padding),
+    );
+
+    const spaceAbove = trigger.top - padding;
+    const placeBelow =
+      spaceAbove < tooltipHeight + gap &&
+      window.innerHeight - trigger.bottom > spaceAbove;
+    const top = placeBelow
+      ? trigger.bottom + gap
+      : trigger.top - tooltipHeight - gap;
+
+    setPosition({ left, top });
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!open || !reason) {
+      setPosition(null);
+      return;
+    }
+
+    updatePosition();
+    // Re-measure after the tooltip has its real size.
+    const frame = window.requestAnimationFrame(() => updatePosition());
+
+    function handleScrollOrResize() {
+      updatePosition();
+    }
+
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [open, reason, updatePosition, tooltipText]);
 
   React.useEffect(() => {
     if (!open || hoverCapable) {
@@ -53,9 +112,14 @@ function StatusIcon({
     }
 
     function handlePointerDown(event: PointerEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setOpen(false);
+      const target = event.target as Node;
+      if (
+        containerRef.current?.contains(target) ||
+        tooltipRef.current?.contains(target)
+      ) {
+        return;
       }
+      setOpen(false);
     }
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -70,7 +134,7 @@ function StatusIcon({
       ref={containerRef}
     >
       <span
-        aria-label={reason ? `${label}: ${reason}` : label}
+        aria-label={tooltipText}
         className={cn(
           "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
           toneClass,
@@ -83,7 +147,7 @@ function StatusIcon({
         }}
         role={interactive ? "button" : undefined}
         tabIndex={interactive ? 0 : undefined}
-        title={reason ? `${label} — ${reason}` : label}
+        title={interactive ? undefined : label}
         onKeyDown={
           interactive
             ? (event) => {
@@ -97,14 +161,26 @@ function StatusIcon({
       >
         {icon}
       </span>
-      {open && reason ? (
-        <span
-          className="absolute bottom-full left-1/2 z-50 mb-1.5 max-w-[240px] -translate-x-1/2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-normal text-slate-950 shadow-md"
-          role="tooltip"
-        >
-          {reason}
-        </span>
-      ) : null}
+      {open && reason
+        ? createPortal(
+            <span
+              className={cn(
+                "pointer-events-none fixed z-50 max-w-[240px] rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-normal text-slate-950 shadow-md",
+                !position && "invisible",
+              )}
+              ref={tooltipRef}
+              role="tooltip"
+              style={
+                position
+                  ? { left: position.left, top: position.top }
+                  : { left: 0, top: 0 }
+              }
+            >
+              {tooltipText}
+            </span>,
+            document.body,
+          )
+        : null}
     </span>
   );
 }
