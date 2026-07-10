@@ -470,6 +470,7 @@ export async function findProductBySku(
 export async function createShopifyProduct(
   connection: ShopifyConnection,
   input: {
+    descriptionHtml?: string;
     handle: string;
     productType?: string;
     publishTarget: "draft" | "published";
@@ -503,6 +504,9 @@ export async function createShopifyProduct(
     }`,
     {
       product: {
+        ...(input.descriptionHtml
+          ? { descriptionHtml: input.descriptionHtml }
+          : {}),
         handle: input.handle,
         ...(input.productType ? { productType: input.productType } : {}),
         status: input.publishTarget === "published" ? "ACTIVE" : "DRAFT",
@@ -523,6 +527,7 @@ export async function createShopifyProduct(
 export async function updateShopifyProduct(
   connection: ShopifyConnection,
   input: {
+    descriptionHtml?: string;
     handle: string;
     productId: string;
     productType?: string;
@@ -557,6 +562,9 @@ export async function updateShopifyProduct(
     }`,
     {
       product: {
+        ...(input.descriptionHtml
+          ? { descriptionHtml: input.descriptionHtml }
+          : {}),
         handle: input.handle,
         id: input.productId,
         ...(input.productType ? { productType: input.productType } : {}),
