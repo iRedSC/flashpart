@@ -732,6 +732,9 @@ export function ProductsPage() {
   const [addPartSku, setAddPartSku] = React.useState("");
   const [addPartName, setAddPartName] = React.useState("");
   const [addPartPrice, setAddPartPrice] = React.useState("");
+  const [addPartDescription, setAddPartDescription] = React.useState("");
+  const [addPartVendor, setAddPartVendor] = React.useState("");
+  const [addPartTags, setAddPartTags] = React.useState("");
   const [addPartError, setAddPartError] = React.useState<string | null>(null);
   const [isAddingPart, setIsAddingPart] = React.useState(false);
   const [importMode, setImportMode] =
@@ -1448,6 +1451,9 @@ export function ProductsPage() {
     setAddPartSku("");
     setAddPartName("");
     setAddPartPrice("");
+    setAddPartDescription("");
+    setAddPartVendor("");
+    setAddPartTags("");
     setAddPartError(null);
     setIsAddingPart(false);
   }
@@ -1456,6 +1462,9 @@ export function ProductsPage() {
     const sku = addPartSku.trim();
     const name = addPartName.trim();
     const price = Number.parseFloat(addPartPrice);
+    const description = addPartDescription.trim() || undefined;
+    const vendor = addPartVendor.trim() || undefined;
+    const tags = normalizeTagString(addPartTags);
 
     if (!sku || !name) {
       setAddPartError("SKU and name are required.");
@@ -1471,7 +1480,14 @@ export function ProductsPage() {
     setAddPartError(null);
 
     try {
-      await createProduct({ name, price, sku });
+      await createProduct({
+        description,
+        name,
+        price,
+        sku,
+        tags,
+        vendor,
+      });
       setAddPartOpen(false);
       resetAddPartDialog();
     } catch (error) {
@@ -1870,7 +1886,8 @@ export function ProductsPage() {
           <DialogHeader>
             <DialogTitle>Add part</DialogTitle>
             <DialogDescription>
-              Enter the SKU, name, and price for a new product.
+              Enter the SKU, name, and price for a new product. Description,
+              vendor, and tags are optional.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1915,6 +1932,52 @@ export function ProductsPage() {
                 }}
                 placeholder="12.99"
                 value={addPartPrice}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label
+                className="text-sm font-medium"
+                htmlFor="add-part-description"
+              >
+                Description
+              </label>
+              <textarea
+                className="min-h-24 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-offset-white placeholder:text-slate-500 focus-visible:ring-2 focus-visible:ring-slate-950 focus-visible:ring-offset-2"
+                id="add-part-description"
+                onChange={(event) => {
+                  setAddPartDescription(event.currentTarget.value);
+                  setAddPartError(null);
+                }}
+                placeholder="Optional product description"
+                value={addPartDescription}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium" htmlFor="add-part-vendor">
+                Vendor
+              </label>
+              <Input
+                id="add-part-vendor"
+                onChange={(event) => {
+                  setAddPartVendor(event.currentTarget.value);
+                  setAddPartError(null);
+                }}
+                placeholder="Optional vendor"
+                value={addPartVendor}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium" htmlFor="add-part-tags">
+                Tags
+              </label>
+              <Input
+                id="add-part-tags"
+                onChange={(event) => {
+                  setAddPartTags(event.currentTarget.value);
+                  setAddPartError(null);
+                }}
+                placeholder="tag-one, tag-two"
+                value={addPartTags}
               />
             </div>
             {addPartError ? (

@@ -829,6 +829,9 @@ export function AppDataProvider({
       createProduct: (args) => {
         const sku = args.sku.trim();
         const name = args.name.trim();
+        const description = args.description?.trim() || undefined;
+        const vendor = args.vendor?.trim() || undefined;
+        const tags = args.tags?.trim() || undefined;
         const now = Date.now();
         const optimisticId =
           `optimistic-product-${operationIdRef.current}` as Id<"products">;
@@ -841,6 +844,7 @@ export function AppDataProvider({
                 _creationTime: now,
                 _id: optimisticId,
                 createdAt: now,
+                description,
                 lastError: undefined,
                 needsPhotoReview: undefined,
                 name,
@@ -848,17 +852,22 @@ export function AppDataProvider({
                 phase: "imported",
                 price: args.price,
                 sku,
+                tags,
                 updatedAt: now,
+                vendor,
               },
               ...state.products,
             ],
           }),
           commit: () =>
             createProductMutation({
+              description,
               name,
               price: args.price,
               sessionToken: session.sessionToken,
               sku,
+              tags,
+              vendor,
             }),
           label: "Adding product",
         });
