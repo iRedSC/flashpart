@@ -8,16 +8,19 @@ export const AI_IMAGE_MODEL_OPTIONS = [
     description: "Best balance of quality and speed for product photo edits.",
     id: "gemini-3.1-flash-image",
     label: "Gemini 3.1 Flash Image",
+    shortLabel: "3.1",
   },
   {
     description: "Fastest and cheapest. Less reliable for reference-photo edits.",
     id: "gemini-3.1-flash-lite-image",
     label: "Gemini 3.1 Flash Lite Image",
+    shortLabel: "3.1 Lite",
   },
   {
     description: "Earlier flash image model.",
     id: "gemini-2.5-flash-image",
     label: "Gemini 2.5 Flash Image",
+    shortLabel: "2.5",
   },
 ] as const;
 
@@ -56,4 +59,11 @@ export function upgradeAiImageModel(model: AiImageModelId): AiImageModelId {
   }
 
   return model;
+}
+
+export function aiImageModelShortLabel(model: AiImageModelId): string {
+  return (
+    AI_IMAGE_MODEL_OPTIONS.find((option) => option.id === model)?.shortLabel ??
+    model
+  );
 }

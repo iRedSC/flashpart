@@ -195,10 +195,12 @@ type AppDataContextValue = {
   regenerateAiImageForPhoto: (args: {
     originalPhotoId: Id<"productPhotos">;
     prompt?: string;
+    model?: AiImageModelId;
   }) => Promise<null>;
   regenerateAiImage: (args: {
     productId: Id<"products">;
     prompt: string;
+    model?: AiImageModelId;
   }) => Promise<null>;
   approvePhoto: (productId: Id<"products">) => Promise<null>;
 };
@@ -1525,7 +1527,7 @@ export function AppDataProvider({
           productIds: productId ? [productId] : undefined,
         });
       },
-      regenerateAiImageForPhoto: ({ originalPhotoId, prompt }) => {
+      regenerateAiImageForPhoto: ({ originalPhotoId, prompt, model }) => {
         const productId = findProductIdForPhoto(
           photosByProductId,
           originalPhotoId,
@@ -1537,6 +1539,7 @@ export function AppDataProvider({
             await regenerateAiImageForPhotoMutation({
               originalPhotoId,
               prompt,
+              model,
               sessionToken: session.sessionToken,
             });
             return null;
@@ -1545,7 +1548,7 @@ export function AppDataProvider({
           productIds: productId ? [productId] : undefined,
         });
       },
-      regenerateAiImage: ({ productId, prompt }) =>
+      regenerateAiImage: ({ productId, prompt, model }) =>
         runOptimistic({
           apply: (state) => ({
             ...state,
@@ -1561,6 +1564,7 @@ export function AppDataProvider({
             regenerateAiImageMutation({
               productId,
               prompt,
+              model,
               sessionToken: session.sessionToken,
             }),
           label: "Regenerating AI photo",

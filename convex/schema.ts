@@ -171,6 +171,8 @@ export default defineSchema({
     aiImageStatus: v.optional(aiImageStatus),
     aiImagePrompt: v.optional(v.string()),
     aiImageError: v.optional(v.string()),
+    /** Gemini image model that produced the legacy product-level AI photo. */
+    aiImageModel: v.optional(aiImageModel),
     shopifyProductId: v.optional(v.string()),
     shopifyProductHandle: v.optional(v.string()),
     shopifyVariantId: v.optional(v.string()),
@@ -233,6 +235,8 @@ export default defineSchema({
     aiGeneration: v.optional(v.number()),
     aiPrompt: v.optional(v.string()),
     aiError: v.optional(v.string()),
+    /** Gemini image model that produced this AI photo. */
+    aiModel: v.optional(aiImageModel),
     captureId: v.optional(v.id("captures")),
     createdAt: v.number(),
     updatedAt: v.number(),

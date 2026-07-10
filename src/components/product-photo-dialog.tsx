@@ -22,11 +22,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { useAppData } from "../data/app-data-provider";
 import { cropImageFileToSquare } from "../lib/capture-image";
 import { convexApi } from "../lib/convex-api";
 import { triggerHaptic } from "../lib/haptics";
-import { DEFAULT_AI_IMAGE_PROMPT } from "../lib/ai-image-settings";
+import {
+  AI_IMAGE_MODEL_OPTIONS,
+  aiImageModelShortLabel,
+  DEFAULT_AI_IMAGE_PROMPT,
+  type AiImageModelId,
+} from "../lib/ai-image-settings";
 import {
   buildPhotoPairs,
   findNextPhotoNeedingApproval,
@@ -43,6 +54,8 @@ import type { Id } from "../../convex/_generated/dataModel";
 type Product = ReturnType<typeof useAppData>["products"][number];
 type PhotoView = "original" | "ai";
 type CaptureMode = "add" | "replace";
+
+const REGEN_LONG_PRESS_MS = 500;
 
 type DialogPair = {
   original: ProductPhoto | null;
@@ -66,6 +79,7 @@ function toClientPhoto(photo: {
   aiStatus?: ProductPhoto["aiStatus"];
   aiPrompt?: string;
   aiError?: string;
+  aiModel?: AiImageModelId;
   captureId?: Id<"captures">;
   createdAt: number;
   updatedAt: number;
@@ -85,6 +99,7 @@ function toClientPhoto(photo: {
     aiStatus: photo.aiStatus,
     aiPrompt: photo.aiPrompt,
     aiError: photo.aiError,
+    aiModel: photo.aiModel,
     captureId: photo.captureId,
     createdAt: photo.createdAt,
     updatedAt: photo.updatedAt,
@@ -151,6 +166,7 @@ function buildDialogPairs(
             aiStatus: product.aiImageStatus,
             aiPrompt: product.aiImagePrompt,
             aiError: product.aiImageError,
+            aiModel: product.aiImageModel as AiImageModelId | undefined,
             createdAt: now,
             updatedAt: now,
           }
@@ -245,6 +261,12 @@ export function ProductPhotoDialog({
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [stage, setStage] = React.useState<string | null>(null);
+  const [regenModelMenu, setRegenModelMenu] = React.useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const regenLongPressTimerRef = React.useRef<number | null>(null);
+  const suppressRegenClickRef = React.useRef(false);
   const previewUrl = React.useMemo(
     () => (captureFile ? URL.createObjectURL(captureFile) : null),
     [captureFile],
@@ -415,6 +437,14 @@ export function ProductPhotoDialog({
   const aiUrl =
     currentPair?.ai?.url ??
     (currentPair?.isLegacy ? (product?.aiShopifyFileUrl ?? null) : null);
+  const aiModelUsed =
+    currentPair?.ai?.aiModel ??
+    (currentPair?.isLegacy
+      ? (product?.aiImageModel as AiImageModelId | undefined)
+      : undefined);
+  const aiModelLabel = aiModelUsed
+    ? aiImageModelShortLabel(aiModelUsed)
+    : null;
   const aiGenerating = currentPair
     ? pairAiGenerating(currentPair, product)
     : false;
@@ -663,7 +693,7 @@ export function ProductPhotoDialog({
     }
   }
 
-  async function handleRegenerate() {
+  async function handleRegenerate(model?: AiImageModelId) {
     if (!product || isBusy || aiGenerating) {
       return;
     }
@@ -678,11 +708,13 @@ export function ProductPhotoDialog({
         await regenerateAiImageForPhoto({
           originalPhotoId: currentPair.original._id as Id<"productPhotos">,
           prompt,
+          model,
         });
       } else {
         await regenerateAiImage({
           productId: product._id,
           prompt,
+          model,
         });
       }
     } catch (caught) {
@@ -694,6 +726,21 @@ export function ProductPhotoDialog({
     } finally {
       setIsRegenerating(false);
     }
+  }
+
+  function clearRegenLongPressTimer() {
+    if (regenLongPressTimerRef.current != null) {
+      window.clearTimeout(regenLongPressTimerRef.current);
+      regenLongPressTimerRef.current = null;
+    }
+  }
+
+  function openRegenModelMenu(x: number, y: number, fromLongPress = false) {
+    clearRegenLongPressTimer();
+    if (fromLongPress) {
+      suppressRegenClickRef.current = true;
+    }
+    setRegenModelMenu({ x, y });
   }
 
   async function resolveNextProductNeedingApproval(
@@ -985,6 +1032,11 @@ export function ProductPhotoDialog({
                 {pairPositionLabel}
               </span>
             ) : null}
+            {activeView === "ai" && aiModelLabel && displayUrl && !previewUrl ? (
+              <span className="absolute bottom-3 left-3 text-[10px] font-medium tracking-wide text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                {aiModelLabel}
+              </span>
+            ) : null}
             {activeView === "ai" && aiGenerating && displayUrl ? (
               <div className="absolute inset-0 flex items-center justify-center bg-black/35">
                 <Loader2 className="h-8 w-8 animate-spin text-white" />
@@ -1064,7 +1116,47 @@ export function ProductPhotoDialog({
                     photosLoading ||
                     (!originalUrl && !currentPair?.original)
                   }
-                  onClick={() => void handleRegenerate()}
+                  onClick={() => {
+                    if (suppressRegenClickRef.current) {
+                      suppressRegenClickRef.current = false;
+                      return;
+                    }
+                    void handleRegenerate();
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    if (
+                      isBusy ||
+                      aiGenerating ||
+                      photosLoading ||
+                      (!originalUrl && !currentPair?.original)
+                    ) {
+                      return;
+                    }
+                    openRegenModelMenu(event.clientX, event.clientY);
+                  }}
+                  onPointerCancel={clearRegenLongPressTimer}
+                  onPointerDown={(event) => {
+                    if (
+                      event.pointerType !== "touch" ||
+                      isBusy ||
+                      aiGenerating ||
+                      photosLoading ||
+                      (!originalUrl && !currentPair?.original)
+                    ) {
+                      return;
+                    }
+
+                    clearRegenLongPressTimer();
+                    const { clientX, clientY } = event;
+                    regenLongPressTimerRef.current = window.setTimeout(() => {
+                      regenLongPressTimerRef.current = null;
+                      triggerHaptic();
+                      openRegenModelMenu(clientX, clientY, true);
+                    }, REGEN_LONG_PRESS_MS);
+                  }}
+                  onPointerLeave={clearRegenLongPressTimer}
+                  onPointerUp={clearRegenLongPressTimer}
                   variant="outline"
                 >
                   {isRegenerating || aiGenerating ? (
@@ -1201,6 +1293,43 @@ export function ProductPhotoDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (!open) {
+            setRegenModelMenu(null);
+          }
+        }}
+        open={regenModelMenu !== null}
+      >
+        {regenModelMenu ? (
+          <DropdownMenuTrigger asChild>
+            <span
+              className="pointer-events-none fixed h-0 w-0"
+              style={{
+                left: regenModelMenu.x,
+                top: regenModelMenu.y,
+              }}
+            />
+          </DropdownMenuTrigger>
+        ) : null}
+        <DropdownMenuContent
+          align="start"
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          {AI_IMAGE_MODEL_OPTIONS.map((option) => (
+            <DropdownMenuItem
+              key={option.id}
+              onSelect={() => {
+                setRegenModelMenu(null);
+                void handleRegenerate(option.id);
+              }}
+            >
+              {option.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </>
   );
 }
