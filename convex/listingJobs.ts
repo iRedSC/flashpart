@@ -139,15 +139,22 @@ export const enqueueCreateDrafts = mutation({
         continue;
       }
 
+      // Legacy republish: after the first publish, AI fields are cleared and
+      // shopifyFileId already points at the hosted publish file.
+      const legacyRepublishReady =
+        args.forceOverwrite === true &&
+        Boolean(product.shopifyProductId) &&
+        Boolean(product.shopifyFileId);
+
       if (
-        product.aiImageStatus !== "ready" ||
-        !product.aiShopifyFileId
+        !legacyRepublishReady &&
+        (product.aiImageStatus !== "ready" || !product.aiShopifyFileId)
       ) {
         aiNotReadyProducts.push(product);
         continue;
       }
 
-      if (product.needsPhotoReview) {
+      if (!legacyRepublishReady && product.needsPhotoReview) {
         needsReviewProducts.push(product);
         continue;
       }
@@ -605,12 +612,21 @@ export const processQueuedJob = internalAction({
           );
         }
       } else {
-        if (!payload.product.aiShopifyFileId) {
+        // First publish needs a ready AI file. Republish of a legacy product
+        // reuses shopifyFileId (already the hosted publish file after success).
+        const legacyPublishFileId =
+          payload.product.aiShopifyFileId ??
+          (payload.job.forceOverwrite === true &&
+          payload.product.shopifyProductId
+            ? payload.product.shopifyFileId
+            : undefined);
+
+        if (!legacyPublishFileId) {
           throw new Error("Generate an AI photo before publishing.");
         }
 
         originalShopifyFileId = payload.product.shopifyFileId;
-        publishFileId = payload.product.aiShopifyFileId;
+        publishFileId = legacyPublishFileId;
 
         if (!originalShopifyFileId) {
           throw new Error("Capture a Shopify-hosted photo before publishing.");
@@ -629,11 +645,16 @@ export const processQueuedJob = internalAction({
       );
       // Prefer the linked Shopify product when republishing so a local SKU
       // change still updates the same listing instead of creating a duplicate.
+      // Only reuse a SKU-lookup variantId when it belongs to that same product.
       const existing = payload.product.shopifyProductId
         ? {
             productId: payload.product.shopifyProductId,
             variantId:
-              payload.product.shopifyVariantId ?? existingBySku?.variantId,
+              payload.product.shopifyVariantId ??
+              (existingBySku != null &&
+              existingBySku.productId === payload.product.shopifyProductId
+                ? existingBySku.variantId
+                : undefined),
           }
         : existingBySku;
 

@@ -343,6 +343,10 @@ function canQueueShopifyListing(
     return false;
   }
 
+  if (product.pendingOperation) {
+    return false;
+  }
+
   if (photos.length > 0) {
     const pairs = buildPhotoPairs(photos);
     // Match listingJobs gate: every original → paired AI with ready + approvedAt.
@@ -359,20 +363,21 @@ function canQueueShopifyListing(
           pair.original.status !== "failed",
       );
 
-    return (
-      product.phase === requiredPhase &&
-      everyOriginalHasApprovedReadyAi &&
-      !product.pendingOperation
-    );
+    return product.phase === requiredPhase && everyOriginalHasApprovedReadyAi;
   }
 
   // photos === [] — legacy product-level fields.
+  if (requiredPhase === "published") {
+    // After the first legacy publish, AI fields are cleared and shopifyFileId
+    // points at the already-hosted publish file — that is enough to republish.
+    return Boolean(product.shopifyFileId);
+  }
+
   return (
-    product.phase === requiredPhase &&
+    product.phase === "captured" &&
     Boolean(product.shopifyFileId) &&
     product.aiImageStatus === "ready" &&
     Boolean(product.aiShopifyFileId) &&
-    !product.needsPhotoReview &&
-    !product.pendingOperation
+    !product.needsPhotoReview
   );
 }

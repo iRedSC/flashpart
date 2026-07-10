@@ -85,7 +85,7 @@ export function ProductRowActionItems({
       </DropdownMenuItem>
       {canRepublish ? (
         <DropdownMenuItem
-          disabled={archived || photosLoading}
+          disabled={photosLoading}
           onSelect={onRepublish}
         >
           <RefreshCw />

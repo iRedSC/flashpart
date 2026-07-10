@@ -807,6 +807,7 @@ export function ProductsPage() {
     overwriteProductIds: Id<"products">[];
     overwriteSkus: string[];
     normalProductIds: Id<"products">[];
+    clearSelectionOnSuccess: boolean;
   } | null>(null);
   const [isOverwritePublishing, setIsOverwritePublishing] = React.useState(false);
   const focusNextCellRef = React.useRef<
@@ -1288,43 +1289,44 @@ export function ProductsPage() {
   );
   const photosBatchLoading =
     filteredProductIds.length > 0 && photosByProductIdQuery === undefined;
-  const selectedCanPublish =
-    !photosBatchLoading &&
-    hasSelection &&
-    viewFilter !== VIEW_ARCHIVED &&
-    selectedRows.every((row) =>
+  const selectedPublishTargets = selectedRows
+    .map((row) => row.original)
+    .filter((product) =>
       canPublishProduct(
         {
-          aiImageStatus: row.original.aiImageStatus,
-          aiShopifyFileId: row.original.aiShopifyFileId ?? undefined,
-          needsPhotoReview: row.original.needsPhotoReview,
-          pendingOperation: row.original.pendingOperation ?? undefined,
-          phase: row.original.phase,
-          shopifyFileId: row.original.shopifyFileId ?? undefined,
+          aiImageStatus: product.aiImageStatus,
+          aiShopifyFileId: product.aiShopifyFileId ?? undefined,
+          needsPhotoReview: product.needsPhotoReview,
+          pendingOperation: product.pendingOperation ?? undefined,
+          phase: product.phase,
+          shopifyFileId: product.shopifyFileId ?? undefined,
         },
-        photosByProductId[row.original._id],
+        photosByProductId[product._id],
       ),
     );
-  const selectedCanRepublish =
-    !photosBatchLoading &&
-    hasSelection &&
-    viewFilter !== VIEW_ARCHIVED &&
-    selectedRows.every((row) =>
+  const selectedRepublishTargets = selectedRows
+    .map((row) => row.original)
+    .filter((product) =>
       canRepublishProduct(
         {
-          aiImageStatus: row.original.aiImageStatus,
-          aiShopifyFileId: row.original.aiShopifyFileId ?? undefined,
-          needsPhotoReview: row.original.needsPhotoReview,
-          pendingOperation: row.original.pendingOperation ?? undefined,
-          phase: row.original.phase,
-          shopifyFileId: row.original.shopifyFileId ?? undefined,
-          shopifyProductId: row.original.shopifyProductId ?? undefined,
+          aiImageStatus: product.aiImageStatus,
+          aiShopifyFileId: product.aiShopifyFileId ?? undefined,
+          needsPhotoReview: product.needsPhotoReview,
+          pendingOperation: product.pendingOperation ?? undefined,
+          phase: product.phase,
+          shopifyFileId: product.shopifyFileId ?? undefined,
+          shopifyProductId: product.shopifyProductId ?? undefined,
         },
-        photosByProductId[row.original._id],
+        photosByProductId[product._id],
       ),
     );
-  const selectedNeedOverwrite = selectedRows.some((row) =>
-    isDuplicateSkuError(row.original),
+  // Enable when at least one selected row qualifies; actions only target those.
+  const selectedCanPublish =
+    !photosBatchLoading && selectedPublishTargets.length > 0;
+  const selectedCanRepublish =
+    !photosBatchLoading && selectedRepublishTargets.length > 0;
+  const selectedNeedOverwrite = selectedPublishTargets.some((product) =>
+    isDuplicateSkuError(product),
   );
   const activeDragIndex = activeDragProductId
     ? visibleIds.indexOf(activeDragProductId)
@@ -1550,14 +1552,15 @@ export function ProductsPage() {
   }
 
   async function handlePublishSelected() {
-    if (selectedProductIds.length === 0) {
+    if (selectedPublishTargets.length === 0) {
       return;
     }
 
-    const targets = selectedRows.map((row) => row.original);
-    const needsOverwrite = targets.some(isDuplicateSkuError);
+    const needsOverwrite = selectedPublishTargets.some(isDuplicateSkuError);
 
-    await requestPublishProducts(targets);
+    await requestPublishProducts(selectedPublishTargets, {
+      clearSelectionOnSuccess: true,
+    });
 
     // Keep selection while the overwrite confirmation dialog is open.
     if (!needsOverwrite) {
@@ -1565,15 +1568,20 @@ export function ProductsPage() {
     }
   }
 
-  async function handleRepublishSelected() {
-    if (selectedProductIds.length === 0) {
+  function handleRepublishSelected() {
+    if (selectedRepublishTargets.length === 0) {
       return;
     }
 
-    requestRepublishProducts(selectedRows.map((row) => row.original));
+    requestRepublishProducts(selectedRepublishTargets, {
+      clearSelectionOnSuccess: true,
+    });
   }
 
-  async function requestPublishProducts(targets: Product[]) {
+  async function requestPublishProducts(
+    targets: Product[],
+    options?: { clearSelectionOnSuccess?: boolean },
+  ) {
     if (targets.length === 0) {
       return;
     }
@@ -1589,6 +1597,7 @@ export function ProductsPage() {
         overwriteProductIds: overwriteTargets.map((product) => product._id),
         overwriteSkus: overwriteTargets.map((product) => product.sku),
         normalProductIds: normalTargets.map((product) => product._id),
+        clearSelectionOnSuccess: options?.clearSelectionOnSuccess === true,
       });
       return;
     }
@@ -1596,7 +1605,10 @@ export function ProductsPage() {
     await publishProducts(targets.map((product) => product._id));
   }
 
-  function requestRepublishProducts(targets: Product[]) {
+  function requestRepublishProducts(
+    targets: Product[],
+    options?: { clearSelectionOnSuccess?: boolean },
+  ) {
     if (targets.length === 0) {
       return;
     }
@@ -1606,28 +1618,43 @@ export function ProductsPage() {
       overwriteProductIds: targets.map((product) => product._id),
       overwriteSkus: targets.map((product) => product.sku),
       normalProductIds: [],
+      clearSelectionOnSuccess: options?.clearSelectionOnSuccess === true,
     });
   }
 
   async function confirmOverwritePublish() {
-    if (!overwritePublish) {
+    if (!overwritePublish || isOverwritePublishing) {
       return;
     }
 
     setIsOverwritePublishing(true);
     try {
-      if (overwritePublish.overwriteProductIds.length > 0) {
-        await publishProducts(overwritePublish.overwriteProductIds, {
+      let remaining = overwritePublish;
+
+      if (remaining.overwriteProductIds.length > 0) {
+        await publishProducts(remaining.overwriteProductIds, {
           forceOverwrite: true,
         });
+        // Drop overwrite ids before the normal publish so a later failure
+        // retry does not re-queue products that already succeeded.
+        remaining = {
+          ...remaining,
+          overwriteProductIds: [],
+          overwriteSkus: [],
+        };
+        setOverwritePublish(
+          remaining.normalProductIds.length > 0 ? remaining : null,
+        );
       }
 
-      if (overwritePublish.normalProductIds.length > 0) {
-        await publishProducts(overwritePublish.normalProductIds);
+      if (remaining.normalProductIds.length > 0) {
+        await publishProducts(remaining.normalProductIds);
       }
 
       setOverwritePublish(null);
-      clearSelection();
+      if (overwritePublish.clearSelectionOnSuccess) {
+        clearSelection();
+      }
     } catch {
       // The shared data provider reports the error and reverts optimistic state.
     } finally {
@@ -2769,8 +2796,8 @@ export function ProductsPage() {
               <div className="space-y-3 text-sm text-slate-500">
                 <p>
                   {overwritePublish?.mode === "republish"
-                    ? "These products are already linked to Shopify. Republishing will overwrite the existing listing data (title, price, tags, and photos)."
-                    : "A Shopify product with a matching SKU already exists. Publishing will overwrite that listing instead of creating a new one."}
+                    ? "These products are already linked to Shopify. Republishing updates title, price, and tags on the existing listing, and attaches the current photos (existing Shopify media is kept)."
+                    : "A Shopify product with a matching SKU already exists. Publishing updates that listing’s title, price, and tags, and attaches the current photos instead of creating a new product."}
                 </p>
                 {overwritePublish ? (
                   <div className="space-y-1.5">
@@ -2778,8 +2805,10 @@ export function ProductsPage() {
                       The following products will be overwritten:
                     </p>
                     <ul className="max-h-40 list-disc space-y-1 overflow-y-auto pl-5 font-mono text-xs text-slate-700">
-                      {overwritePublish.overwriteSkus.map((sku) => (
-                        <li key={sku}>{sku}</li>
+                      {overwritePublish.overwriteProductIds.map((productId, index) => (
+                        <li key={productId}>
+                          {overwritePublish.overwriteSkus[index] ?? productId}
+                        </li>
                       ))}
                     </ul>
                   </div>
