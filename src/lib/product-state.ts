@@ -141,6 +141,13 @@ export function hasActiveError(product: { lastError?: LastError }): boolean {
   return product.lastError !== undefined;
 }
 
+/** True when the last publish failed because a Shopify product already has this SKU. */
+export function isDuplicateSkuError(product: {
+  lastError?: LastError;
+}): boolean {
+  return product.lastError?.code === "duplicateSku";
+}
+
 export function isArchived(product: { archivedAt?: number }): boolean {
   return product.archivedAt !== undefined;
 }

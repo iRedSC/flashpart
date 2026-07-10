@@ -7,6 +7,7 @@ import {
 import {
   canArchive,
   isArchived,
+  isDuplicateSkuError,
   type LastError,
 } from "../lib/product-state";
 import { DropdownMenuItem } from "./ui/dropdown-menu";
@@ -70,6 +71,7 @@ export function ProductRowActionItems({
   // Only treat as legacy once photos have resolved to an empty list.
   const isLegacyOnly =
     !photosLoading && !hasPhotoRows && Boolean(product.shopifyFileId);
+  const publishOverwrite = isDuplicateSkuError(product);
 
   return (
     <>
@@ -82,7 +84,7 @@ export function ProductRowActionItems({
         onSelect={onPublish}
       >
         <Send />
-        Publish
+        {publishOverwrite ? "Publish & overwrite" : "Publish"}
       </DropdownMenuItem>
       {archived ? (
         <DropdownMenuItem onSelect={onUnarchive}>

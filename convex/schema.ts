@@ -265,6 +265,8 @@ export default defineSchema({
       v.literal("failed"),
     ),
     attempts: v.number(),
+    /** When true, update an existing Shopify product with the same SKU instead of blocking. */
+    forceOverwrite: v.optional(v.boolean()),
     triggerRunId: v.optional(v.string()),
     error: v.optional(v.string()),
     result: v.optional(v.any()),

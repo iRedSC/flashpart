@@ -89,7 +89,7 @@ import {
   needsAiPhotoApproval,
   type ProductPhoto,
 } from "../lib/product-photo";
-import { canArchive, isArchived, isGroupArchived } from "../lib/product-state";
+import { canArchive, isArchived, isDuplicateSkuError, isGroupArchived } from "../lib/product-state";
 import { cn } from "../lib/utils";
 import { normalizeTagString } from "../lib/tags";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -790,6 +790,11 @@ export function ProductsPage() {
     x: number;
     y: number;
   } | null>(null);
+  const [overwritePublish, setOverwritePublish] = React.useState<{
+    productIds: Id<"products">[];
+    skus: string[];
+  } | null>(null);
+  const [isOverwritePublishing, setIsOverwritePublishing] = React.useState(false);
   const focusNextCellRef = React.useRef<
     (currentId: Id<"products">, columnId: EditableColumnId) => void
   >(() => {});
@@ -1239,6 +1244,9 @@ export function ProductsPage() {
         photosByProductId[row.original._id],
       ),
     );
+  const selectedNeedOverwrite = selectedRows.some((row) =>
+    isDuplicateSkuError(row.original),
+  );
   const activeDragIndex = activeDragProductId
     ? visibleIds.indexOf(activeDragProductId)
     : -1;
@@ -1467,8 +1475,53 @@ export function ProductsPage() {
       return;
     }
 
-    await publishProducts(selectedProductIds);
-    clearSelection();
+    const targets = selectedRows.map((row) => row.original);
+    const needsOverwrite = targets.some(isDuplicateSkuError);
+
+    await requestPublishProducts(targets);
+
+    // Keep selection while the overwrite confirmation dialog is open.
+    if (!needsOverwrite) {
+      clearSelection();
+    }
+  }
+
+  async function requestPublishProducts(targets: Product[]) {
+    if (targets.length === 0) {
+      return;
+    }
+
+    const productIds = targets.map((product) => product._id);
+    const overwriteTargets = targets.filter(isDuplicateSkuError);
+
+    if (overwriteTargets.length > 0) {
+      setOverwritePublish({
+        productIds,
+        skus: overwriteTargets.map((product) => product.sku),
+      });
+      return;
+    }
+
+    await publishProducts(productIds);
+  }
+
+  async function confirmOverwritePublish() {
+    if (!overwritePublish) {
+      return;
+    }
+
+    setIsOverwritePublishing(true);
+    try {
+      await publishProducts(overwritePublish.productIds, {
+        forceOverwrite: true,
+      });
+      setOverwritePublish(null);
+      clearSelection();
+    } catch {
+      // The shared data provider reports the error and reverts optimistic state.
+    } finally {
+      setIsOverwritePublishing(false);
+    }
   }
 
   async function handleCaptureSelected() {
@@ -1815,7 +1868,7 @@ export function ProductsPage() {
               }
             >
               <Send />
-              Publish
+              {selectedNeedOverwrite ? "Publish & overwrite" : "Publish"}
             </DropdownMenuItem>
             {viewFilter === VIEW_ARCHIVED ? (
               <DropdownMenuItem
@@ -2277,7 +2330,7 @@ export function ProductsPage() {
                   onDeleteShopifyFile={handleDeleteShopifyFileForProduct}
                   onOpenPhoto={(target) => setPhotoProductId(target._id)}
                   onPublish={(target) =>
-                    void publishProducts([target._id]).catch(() => undefined)
+                    void requestPublishProducts([target]).catch(() => undefined)
                   }
                   onUnarchive={(target) =>
                     void handleUnarchiveProducts([target._id]).catch(
@@ -2552,7 +2605,7 @@ export function ProductsPage() {
               }
               onOpenPhoto={() => setPhotoProductId(desktopRowMenu.product._id)}
               onPublish={() =>
-                void publishProducts([desktopRowMenu.product._id]).catch(
+                void requestPublishProducts([desktopRowMenu.product]).catch(
                   () => undefined,
                 )
               }
@@ -2567,6 +2620,54 @@ export function ProductsPage() {
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && !isOverwritePublishing) {
+            setOverwritePublish(null);
+          }
+        }}
+        open={overwritePublish !== null}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Overwrite existing Shopify product?</DialogTitle>
+            <DialogDescription>
+              {overwritePublish && overwritePublish.skus.length === 1
+                ? `A Shopify product with SKU ${overwritePublish.skus[0]} already exists. Publishing will update that product instead of creating a new one.`
+                : overwritePublish
+                  ? `${overwritePublish.skus.length.toLocaleString()} selected products already exist on Shopify with matching SKUs. Publishing will update those products instead of creating new ones.`
+                  : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              disabled={isOverwritePublishing}
+              onClick={() => setOverwritePublish(null)}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={isOverwritePublishing}
+              onClick={() =>
+                void confirmOverwritePublish().catch(() => undefined)
+              }
+              type="button"
+            >
+              {isOverwritePublishing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Publishing…
+                </>
+              ) : (
+                "Publish & overwrite"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

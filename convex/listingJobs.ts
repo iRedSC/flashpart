@@ -64,6 +64,8 @@ export const enqueueCreateDrafts = mutation({
   args: {
     sessionToken: v.string(),
     productIds: v.array(v.id("products")),
+    /** Update existing Shopify products with matching SKUs instead of blocking. */
+    forceOverwrite: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const userId = await requireSessionUser(ctx, args.sessionToken);
@@ -197,6 +199,7 @@ export const enqueueCreateDrafts = mutation({
         type: "createShopifyDraft",
         status: "queued",
         attempts: 0,
+        forceOverwrite: args.forceOverwrite === true ? true : undefined,
         createdAt: now,
         updatedAt: now,
       });
@@ -272,12 +275,17 @@ export const jobPayload = internalQuery({
       }
     }
 
+    const duplicatePolicy =
+      job.forceOverwrite === true
+        ? ("updateExisting" as const)
+        : (settings?.duplicatePolicy ?? "blockExisting");
+
     return {
       connection,
       job,
       product,
       settings: {
-        duplicatePolicy: settings?.duplicatePolicy ?? "blockExisting",
+        duplicatePolicy,
         shopifyDefaultTags: settings?.shopifyDefaultTags,
         shopifyProductType: settings?.shopifyProductType ?? "Part",
         shopifyPublishTarget: settings?.shopifyPublishTarget ?? "draft",
