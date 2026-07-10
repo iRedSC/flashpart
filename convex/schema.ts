@@ -100,6 +100,7 @@ export default defineSchema({
     aiImageDefaultPrompt: v.optional(v.string()),
     aiImageEditStrength: v.optional(aiImageEditStrength),
     aiImageModel: v.optional(aiImageModel),
+    aiImageUpgradeModelOnRegen: v.optional(v.boolean()),
     duplicatePolicy,
     maxProductPhotos: v.optional(v.number()),
     shopifyPublishTarget: v.optional(shopifyPublishTarget),

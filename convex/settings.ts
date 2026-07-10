@@ -21,6 +21,7 @@ const defaultSettings = {
   aiImageDefaultPrompt: DEFAULT_AI_IMAGE_PROMPT,
   aiImageEditStrength: DEFAULT_AI_IMAGE_EDIT_STRENGTH as AiImageEditStrength,
   aiImageModel: GEMINI_IMAGE_MODEL as AiImageModelId,
+  aiImageUpgradeModelOnRegen: false,
   autoArchiveComplete: false,
   autoArchiveCompleteGroups: false,
   duplicatePolicy: "blockExisting" as const,
@@ -49,6 +50,7 @@ export function resolveAiImageSettings(
     aiImageDefaultPrompt?: string;
     aiImageEditStrength?: AiImageEditStrength;
     aiImageModel?: AiImageModelId;
+    aiImageUpgradeModelOnRegen?: boolean;
   } | null,
 ) {
   const aiImageDefaultPrompt =
@@ -56,11 +58,14 @@ export function resolveAiImageSettings(
   const aiImageModel = settings?.aiImageModel ?? GEMINI_IMAGE_MODEL;
   const aiImageEditStrength =
     settings?.aiImageEditStrength ?? DEFAULT_AI_IMAGE_EDIT_STRENGTH;
+  const aiImageUpgradeModelOnRegen =
+    settings?.aiImageUpgradeModelOnRegen === true;
 
   return {
     aiImageDefaultPrompt,
     aiImageEditStrength,
     aiImageModel,
+    aiImageUpgradeModelOnRegen,
   };
 }
 
@@ -330,6 +335,33 @@ export const setAiImageEditStrength = mutation({
     }
 
     return { aiImageEditStrength: args.aiImageEditStrength };
+  },
+});
+
+export const setAiImageUpgradeModelOnRegen = mutation({
+  args: {
+    aiImageUpgradeModelOnRegen: v.boolean(),
+    sessionToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const settings = await getSettingsDocument(ctx);
+    const now = Date.now();
+
+    if (settings) {
+      await ctx.db.patch(settings._id, {
+        aiImageUpgradeModelOnRegen: args.aiImageUpgradeModelOnRegen,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("appSettings", {
+        ...defaultSettings,
+        aiImageUpgradeModelOnRegen: args.aiImageUpgradeModelOnRegen,
+        updatedAt: now,
+      });
+    }
+
+    return { aiImageUpgradeModelOnRegen: args.aiImageUpgradeModelOnRegen };
   },
 });
 

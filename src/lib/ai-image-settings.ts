@@ -44,3 +44,16 @@ export type AiImageEditStrength =
   (typeof AI_IMAGE_EDIT_STRENGTH_OPTIONS)[number]["id"];
 
 export const DEFAULT_AI_IMAGE_MODEL: AiImageModelId = "gemini-3.1-flash-image";
+
+/** One step up the quality ladder for regen: 2.5 → 3.1 Lite → 3.1. */
+export function upgradeAiImageModel(model: AiImageModelId): AiImageModelId {
+  if (model === "gemini-2.5-flash-image") {
+    return "gemini-3.1-flash-lite-image";
+  }
+
+  if (model === "gemini-3.1-flash-lite-image") {
+    return "gemini-3.1-flash-image";
+  }
+
+  return model;
+}
