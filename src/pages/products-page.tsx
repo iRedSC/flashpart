@@ -1291,18 +1291,20 @@ export function ProductsPage() {
     filteredProductIds.length > 0 && photosByProductIdQuery === undefined;
   const selectedPublishTargets = selectedRows
     .map((row) => row.original)
-    .filter((product) =>
-      canPublishProduct(
-        {
-          aiImageStatus: product.aiImageStatus,
-          aiShopifyFileId: product.aiShopifyFileId ?? undefined,
-          needsPhotoReview: product.needsPhotoReview,
-          pendingOperation: product.pendingOperation ?? undefined,
-          phase: product.phase,
-          shopifyFileId: product.shopifyFileId ?? undefined,
-        },
-        photosByProductId[product._id],
-      ),
+    .filter(
+      (product) =>
+        !isArchived(product) &&
+        canPublishProduct(
+          {
+            aiImageStatus: product.aiImageStatus,
+            aiShopifyFileId: product.aiShopifyFileId ?? undefined,
+            needsPhotoReview: product.needsPhotoReview,
+            pendingOperation: product.pendingOperation ?? undefined,
+            phase: product.phase,
+            shopifyFileId: product.shopifyFileId ?? undefined,
+          },
+          photosByProductId[product._id],
+        ),
     );
   const selectedRepublishTargets = selectedRows
     .map((row) => row.original)
@@ -2788,28 +2790,39 @@ export function ProductsPage() {
                 ? overwritePublish.overwriteSkus.length === 1
                   ? "Republish to Shopify?"
                   : "Republish products to Shopify?"
-                : overwritePublish?.overwriteSkus.length === 1
-                  ? "Overwrite existing Shopify product?"
-                  : "Overwrite existing Shopify products?"}
+                : overwritePublish &&
+                    overwritePublish.overwriteProductIds.length === 0 &&
+                    overwritePublish.normalProductIds.length > 0
+                  ? "Finish publishing remaining products?"
+                  : overwritePublish?.overwriteSkus.length === 1
+                    ? "Overwrite existing Shopify product?"
+                    : "Overwrite existing Shopify products?"}
             </DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-3 text-sm text-slate-500">
                 <p>
                   {overwritePublish?.mode === "republish"
                     ? "These products are already linked to Shopify. Republishing updates title, price, and tags on the existing listing, and attaches the current photos (existing Shopify media is kept)."
-                    : "A Shopify product with a matching SKU already exists. Publishing updates that listing’s title, price, and tags, and attaches the current photos instead of creating a new product."}
+                    : overwritePublish &&
+                        overwritePublish.overwriteProductIds.length === 0 &&
+                        overwritePublish.normalProductIds.length > 0
+                      ? "Overwrite publish already queued. Confirm to publish the remaining selected products normally."
+                      : "A Shopify product with a matching SKU already exists. Publishing updates that listing’s title, price, and tags, and attaches the current photos instead of creating a new product."}
                 </p>
-                {overwritePublish ? (
+                {overwritePublish &&
+                overwritePublish.overwriteProductIds.length > 0 ? (
                   <div className="space-y-1.5">
                     <p className="font-medium text-slate-700">
                       The following products will be overwritten:
                     </p>
                     <ul className="max-h-40 list-disc space-y-1 overflow-y-auto pl-5 font-mono text-xs text-slate-700">
-                      {overwritePublish.overwriteProductIds.map((productId, index) => (
-                        <li key={productId}>
-                          {overwritePublish.overwriteSkus[index] ?? productId}
-                        </li>
-                      ))}
+                      {overwritePublish.overwriteProductIds.map(
+                        (productId, index) => (
+                          <li key={productId}>
+                            {overwritePublish.overwriteSkus[index] ?? productId}
+                          </li>
+                        ),
+                      )}
                     </ul>
                   </div>
                 ) : null}
@@ -2817,9 +2830,13 @@ export function ProductsPage() {
                 overwritePublish.mode === "duplicateSku" &&
                 overwritePublish.normalProductIds.length > 0 ? (
                   <p>
-                    {overwritePublish.normalProductIds.length === 1
-                      ? "1 other selected product will publish normally."
-                      : `${overwritePublish.normalProductIds.length.toLocaleString()} other selected products will publish normally.`}
+                    {overwritePublish.overwriteProductIds.length === 0
+                      ? overwritePublish.normalProductIds.length === 1
+                        ? "1 product still needs to publish normally."
+                        : `${overwritePublish.normalProductIds.length.toLocaleString()} products still need to publish normally.`
+                      : overwritePublish.normalProductIds.length === 1
+                        ? "1 other selected product will publish normally."
+                        : `${overwritePublish.normalProductIds.length.toLocaleString()} other selected products will publish normally.`}
                   </p>
                 ) : null}
               </div>
@@ -2850,6 +2867,9 @@ export function ProductsPage() {
                 </>
               ) : overwritePublish?.mode === "republish" ? (
                 "Republish"
+              ) : overwritePublish &&
+                overwritePublish.overwriteProductIds.length === 0 ? (
+                "Publish remaining"
               ) : (
                 "Publish & overwrite"
               )}
