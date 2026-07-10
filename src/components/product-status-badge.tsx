@@ -8,6 +8,7 @@ import {
   Download,
   Eye,
   Loader2,
+  Pencil,
 } from "lucide-react";
 import { Badge } from "./ui/badge";
 import {
@@ -245,6 +246,7 @@ export function ProductStatusIcons({
   pendingOperation,
   lastError,
   needsPhotoReview,
+  needsRepublish,
   saving,
   shopDomain,
   className,
@@ -253,6 +255,7 @@ export function ProductStatusIcons({
   pendingOperation?: PendingOperation;
   lastError?: LastError;
   needsPhotoReview?: boolean;
+  needsRepublish?: boolean;
   saving?: boolean;
   shopDomain?: string | null;
   className?: string;
@@ -282,6 +285,14 @@ export function ProductStatusIcons({
           toneClass="bg-amber-50 text-amber-800"
         />
       ) : null}
+      {needsRepublish ? (
+        <StatusIcon
+          icon={<Pencil className="h-3.5 w-3.5" />}
+          label="Edited"
+          reason="Local changes are not on Shopify yet. Republish when ready."
+          toneClass="bg-orange-50 text-orange-700"
+        />
+      ) : null}
       {lastError ? (
         <StatusIcon
           href={duplicateSkuAdminUrl}
@@ -307,17 +318,20 @@ export function ProductStatusBadge({
   pendingOperation,
   lastError,
   needsPhotoReview,
+  needsRepublish,
   className,
 }: {
   phase: ProductPhase;
   pendingOperation?: PendingOperation;
   lastError?: LastError;
   needsPhotoReview?: boolean;
+  needsRepublish?: boolean;
   className?: string;
 }) {
   const modifiers = [
     pendingOperation ? pendingOperationLabels[pendingOperation] : null,
     needsPhotoReview ? "Review photo" : null,
+    needsRepublish ? "Edited" : null,
     lastError ? lastError.message : null,
   ].filter(Boolean);
 

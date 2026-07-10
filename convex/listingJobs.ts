@@ -398,6 +398,7 @@ export const markJobSucceeded = internalMutation({
         archivedAt: shouldAutoArchive ? now : product?.archivedAt,
         lastError: undefined,
         needsPhotoReview: undefined,
+        needsRepublish: undefined,
         pendingOperation: undefined,
         phase: "published",
         shopifyProductHandle: args.shopifyProductHandle,
@@ -427,6 +428,7 @@ export const markJobSucceeded = internalMutation({
       archivedAt: shouldAutoArchive ? now : product?.archivedAt,
       lastError: undefined,
       needsPhotoReview: undefined,
+      needsRepublish: undefined,
       pendingOperation: undefined,
       phase: "published",
       shopifyFileDeletedAt:

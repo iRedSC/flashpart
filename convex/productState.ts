@@ -73,6 +73,28 @@ export function canArchive(product: { lastError?: LastError }): boolean {
   return product.lastError === undefined;
 }
 
+/** True when the product is (or was) linked to a Shopify listing. */
+export function isLinkedToShopify(product: {
+  phase?: ProductPhase;
+  shopifyProductId?: string;
+}): boolean {
+  return product.phase === "published" || Boolean(product.shopifyProductId);
+}
+
+/**
+ * Overlay flag when local listing data drifts from Shopify.
+ * Keep phase as published — this does not mean "ready to list" again.
+ */
+export function needsRepublishPatch(product: {
+  phase?: ProductPhase;
+  shopifyProductId?: string;
+}): { needsRepublish: true } | Record<string, never> {
+  if (isLinkedToShopify(product)) {
+    return { needsRepublish: true };
+  }
+  return {};
+}
+
 /** Apply an error and ensure the product is visible outside the archive. */
 export function productErrorFields(lastError: LastError, now: number) {
   return {

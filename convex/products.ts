@@ -10,6 +10,7 @@ import {
   canArchive,
   compareProductDisplayOrder,
   migrateLegacyProduct,
+  needsRepublishPatch,
   resolveProductPhase,
   type LastError,
   type PendingOperation,
@@ -39,6 +40,7 @@ function normalizeProduct(product: Doc<"products">) {
       (product.pendingOperation ??
         legacy?.pendingOperation) as PendingOperation | undefined,
     needsPhotoReview: product.needsPhotoReview ?? legacy?.needsPhotoReview,
+    needsRepublish: product.needsRepublish,
     lastError: (product.lastError ?? legacy?.lastError) as LastError | undefined,
   } satisfies Doc<"products"> & { phase: ProductPhase };
 }
@@ -89,9 +91,16 @@ export const update = mutation({
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
 
+    const product = await ctx.db.get(args.id);
+
+    if (!product) {
+      throw new ConvexError("Product not found.");
+    }
+
     const patch: {
       description?: string;
       name?: string;
+      needsRepublish?: true;
       price?: number;
       sku?: string;
       tags?: string;
@@ -99,28 +108,53 @@ export const update = mutation({
       updatedAt: number;
     } = { updatedAt: Date.now() };
 
-    if (args.sku !== undefined) {
+    let changed = false;
+
+    if (args.sku !== undefined && args.sku !== product.sku) {
       patch.sku = args.sku;
+      changed = true;
     }
 
-    if (args.name !== undefined) {
+    if (args.name !== undefined && args.name !== product.name) {
       patch.name = args.name;
+      changed = true;
     }
 
     if (args.description !== undefined) {
-      patch.description = args.description.trim() || undefined;
+      const description = args.description.trim() || undefined;
+      if (description !== product.description) {
+        patch.description = description;
+        changed = true;
+      }
     }
 
     if (args.vendor !== undefined) {
-      patch.vendor = args.vendor.trim() || undefined;
+      const vendor = args.vendor.trim() || undefined;
+      if (vendor !== product.vendor) {
+        patch.vendor = vendor;
+        changed = true;
+      }
     }
 
     if (args.tags !== undefined) {
-      patch.tags = normalizeTagString(args.tags);
+      const tags = normalizeTagString(args.tags);
+      if (tags !== product.tags) {
+        patch.tags = tags;
+        changed = true;
+      }
     }
 
-    if (args.price !== undefined) {
+    if (args.price !== undefined && args.price !== product.price) {
       patch.price = args.price;
+      changed = true;
+    }
+
+    if (changed) {
+      Object.assign(patch, needsRepublishPatch(product));
+    }
+
+    if (!changed) {
+      return;
     }
 
     await ctx.db.patch(args.id, patch);
@@ -214,18 +248,34 @@ export const importProducts = mutation({
           continue;
         }
 
+        const description =
+          product.description !== undefined
+            ? product.description.trim() || undefined
+            : undefined;
+        const vendor =
+          product.vendor !== undefined
+            ? product.vendor.trim() || undefined
+            : undefined;
+        const tags =
+          product.tags !== undefined
+            ? normalizeTagString(product.tags)
+            : undefined;
+
+        const changed =
+          name !== existing.name ||
+          product.price !== existing.price ||
+          (product.description !== undefined &&
+            description !== existing.description) ||
+          (product.vendor !== undefined && vendor !== existing.vendor) ||
+          (product.tags !== undefined && tags !== existing.tags);
+
         await ctx.db.patch(existing._id, {
           name,
           price: product.price,
-          ...(product.description !== undefined
-            ? { description: product.description.trim() || undefined }
-            : {}),
-          ...(product.vendor !== undefined
-            ? { vendor: product.vendor.trim() || undefined }
-            : {}),
-          ...(product.tags !== undefined
-            ? { tags: normalizeTagString(product.tags) }
-            : {}),
+          ...(product.description !== undefined ? { description } : {}),
+          ...(product.vendor !== undefined ? { vendor } : {}),
+          ...(product.tags !== undefined ? { tags } : {}),
+          ...(changed ? needsRepublishPatch(existing) : {}),
           updatedAt: now,
         });
         overwritten += 1;
@@ -399,6 +449,7 @@ export const markShopifyFileDeleted = internalMutation({
       aiShopifyFileUrl: undefined,
       captureId: undefined,
       needsPhotoReview: undefined,
+      needsRepublish: undefined,
       pendingOperation: undefined,
       phase: "imported",
       shopifyFileDeletedAt: args.deletedAt,

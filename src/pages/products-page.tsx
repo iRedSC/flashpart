@@ -466,6 +466,7 @@ function MobileProductCard({
             <ProductStatusIcons
               lastError={lastError ?? product.lastError}
               needsPhotoReview={productNeedsPhotoReview(product, photos)}
+              needsRepublish={product.needsRepublish}
               pendingOperation={product.pendingOperation}
               phase={product.phase}
               saving={isPending}
@@ -1099,6 +1100,7 @@ export function ProductsPage() {
               row.original,
               photosByProductId[row.original._id],
             )}
+            needsRepublish={row.original.needsRepublish}
             pendingOperation={row.original.pendingOperation}
             phase={row.original.phase}
             saving={isProductPending(row.original._id)}
@@ -2548,6 +2550,7 @@ export function ProductsPage() {
                       activeDragProduct,
                       photosByProductId[activeDragProduct._id],
                     )}
+                    needsRepublish={activeDragProduct.needsRepublish}
                     pendingOperation={activeDragProduct.pendingOperation}
                     phase={activeDragProduct.phase}
                     saving={isProductPending(activeDragProduct._id)}

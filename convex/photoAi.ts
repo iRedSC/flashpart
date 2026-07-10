@@ -24,7 +24,7 @@ import {
   getAiForOriginal,
   productHasPhotoRows,
 } from "./productPhotos";
-import { productErrorFields } from "./productState";
+import { productErrorFields, needsRepublishPatch } from "./productState";
 import { resolveAiImageSettings } from "./settings";
 import {
   deleteShopifyFiles,
@@ -372,6 +372,7 @@ export const markReady = internalMutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const product = await ctx.db.get(args.productId);
 
     await ctx.db.patch(args.productId, {
       aiImageError: undefined,
@@ -383,6 +384,7 @@ export const markReady = internalMutation({
       needsPhotoReview: true,
       pendingOperation: undefined,
       updatedAt: now,
+      ...(product ? needsRepublishPatch(product) : {}),
     });
   },
 });
@@ -463,6 +465,7 @@ export const scheduleProcessing = internalMutation({
       needsPhotoReview: undefined,
       pendingOperation: "aiImageGenerating",
       updatedAt: now,
+      ...needsRepublishPatch(product),
     };
 
     if (args.resetPrompt) {
@@ -788,6 +791,7 @@ export const regenerate = mutation({
       needsPhotoReview: undefined,
       pendingOperation: "aiImageGenerating",
       updatedAt: now,
+      ...needsRepublishPatch(product),
     });
     await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
       previousAiShopifyFileId,
