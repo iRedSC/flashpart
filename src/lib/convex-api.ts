@@ -177,6 +177,9 @@ export const convexApi = {
     setAiImageUpgradeModelOnRegen: deployedFunction<
       typeof api.settings.setAiImageUpgradeModelOnRegen
     >("settings.js:setAiImageUpgradeModelOnRegen"),
+    setAiImageWhitenBackground: deployedFunction<
+      typeof api.settings.setAiImageWhitenBackground
+    >("settings.js:setAiImageWhitenBackground"),
     setMaxProductPhotos: deployedFunction<
       typeof api.settings.setMaxProductPhotos
     >("settings.js:setMaxProductPhotos"),

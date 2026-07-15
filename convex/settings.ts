@@ -22,6 +22,7 @@ const defaultSettings = {
   aiImageEditStrength: DEFAULT_AI_IMAGE_EDIT_STRENGTH as AiImageEditStrength,
   aiImageModel: GEMINI_IMAGE_MODEL as AiImageModelId,
   aiImageUpgradeModelOnRegen: false,
+  aiImageWhitenBackground: true,
   autoArchiveComplete: false,
   autoArchiveCompleteGroups: false,
   duplicatePolicy: "blockExisting" as const,
@@ -51,6 +52,7 @@ export function resolveAiImageSettings(
     aiImageEditStrength?: AiImageEditStrength;
     aiImageModel?: AiImageModelId;
     aiImageUpgradeModelOnRegen?: boolean;
+    aiImageWhitenBackground?: boolean;
   } | null,
 ) {
   const aiImageDefaultPrompt =
@@ -60,12 +62,15 @@ export function resolveAiImageSettings(
     settings?.aiImageEditStrength ?? DEFAULT_AI_IMAGE_EDIT_STRENGTH;
   const aiImageUpgradeModelOnRegen =
     settings?.aiImageUpgradeModelOnRegen === true;
+  // Default on: missing/undefined keeps today's always-whiten behavior.
+  const aiImageWhitenBackground = settings?.aiImageWhitenBackground !== false;
 
   return {
     aiImageDefaultPrompt,
     aiImageEditStrength,
     aiImageModel,
     aiImageUpgradeModelOnRegen,
+    aiImageWhitenBackground,
   };
 }
 
@@ -362,6 +367,33 @@ export const setAiImageUpgradeModelOnRegen = mutation({
     }
 
     return { aiImageUpgradeModelOnRegen: args.aiImageUpgradeModelOnRegen };
+  },
+});
+
+export const setAiImageWhitenBackground = mutation({
+  args: {
+    aiImageWhitenBackground: v.boolean(),
+    sessionToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const settings = await getSettingsDocument(ctx);
+    const now = Date.now();
+
+    if (settings) {
+      await ctx.db.patch(settings._id, {
+        aiImageWhitenBackground: args.aiImageWhitenBackground,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("appSettings", {
+        ...defaultSettings,
+        aiImageWhitenBackground: args.aiImageWhitenBackground,
+        updatedAt: now,
+      });
+    }
+
+    return { aiImageWhitenBackground: args.aiImageWhitenBackground };
   },
 });
 

@@ -74,6 +74,7 @@ export const processingPayload = internalQuery({
           existingAi?.aiPrompt ??
           product.aiImagePrompt ??
           aiSettings.aiImageDefaultPrompt,
+        aiImageWhitenBackground: aiSettings.aiImageWhitenBackground,
         originalPhotoId: original._id,
         originalStorageId: original.storageId,
         originalUrl: original.url,
@@ -93,6 +94,7 @@ export const processingPayload = internalQuery({
       aiImageModel: aiImageModelId,
       aiImagePrompt:
         product.aiImagePrompt ?? aiSettings.aiImageDefaultPrompt,
+      aiImageWhitenBackground: aiSettings.aiImageWhitenBackground,
       aiShopifyFileId: product.aiShopifyFileId,
       productId: product._id,
       shopifyFileUrl: product.shopifyFileUrl,

@@ -337,13 +337,16 @@ export const processProductPhoto = internalAction({
           model: payload.aiImageModel,
           prompt: payload.aiImagePrompt,
         });
-        const whitened = await whitenOffWhiteBackground(
-          generated.data,
-          generated.mimeType,
-        );
+        const output =
+          payload.aiImageWhitenBackground !== false
+            ? await whitenOffWhiteBackground(
+                generated.data,
+                generated.mimeType,
+              )
+            : generated;
         const storageId = await ctx.storage.store(
-          new Blob([new Uint8Array(whitened.data)], {
-            type: whitened.mimeType,
+          new Blob([new Uint8Array(output.data)], {
+            type: output.mimeType,
           }),
         );
         const url = await ctx.storage.getUrl(storageId);
@@ -426,16 +429,19 @@ export const processProductPhoto = internalAction({
         model: payload.aiImageModel,
         prompt: payload.aiImagePrompt,
       });
-      const whitened = await whitenOffWhiteBackground(
-        generated.data,
-        generated.mimeType,
-      );
-      const extension = whitened.mimeType.includes("png") ? "png" : "jpg";
+      const output =
+        payload.aiImageWhitenBackground !== false
+          ? await whitenOffWhiteBackground(
+              generated.data,
+              generated.mimeType,
+            )
+          : generated;
+      const extension = output.mimeType.includes("png") ? "png" : "jpg";
       const aiFile = await uploadImageBufferToShopify(connection, {
         alt: `${payload.sku} AI photo`,
-        data: whitened.data,
+        data: output.data,
         filename: `${payload.sku}-ai.${extension}`,
-        mimeType: whitened.mimeType,
+        mimeType: output.mimeType,
       });
 
       await ctx.runMutation(photoAiModel.markReady, {

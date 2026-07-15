@@ -28,6 +28,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { Switch } from "./ui/switch";
 import { useAppData } from "../data/app-data-provider";
 import { cropImageFileToSquare } from "../lib/capture-image";
 import { convexApi } from "../lib/convex-api";
@@ -236,12 +237,15 @@ export function ProductPhotoDialog({
     regenerateAiImageForPhoto,
     replaceProductPhoto,
     session,
+    setAiImageWhitenBackground,
     settings,
   } = useAppData();
   const convex = useConvex();
   const defaultPrompt =
     settings?.aiImageDefaultPrompt?.trim() || DEFAULT_AI_IMAGE_PROMPT;
   const maxProductPhotos = settings?.maxProductPhotos ?? 5;
+  const aiImageWhitenBackground =
+    settings?.aiImageWhitenBackground !== false;
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const touchStartXRef = React.useRef<number | null>(null);
   const initializedForProductRef = React.useRef<string | null>(null);
@@ -1099,6 +1103,27 @@ export function ProductPhotoDialog({
             <p className="text-sm text-slate-500">
               Assign this product to a group to take its photo.
             </p>
+          ) : null}
+
+          {activeView === "ai" && !captureFile ? (
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Whiten background</p>
+                <p className="text-xs text-slate-500">
+                  Applies to the next generation
+                </p>
+              </div>
+              <Switch
+                aria-label="Whiten background"
+                checked={aiImageWhitenBackground}
+                disabled={isBusy || aiGenerating}
+                onCheckedChange={(checked) =>
+                  void setAiImageWhitenBackground(checked).catch(
+                    () => undefined,
+                  )
+                }
+              />
+            </div>
           ) : null}
 
           <DialogFooter className="flex flex-row flex-nowrap items-center gap-1.5 overflow-x-auto sm:justify-start">

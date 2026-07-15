@@ -140,6 +140,9 @@ type AppDataContextValue = {
   setAiImageUpgradeModelOnRegen: (
     aiImageUpgradeModelOnRegen: boolean,
   ) => Promise<{ aiImageUpgradeModelOnRegen: boolean } | null>;
+  setAiImageWhitenBackground: (
+    aiImageWhitenBackground: boolean,
+  ) => Promise<{ aiImageWhitenBackground: boolean } | null>;
   setMaxProductPhotos: (
     maxProductPhotos: number,
   ) => Promise<{ maxProductPhotos: number } | null>;
@@ -437,6 +440,9 @@ export function AppDataProvider({
   );
   const setAiImageUpgradeModelOnRegenMutation = useMutation(
     convexApi.settings.setAiImageUpgradeModelOnRegen,
+  );
+  const setAiImageWhitenBackgroundMutation = useMutation(
+    convexApi.settings.setAiImageWhitenBackground,
   );
   const setMaxProductPhotosMutation = useMutation(
     convexApi.settings.setMaxProductPhotos,
@@ -1125,6 +1131,25 @@ export function AppDataProvider({
             }),
           label: "Saving upgrade model on regen",
         }),
+      setAiImageWhitenBackground: (aiImageWhitenBackground) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  aiImageWhitenBackground,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setAiImageWhitenBackgroundMutation({
+              aiImageWhitenBackground,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving whiten background",
+        }),
       setMaxProductPhotos: (maxProductPhotos) =>
         runOptimistic({
           apply: (state) => ({
@@ -1704,6 +1729,7 @@ export function AppDataProvider({
       setAiImageEditStrengthMutation,
       setAiImageModelMutation,
       setAiImageUpgradeModelOnRegenMutation,
+      setAiImageWhitenBackgroundMutation,
       setMaxProductPhotosMutation,
       setDuplicatePolicyMutation,
       setAutoArchiveCompleteMutation,

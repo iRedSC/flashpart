@@ -101,6 +101,8 @@ export default defineSchema({
     aiImageEditStrength: v.optional(aiImageEditStrength),
     aiImageModel: v.optional(aiImageModel),
     aiImageUpgradeModelOnRegen: v.optional(v.boolean()),
+    /** Pull near-white AI backgrounds to pure white after generation. */
+    aiImageWhitenBackground: v.optional(v.boolean()),
     duplicatePolicy,
     maxProductPhotos: v.optional(v.number()),
     shopifyPublishTarget: v.optional(shopifyPublishTarget),
