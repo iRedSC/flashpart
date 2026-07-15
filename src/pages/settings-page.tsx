@@ -31,6 +31,7 @@ export function SettingsPage() {
     setAiImageEditStrength,
     setAiImageModel,
     setAiImageUpgradeModelOnRegen,
+    setAiImageWhitenBackground,
     setAutoArchiveComplete,
     setAutoArchiveCompleteGroups,
     setDuplicatePolicy,
@@ -87,6 +88,8 @@ export function SettingsPage() {
     settings?.autoArchiveCompleteGroups === true;
   const aiImageUpgradeModelOnRegen =
     settings?.aiImageUpgradeModelOnRegen === true;
+  const aiImageWhitenBackground =
+    settings?.aiImageWhitenBackground !== false;
 
   React.useEffect(() => {
     setProductType(settings?.shopifyProductType ?? "Part");
@@ -342,6 +345,23 @@ export function SettingsPage() {
                 void setAiImageUpgradeModelOnRegen(checked).catch(
                   () => undefined,
                 )
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
+            <div>
+              <p className="font-medium">Whiten background</p>
+              <p className="text-sm text-slate-500">
+                After the first AI generation, pull slightly off-white corners to
+                pure white. Regenerations skip this; use Whiten in the photo
+                dialog when you need it.
+              </p>
+            </div>
+            <Switch
+              aria-label="Whiten background"
+              checked={aiImageWhitenBackground}
+              onCheckedChange={(checked) =>
+                void setAiImageWhitenBackground(checked).catch(() => undefined)
               }
             />
           </div>

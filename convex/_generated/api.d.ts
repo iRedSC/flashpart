@@ -19,6 +19,7 @@ import type * as listingJobs from "../listingJobs.js";
 import type * as migrations from "../migrations.js";
 import type * as photoAi from "../photoAi.js";
 import type * as photoAiConstants from "../photoAiConstants.js";
+import type * as photoAiProcess from "../photoAiProcess.js";
 import type * as photoGc from "../photoGc.js";
 import type * as productPhotos from "../productPhotos.js";
 import type * as productState from "../productState.js";
@@ -28,6 +29,7 @@ import type * as shopify from "../shopify.js";
 import type * as shopifyClient from "../shopifyClient.js";
 import type * as shopifyModel from "../shopifyModel.js";
 import type * as tags from "../tags.js";
+import type * as whitenBackground from "../whitenBackground.js";
 
 import type {
   ApiFromModules,
@@ -47,6 +49,7 @@ declare const fullApi: ApiFromModules<{
   migrations: typeof migrations;
   photoAi: typeof photoAi;
   photoAiConstants: typeof photoAiConstants;
+  photoAiProcess: typeof photoAiProcess;
   photoGc: typeof photoGc;
   productPhotos: typeof productPhotos;
   productState: typeof productState;
@@ -56,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   shopifyClient: typeof shopifyClient;
   shopifyModel: typeof shopifyModel;
   tags: typeof tags;
+  whitenBackground: typeof whitenBackground;
 }>;
 
 /**

@@ -237,6 +237,7 @@ export function ProductPhotoDialog({
     replaceProductPhoto,
     session,
     settings,
+    whitenAiBackground,
   } = useAppData();
   const convex = useConvex();
   const defaultPrompt =
@@ -257,6 +258,9 @@ export function ProductPhotoDialog({
   const [promptDialogOpen, setPromptDialogOpen] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isRegenerating, setIsRegenerating] = React.useState(false);
+  const [isWhitening, setIsWhitening] = React.useState(false);
+  const [offerWhitenAfterRegen, setOfferWhitenAfterRegen] =
+    React.useState(false);
   const [isApproving, setIsApproving] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -322,6 +326,8 @@ export function ProductPhotoDialog({
     setCaptureFile(null);
     setCaptureMode("add");
     setPromptDialogOpen(false);
+    setOfferWhitenAfterRegen(false);
+    setIsWhitening(false);
     initializedForProductRef.current = null;
     pendingFocusOriginalIdRef.current = null;
 
@@ -430,6 +436,10 @@ export function ProductPhotoDialog({
     safePairIndex,
   ]);
 
+  React.useEffect(() => {
+    setOfferWhitenAfterRegen(false);
+  }, [safePairIndex]);
+
   const originalUrl =
     previewUrl ??
     currentPair?.original?.url ??
@@ -458,7 +468,8 @@ export function ProductPhotoDialog({
       !aiFailed,
   );
   const canTakePhoto = Boolean(product?.groupId);
-  const isBusy = isSaving || isRegenerating || isApproving || isDeleting;
+  const isBusy =
+    isSaving || isRegenerating || isWhitening || isApproving || isDeleting;
   const originalCount = pairs.filter((pair) => pair.original != null).length;
   const isLegacyOnly =
     pairs.length > 0 && pairs.every((pair) => pair.isLegacy);
@@ -706,6 +717,7 @@ export function ProductPhotoDialog({
     triggerHaptic();
     setError(null);
     setIsRegenerating(true);
+    setOfferWhitenAfterRegen(false);
     setActiveView("ai");
 
     try {
@@ -722,6 +734,7 @@ export function ProductPhotoDialog({
           model,
         });
       }
+      setOfferWhitenAfterRegen(true);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -730,6 +743,35 @@ export function ProductPhotoDialog({
       );
     } finally {
       setIsRegenerating(false);
+    }
+  }
+
+  async function handleWhitenBackground() {
+    if (!product || isBusy || aiGenerating || !aiUrl) {
+      return;
+    }
+
+    triggerHaptic();
+    setError(null);
+    setIsWhitening(true);
+
+    try {
+      await whitenAiBackground({
+        productId: product._id,
+        originalPhotoId:
+          currentPair && !currentPair.isLegacy && currentPair.original
+            ? (currentPair.original._id as Id<"productPhotos">)
+            : undefined,
+      });
+      setOfferWhitenAfterRegen(false);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Could not whiten the AI background.",
+      );
+    } finally {
+      setIsWhitening(false);
     }
   }
 
@@ -810,6 +852,7 @@ export function ProductPhotoDialog({
 
     triggerHaptic();
     setError(null);
+    setOfferWhitenAfterRegen(false);
     setIsApproving(true);
 
     try {
@@ -1171,6 +1214,24 @@ export function ProductPhotoDialog({
                   )}
                   Regen
                 </Button>
+                {offerWhitenAfterRegen &&
+                aiUrl &&
+                !aiGenerating &&
+                !aiFailed ? (
+                  <Button
+                    className={footerButtonClass}
+                    disabled={isBusy}
+                    onClick={() => void handleWhitenBackground()}
+                    variant="outline"
+                  >
+                    {isWhitening ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    Whiten
+                  </Button>
+                ) : null}
                 {currentAiNeedsApproval ? (
                   <Button
                     className={footerButtonClass}
