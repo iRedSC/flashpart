@@ -1,6 +1,8 @@
-"use node";
-
-import sharp from "sharp";
+import jpeg from "jpeg-js";
+// Pure-JS PNG codec; no published TypeScript types.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-expect-error -- upng-js ships without types
+import UPNG from "upng-js";
 
 /** Pixels sampled from each corner when estimating the backdrop color. */
 const CORNER_SAMPLE = 16;
@@ -17,11 +19,33 @@ const MATCH_THRESHOLD = 28;
 
 type Rgb = { r: number; g: number; b: number };
 
+type DecodedImage = {
+  width: number;
+  height: number;
+  /** RGBA row-major pixels. */
+  pixels: Uint8Array;
+};
+
+type UpngModule = {
+  decode: (buffer: ArrayBuffer) => {
+    width: number;
+    height: number;
+  };
+  toRGBA8: (img: { width: number; height: number }) => ArrayBuffer[];
+  encode: (
+    frames: ArrayBuffer[],
+    width: number,
+    height: number,
+    cnum: number,
+  ) => ArrayBuffer;
+};
+
+const upng = UPNG as UpngModule;
+
 function sampleCornerAverage(
   pixels: Uint8Array,
   width: number,
   height: number,
-  channels: number,
   sampleSize: number,
 ): Rgb {
   const size = Math.max(
@@ -43,7 +67,7 @@ function sampleCornerAverage(
   for (const [ox, oy] of origins) {
     for (let y = oy; y < oy + size; y += 1) {
       for (let x = ox; x < ox + size; x += 1) {
-        const i = (y * width + x) * channels;
+        const i = (y * width + x) * 4;
         r += pixels[i]!;
         g += pixels[i + 1]!;
         b += pixels[i + 2]!;
@@ -65,34 +89,77 @@ function isNearWhite(color: Rgb, minChannel: number) {
   );
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function decodeImage(data: ArrayBuffer, mimeType: string): DecodedImage {
+  const bytes = new Uint8Array(data);
+
+  if (mimeType.includes("png")) {
+    const png = upng.decode(toArrayBuffer(bytes));
+    const rgbaFrames = upng.toRGBA8(png);
+    const frame = rgbaFrames[0];
+    if (!frame) {
+      throw new Error("PNG decode returned no frames.");
+    }
+    return {
+      width: png.width,
+      height: png.height,
+      pixels: new Uint8Array(frame),
+    };
+  }
+
+  const decoded = jpeg.decode(bytes, { useTArray: true });
+  return {
+    width: decoded.width,
+    height: decoded.height,
+    pixels: decoded.data,
+  };
+}
+
+function encodeImage(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  mimeType: string,
+): { data: ArrayBuffer; mimeType: string } {
+  if (mimeType.includes("png")) {
+    const encoded = upng.encode([toArrayBuffer(pixels)], width, height, 0);
+    return {
+      data: encoded,
+      mimeType: "image/png",
+    };
+  }
+
+  const encoded = jpeg.encode({ data: pixels, width, height }, 95).data;
+  return {
+    data: toArrayBuffer(encoded),
+    mimeType: "image/jpeg",
+  };
+}
+
 /**
  * Pull near-white backdrop pixels to pure white using the image corners as
  * the background reference. No-ops when corners do not look like a white BG.
+ *
+ * Pure JS (jpeg-js / upng-js) so Convex Node deploy does not need sharp's
+ * platform-native binaries.
  */
 export async function whitenOffWhiteBackground(
   data: ArrayBuffer,
   mimeType: string,
 ): Promise<{ data: ArrayBuffer; mimeType: string }> {
-  const { data: raw, info } = await sharp(Buffer.from(data))
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const { width, height, channels } = info;
-  const pixels = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-  const bg = sampleCornerAverage(
-    pixels,
-    width,
-    height,
-    channels,
-    CORNER_SAMPLE,
-  );
+  const { width, height, pixels } = decodeImage(data, mimeType);
+  const bg = sampleCornerAverage(pixels, width, height, CORNER_SAMPLE);
 
   if (!isNearWhite(bg, NEAR_WHITE_MIN)) {
     return { data, mimeType };
   }
 
-  for (let i = 0; i < pixels.length; i += channels) {
+  for (let i = 0; i < pixels.length; i += 4) {
     const r = pixels[i]!;
     const g = pixels[i + 1]!;
     const b = pixels[i + 2]!;
@@ -114,20 +181,5 @@ export async function whitenOffWhiteBackground(
     pixels[i + 2] = Math.round(b + (255 - b) * t);
   }
 
-  const isPng = mimeType.includes("png");
-  const encoded = isPng
-    ? await sharp(pixels, { raw: { width, height, channels } })
-        .png()
-        .toBuffer()
-    : await sharp(pixels, { raw: { width, height, channels } })
-        .jpeg({ quality: 95, mozjpeg: true })
-        .toBuffer();
-
-  return {
-    data: encoded.buffer.slice(
-      encoded.byteOffset,
-      encoded.byteOffset + encoded.byteLength,
-    ),
-    mimeType: isPng ? "image/png" : "image/jpeg",
-  };
+  return encodeImage(pixels, width, height, mimeType);
 }
