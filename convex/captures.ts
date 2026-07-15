@@ -9,7 +9,7 @@ import { shopifyFileStatus } from "./schema";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const photoAiModel = {
   processProductPhoto: makeFunctionReference(
-    "photoAi.js:processProductPhoto",
+    "photoAiProcess.js:processProductPhoto",
   ) as any,
 };
 

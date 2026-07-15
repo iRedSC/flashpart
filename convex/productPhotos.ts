@@ -20,8 +20,9 @@ import {
 } from "./settings";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const processProductPhotoRef = makeFunctionReference(
-  "photoAi.js:processProductPhoto",
+  "photoAiProcess.js:processProductPhoto",
 ) as any;
 
 type DbCtx = QueryCtx | MutationCtx;
