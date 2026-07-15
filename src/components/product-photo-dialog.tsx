@@ -259,8 +259,6 @@ export function ProductPhotoDialog({
   const [isSaving, setIsSaving] = React.useState(false);
   const [isRegenerating, setIsRegenerating] = React.useState(false);
   const [isWhitening, setIsWhitening] = React.useState(false);
-  const [offerWhitenAfterRegen, setOfferWhitenAfterRegen] =
-    React.useState(false);
   const [isApproving, setIsApproving] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -326,7 +324,6 @@ export function ProductPhotoDialog({
     setCaptureFile(null);
     setCaptureMode("add");
     setPromptDialogOpen(false);
-    setOfferWhitenAfterRegen(false);
     setIsWhitening(false);
     initializedForProductRef.current = null;
     pendingFocusOriginalIdRef.current = null;
@@ -435,10 +432,6 @@ export function ProductPhotoDialog({
     promptDirty,
     safePairIndex,
   ]);
-
-  React.useEffect(() => {
-    setOfferWhitenAfterRegen(false);
-  }, [safePairIndex]);
 
   const originalUrl =
     previewUrl ??
@@ -717,7 +710,6 @@ export function ProductPhotoDialog({
     triggerHaptic();
     setError(null);
     setIsRegenerating(true);
-    setOfferWhitenAfterRegen(false);
     setActiveView("ai");
 
     try {
@@ -734,7 +726,6 @@ export function ProductPhotoDialog({
           model,
         });
       }
-      setOfferWhitenAfterRegen(true);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -763,7 +754,6 @@ export function ProductPhotoDialog({
             ? (currentPair.original._id as Id<"productPhotos">)
             : undefined,
       });
-      setOfferWhitenAfterRegen(false);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -852,7 +842,6 @@ export function ProductPhotoDialog({
 
     triggerHaptic();
     setError(null);
-    setOfferWhitenAfterRegen(false);
     setIsApproving(true);
 
     try {
@@ -1214,10 +1203,7 @@ export function ProductPhotoDialog({
                   )}
                   Regen
                 </Button>
-                {offerWhitenAfterRegen &&
-                aiUrl &&
-                !aiGenerating &&
-                !aiFailed ? (
+                {aiUrl && !aiGenerating && !aiFailed ? (
                   <Button
                     className={footerButtonClass}
                     disabled={isBusy}
