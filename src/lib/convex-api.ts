@@ -85,6 +85,11 @@ export const convexApi = {
       "photoAi.js:regenerateForPhoto",
     ),
   },
+  photoAiProcess: {
+    whitenAiBackground: deployedFunction<
+      typeof api.photoAiProcess.whitenAiBackground
+    >("photoAiProcess.js:whitenAiBackground"),
+  },
   photoGc: {
     runPhotoStorageGc: deployedFunction<typeof api.photoGc.runPhotoStorageGc>(
       "photoGc.js:runPhotoStorageGc",

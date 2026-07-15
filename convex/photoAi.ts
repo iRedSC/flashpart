@@ -24,6 +24,78 @@ const photoAiModel = {
   ) as any,
 };
 
+export const assertSignedIn = internalMutation({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+  },
+});
+
+export const whitenPayload = internalQuery({
+  args: {
+    productId: v.id("products"),
+    originalPhotoId: v.optional(v.id("productPhotos")),
+  },
+  handler: async (ctx, args) => {
+    const product = await ctx.db.get(args.productId);
+
+    if (!product) {
+      return null;
+    }
+
+    if (args.originalPhotoId) {
+      const original = await ctx.db.get(args.originalPhotoId);
+
+      if (
+        !original ||
+        original.productId !== args.productId ||
+        original.kind !== "original"
+      ) {
+        return null;
+      }
+
+      const ai = await getAiForOriginal(ctx, args.originalPhotoId);
+
+      if (!ai || ai.aiStatus !== "ready" || (!ai.storageId && !ai.url)) {
+        return null;
+      }
+
+      return {
+        mode: "convex" as const,
+        aiGeneration: ai.aiGeneration ?? 0,
+        aiModel: ai.aiModel,
+        aiPhotoId: ai._id,
+        originalPhotoId: original._id,
+        sku: product.sku,
+        storageId: ai.storageId,
+        url: ai.url,
+      };
+    }
+
+    if (await productHasPhotoRows(ctx, args.productId)) {
+      return null;
+    }
+
+    if (
+      product.aiImageStatus !== "ready" ||
+      !product.aiShopifyFileUrl ||
+      !product.aiShopifyFileId
+    ) {
+      return null;
+    }
+
+    return {
+      mode: "shopify" as const,
+      aiImageModel: product.aiImageModel,
+      aiShopifyFileId: product.aiShopifyFileId,
+      aiShopifyFileUrl: product.aiShopifyFileUrl,
+      productId: product._id,
+      shopifyProductId: product.shopifyProductId,
+      sku: product.sku,
+    };
+  },
+});
+
 export const processingPayload = internalQuery({
   args: {
     productId: v.id("products"),

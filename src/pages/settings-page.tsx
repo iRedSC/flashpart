@@ -352,8 +352,9 @@ export function SettingsPage() {
             <div>
               <p className="font-medium">Whiten background</p>
               <p className="text-sm text-slate-500">
-                After generation, pull slightly off-white corners to pure white.
-                Applies to new captures and regenerations.
+                After the first AI generation, pull slightly off-white corners to
+                pure white. Regenerations skip this; use Whiten in the photo
+                dialog when you need it.
               </p>
             </div>
             <Switch

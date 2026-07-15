@@ -2,7 +2,7 @@
 
 import { ConvexError, v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
-import { internalAction } from "./_generated/server";
+import { action, internalAction } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import {
   aiImageModel,
@@ -20,12 +20,14 @@ import { whitenOffWhiteBackground } from "./whitenBackground";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const photoAiModel = {
+  assertSignedIn: makeFunctionReference("photoAi.js:assertSignedIn") as any,
   markGenerating: makeFunctionReference("photoAi.js:markGenerating") as any,
   markReady: makeFunctionReference("photoAi.js:markReady") as any,
   markFailed: makeFunctionReference("photoAi.js:markFailed") as any,
   processingPayload: makeFunctionReference(
     "photoAi.js:processingPayload",
   ) as any,
+  whitenPayload: makeFunctionReference("photoAi.js:whitenPayload") as any,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -337,13 +339,15 @@ export const processProductPhoto = internalAction({
           model: payload.aiImageModel,
           prompt: payload.aiImagePrompt,
         });
-        const output =
-          payload.aiImageWhitenBackground !== false
-            ? await whitenOffWhiteBackground(
-                generated.data,
-                generated.mimeType,
-              )
-            : generated;
+        // Regens skip auto-whiten; first captures follow the settings toggle.
+        const shouldWhiten =
+          !args.isRegeneration && payload.aiImageWhitenBackground !== false;
+        const output = shouldWhiten
+          ? await whitenOffWhiteBackground(
+              generated.data,
+              generated.mimeType,
+            )
+          : generated;
         const storageId = await ctx.storage.store(
           new Blob([new Uint8Array(output.data)], {
             type: output.mimeType,
@@ -429,13 +433,15 @@ export const processProductPhoto = internalAction({
         model: payload.aiImageModel,
         prompt: payload.aiImagePrompt,
       });
-      const output =
-        payload.aiImageWhitenBackground !== false
-          ? await whitenOffWhiteBackground(
-              generated.data,
-              generated.mimeType,
-            )
-          : generated;
+      // Regens skip auto-whiten; first captures follow the settings toggle.
+      const shouldWhiten =
+        !args.isRegeneration && payload.aiImageWhitenBackground !== false;
+      const output = shouldWhiten
+        ? await whitenOffWhiteBackground(
+            generated.data,
+            generated.mimeType,
+          )
+        : generated;
       const extension = output.mimeType.includes("png") ? "png" : "jpg";
       const aiFile = await uploadImageBufferToShopify(connection, {
         alt: `${payload.sku} AI photo`,
@@ -460,5 +466,130 @@ export const processProductPhoto = internalAction({
         productId: args.productId,
       });
     }
+  },
+});
+
+/**
+ * Apply corner whitening to an existing ready AI photo.
+ * Used after regen (which skips auto-whiten) when the operator wants it.
+ */
+export const whitenAiBackground = action({
+  args: {
+    sessionToken: v.string(),
+    productId: v.id("products"),
+    originalPhotoId: v.optional(v.id("productPhotos")),
+  },
+  handler: async (ctx, args) => {
+    await ctx.runMutation(photoAiModel.assertSignedIn, {
+      sessionToken: args.sessionToken,
+    });
+
+    const payload = await ctx.runQuery(photoAiModel.whitenPayload, {
+      productId: args.productId,
+      originalPhotoId: args.originalPhotoId,
+    });
+
+    if (!payload) {
+      throw new ConvexError("Generate an AI photo before whitening.");
+    }
+
+    if (payload.mode === "convex") {
+      let imageData: ArrayBuffer;
+      let mimeType = "image/png";
+
+      if (payload.storageId) {
+        const blob = await ctx.storage.get(
+          payload.storageId as Id<"_storage">,
+        );
+        if (!blob) {
+          throw new ConvexError("Could not load the AI photo.");
+        }
+        mimeType = blob.type || "image/png";
+        imageData = await blob.arrayBuffer();
+      } else if (payload.url) {
+        const response = await fetch(payload.url);
+        if (!response.ok) {
+          throw new ConvexError("Could not download the AI photo.");
+        }
+        mimeType = response.headers.get("content-type") ?? "image/png";
+        imageData = await response.arrayBuffer();
+      } else {
+        throw new ConvexError("AI photo is missing image data.");
+      }
+
+      const whitened = await whitenOffWhiteBackground(imageData, mimeType);
+      const storageId = await ctx.storage.store(
+        new Blob([new Uint8Array(whitened.data)], {
+          type: whitened.mimeType,
+        }),
+      );
+      const url = await ctx.storage.getUrl(storageId);
+
+      try {
+        await ctx.runMutation(productPhotosModel.markAiReadyInternal, {
+          originalPhotoId: payload.originalPhotoId,
+          storageId,
+          url: url ?? undefined,
+          aiGeneration: payload.aiGeneration,
+          aiModel: payload.aiModel,
+        });
+      } catch (error) {
+        try {
+          await ctx.storage.delete(storageId);
+        } catch {
+          // Storage may already be gone.
+        }
+        throw error;
+      }
+
+      return { url: url ?? undefined };
+    }
+
+    const connection = await ctx.runQuery(
+      shopifyModel.firstActiveConnection,
+      {},
+    );
+
+    if (!connection) {
+      throw new ConvexError("Connect Shopify before whitening AI photos.");
+    }
+
+    const response = await fetch(payload.aiShopifyFileUrl);
+
+    if (!response.ok) {
+      throw new ConvexError("Could not download the AI photo.");
+    }
+
+    const mimeType =
+      response.headers.get("content-type") ?? "image/png";
+    const imageData = await response.arrayBuffer();
+    const whitened = await whitenOffWhiteBackground(imageData, mimeType);
+    const extension = whitened.mimeType.includes("png") ? "png" : "jpg";
+    const previousAiShopifyFileId = payload.aiShopifyFileId;
+    const aiFile = await uploadImageBufferToShopify(connection, {
+      alt: `${payload.sku} AI photo`,
+      data: whitened.data,
+      filename: `${payload.sku}-ai.${extension}`,
+      mimeType: whitened.mimeType,
+    });
+
+    await ctx.runMutation(photoAiModel.markReady, {
+      aiShopifyFileId: aiFile.id,
+      aiShopifyFileStatus: aiFile.status,
+      aiShopifyFileUrl: aiFile.url,
+      productId: payload.productId,
+      aiImageModel: payload.aiImageModel,
+    });
+
+    if (previousAiShopifyFileId) {
+      await detachAndDeleteShopifyFilesBestEffort(
+        ctx,
+        connection,
+        [previousAiShopifyFileId],
+        payload.shopifyProductId,
+      );
+    }
+
+    return { url: aiFile.url };
   },
 });

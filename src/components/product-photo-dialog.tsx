@@ -28,7 +28,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { Switch } from "./ui/switch";
 import { useAppData } from "../data/app-data-provider";
 import { cropImageFileToSquare } from "../lib/capture-image";
 import { convexApi } from "../lib/convex-api";
@@ -237,15 +236,13 @@ export function ProductPhotoDialog({
     regenerateAiImageForPhoto,
     replaceProductPhoto,
     session,
-    setAiImageWhitenBackground,
     settings,
+    whitenAiBackground,
   } = useAppData();
   const convex = useConvex();
   const defaultPrompt =
     settings?.aiImageDefaultPrompt?.trim() || DEFAULT_AI_IMAGE_PROMPT;
   const maxProductPhotos = settings?.maxProductPhotos ?? 5;
-  const aiImageWhitenBackground =
-    settings?.aiImageWhitenBackground !== false;
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const touchStartXRef = React.useRef<number | null>(null);
   const initializedForProductRef = React.useRef<string | null>(null);
@@ -261,6 +258,9 @@ export function ProductPhotoDialog({
   const [promptDialogOpen, setPromptDialogOpen] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isRegenerating, setIsRegenerating] = React.useState(false);
+  const [isWhitening, setIsWhitening] = React.useState(false);
+  const [offerWhitenAfterRegen, setOfferWhitenAfterRegen] =
+    React.useState(false);
   const [isApproving, setIsApproving] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -326,6 +326,8 @@ export function ProductPhotoDialog({
     setCaptureFile(null);
     setCaptureMode("add");
     setPromptDialogOpen(false);
+    setOfferWhitenAfterRegen(false);
+    setIsWhitening(false);
     initializedForProductRef.current = null;
     pendingFocusOriginalIdRef.current = null;
 
@@ -434,6 +436,10 @@ export function ProductPhotoDialog({
     safePairIndex,
   ]);
 
+  React.useEffect(() => {
+    setOfferWhitenAfterRegen(false);
+  }, [safePairIndex]);
+
   const originalUrl =
     previewUrl ??
     currentPair?.original?.url ??
@@ -462,7 +468,8 @@ export function ProductPhotoDialog({
       !aiFailed,
   );
   const canTakePhoto = Boolean(product?.groupId);
-  const isBusy = isSaving || isRegenerating || isApproving || isDeleting;
+  const isBusy =
+    isSaving || isRegenerating || isWhitening || isApproving || isDeleting;
   const originalCount = pairs.filter((pair) => pair.original != null).length;
   const isLegacyOnly =
     pairs.length > 0 && pairs.every((pair) => pair.isLegacy);
@@ -710,6 +717,7 @@ export function ProductPhotoDialog({
     triggerHaptic();
     setError(null);
     setIsRegenerating(true);
+    setOfferWhitenAfterRegen(false);
     setActiveView("ai");
 
     try {
@@ -726,6 +734,7 @@ export function ProductPhotoDialog({
           model,
         });
       }
+      setOfferWhitenAfterRegen(true);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -734,6 +743,35 @@ export function ProductPhotoDialog({
       );
     } finally {
       setIsRegenerating(false);
+    }
+  }
+
+  async function handleWhitenBackground() {
+    if (!product || isBusy || aiGenerating || !aiUrl) {
+      return;
+    }
+
+    triggerHaptic();
+    setError(null);
+    setIsWhitening(true);
+
+    try {
+      await whitenAiBackground({
+        productId: product._id,
+        originalPhotoId:
+          currentPair && !currentPair.isLegacy && currentPair.original
+            ? (currentPair.original._id as Id<"productPhotos">)
+            : undefined,
+      });
+      setOfferWhitenAfterRegen(false);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Could not whiten the AI background.",
+      );
+    } finally {
+      setIsWhitening(false);
     }
   }
 
@@ -1105,27 +1143,6 @@ export function ProductPhotoDialog({
             </p>
           ) : null}
 
-          {activeView === "ai" && !captureFile ? (
-            <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-2.5">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Whiten background</p>
-                <p className="text-xs text-slate-500">
-                  Applies to the next generation
-                </p>
-              </div>
-              <Switch
-                aria-label="Whiten background"
-                checked={aiImageWhitenBackground}
-                disabled={isBusy || aiGenerating}
-                onCheckedChange={(checked) =>
-                  void setAiImageWhitenBackground(checked).catch(
-                    () => undefined,
-                  )
-                }
-              />
-            </div>
-          ) : null}
-
           <DialogFooter className="flex flex-row flex-nowrap items-center gap-1.5 overflow-x-auto sm:justify-start">
             {activeView === "ai" && !captureFile ? (
               <>
@@ -1196,6 +1213,24 @@ export function ProductPhotoDialog({
                   )}
                   Regen
                 </Button>
+                {offerWhitenAfterRegen &&
+                aiUrl &&
+                !aiGenerating &&
+                !aiFailed ? (
+                  <Button
+                    className={footerButtonClass}
+                    disabled={isBusy}
+                    onClick={() => void handleWhitenBackground()}
+                    variant="outline"
+                  >
+                    {isWhitening ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    Whiten
+                  </Button>
+                ) : null}
                 {currentAiNeedsApproval ? (
                   <Button
                     className={footerButtonClass}

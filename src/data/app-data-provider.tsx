@@ -196,6 +196,10 @@ type AppDataContextValue = {
     options?: { confirmPublishedDelete?: boolean },
   ) => Promise<null>;
   approveAiPhoto: (photoId: Id<"productPhotos">) => Promise<null>;
+  whitenAiBackground: (args: {
+    productId: Id<"products">;
+    originalPhotoId?: Id<"productPhotos">;
+  }) => Promise<{ url?: string } | null>;
   regenerateAiImageForPhoto: (args: {
     originalPhotoId: Id<"productPhotos">;
     prompt?: string;
@@ -480,6 +484,9 @@ export function AppDataProvider({
   );
   const approvePhotoMutation = useMutation(convexApi.photoAi.approvePhoto);
   const approveAiPhotoMutation = useMutation(convexApi.photoAi.approveAiPhoto);
+  const whitenAiBackgroundAction = useAction(
+    convexApi.photoAiProcess.whitenAiBackground,
+  );
   const operationIdRef = React.useRef(0);
   const hasInitializedFailedJobTrackingRef = React.useRef(false);
   const seenFailedListingJobIdsRef = React.useRef<Set<string>>(new Set());
@@ -1588,6 +1595,20 @@ export function AppDataProvider({
           productIds: productId ? [productId] : undefined,
         });
       },
+      whitenAiBackground: ({ productId, originalPhotoId }) =>
+        runOptimistic({
+          apply: (state) => state,
+          commit: async () => {
+            const result = await whitenAiBackgroundAction({
+              productId,
+              originalPhotoId,
+              sessionToken: session.sessionToken,
+            });
+            return result ?? null;
+          },
+          label: "Whitening AI background",
+          productIds: [productId],
+        }),
       regenerateAiImageForPhoto: ({ originalPhotoId, prompt, model }) => {
         const productId = findProductIdForPhoto(
           photosByProductId,
@@ -1710,6 +1731,7 @@ export function AppDataProvider({
       queryArgs,
       approveAiPhotoMutation,
       approvePhotoMutation,
+      whitenAiBackgroundAction,
       deletePhotoMutation,
       deleteUploadedStorageMutation,
       finalizeOriginalUploadMutation,
