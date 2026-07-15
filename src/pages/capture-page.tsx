@@ -57,6 +57,8 @@ export function CapturePage() {
   const [cameraError, setCameraError] = React.useState<string | null>(null);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
   const [isSaving, setIsSaving] = React.useState(false);
+  /** Sync guard — React state alone cannot block double-taps in the same render. */
+  const savingRef = React.useRef(false);
   /** Keep capturing on this product until max photos or operator advances. */
   const [heldProductId, setHeldProductId] = React.useState<Id<"products"> | null>(
     null,
@@ -249,6 +251,22 @@ export function CapturePage() {
     }
   }, [heldProduct, heldProductId]);
 
+  // Do not let a prior product's optimistic count leak onto the next queue item.
+  const previousProductIdRef = React.useRef(currentProductId);
+  React.useEffect(() => {
+    if (previousProductIdRef.current === currentProductId) {
+      return;
+    }
+
+    previousProductIdRef.current = currentProductId;
+
+    if (heldProductId != null && heldProductId === currentProductId) {
+      return;
+    }
+
+    setLocalOriginalCount(0);
+  }, [currentProductId, heldProductId]);
+
   function clearHeldProduct() {
     setHeldProductId(null);
     setLocalOriginalCount(0);
@@ -356,7 +374,7 @@ export function CapturePage() {
   }
 
   async function handleSave(withPhoto: boolean) {
-    if (!currentProduct || isSaving || photosLoading) {
+    if (!currentProduct || isSaving || savingRef.current || photosLoading) {
       return;
     }
 
@@ -390,6 +408,7 @@ export function CapturePage() {
       triggerHaptic();
       setUploadError(null);
       setSelectedFile(null);
+      savingRef.current = true;
       setIsSaving(true);
 
       try {
@@ -431,6 +450,7 @@ export function CapturePage() {
             : "Photo could not be saved. Please try again.",
         );
       } finally {
+        savingRef.current = false;
         setIsSaving(false);
       }
       return;
@@ -442,23 +462,29 @@ export function CapturePage() {
 
     const capturedProductId = currentProduct._id;
     const countBeforeSave = originalCount;
+    const nextCount = countBeforeSave + 1;
+    const fileToUpload = selectedFile;
 
     triggerHaptic();
     setUploadError(null);
     setSelectedFile(null);
+    // Hold before upload so optimistic phase / photo-query races cannot advance
+    // the queue to the next part while this photo is still saving.
+    setHeldProductId(capturedProductId);
+    setSkippedProductIds((prev) =>
+      prev.filter((productId) => productId !== capturedProductId),
+    );
+    savingRef.current = true;
     setIsSaving(true);
 
     try {
       await submitCapture({
         groupId: captureGroupId,
         productId: capturedProductId,
-        file: selectedFile,
+        file: fileToUpload,
       });
 
-      const nextCount = countBeforeSave + 1;
-
       if (nextCount < maxProductPhotos) {
-        setHeldProductId(capturedProductId);
         setLocalOriginalCount(nextCount);
       } else {
         clearHeldProduct();
@@ -466,12 +492,15 @@ export function CapturePage() {
 
       triggerHaptic();
     } catch (error) {
+      // Keep the hold so the operator can retry on the same part.
+      setLocalOriginalCount(countBeforeSave);
       setUploadError(
         error instanceof Error
           ? error.message
           : "Photo could not be saved. Please try again.",
       );
     } finally {
+      savingRef.current = false;
       setIsSaving(false);
     }
   }
@@ -856,7 +885,9 @@ export function CapturePage() {
                 </>
               )}
             </Button>
-            {secondaryIsNext ? (
+            {/* Hide part-advance while a preview is up — Save / Retake only.
+                Otherwise Skip / Next product can discard the shot and jump parts. */}
+            {hasPreview ? null : secondaryIsNext ? (
               <Button
                 className="h-11 w-full text-slate-500"
                 disabled={isSaving}
