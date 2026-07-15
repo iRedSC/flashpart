@@ -577,6 +577,60 @@ export async function applyMarkAiReady(
   return aiPhoto._id;
 }
 
+/**
+ * Replace AI image bytes after on-demand whitening. Unlike applyMarkAiReady,
+ * keeps approvedAt so Approve → Whiten does not bounce the photo back to review.
+ * Still clears Shopify file identity because the pixels changed.
+ */
+export async function applyWhitenAiReady(
+  ctx: MutationCtx,
+  args: {
+    storageId: Id<"_storage">;
+    url?: string;
+    aiGeneration: number;
+    aiPhotoId?: Id<"productPhotos">;
+    originalPhotoId?: Id<"productPhotos">;
+    aiModel?: AiImageModelId;
+  },
+) {
+  let aiPhoto: Doc<"productPhotos">;
+  try {
+    aiPhoto = await resolveAiPhotoRow(ctx, args);
+  } catch {
+    await deleteStorageBlob(ctx, args.storageId);
+    return null;
+  }
+
+  if ((aiPhoto.aiGeneration ?? 0) !== args.aiGeneration) {
+    await deleteStorageBlob(ctx, args.storageId);
+    return null;
+  }
+
+  const now = Date.now();
+  const url = args.url ?? (await ctx.storage.getUrl(args.storageId));
+
+  if (aiPhoto.storageId && aiPhoto.storageId !== args.storageId) {
+    await deleteStorageBlob(ctx, aiPhoto.storageId);
+  }
+
+  await ctx.db.patch(aiPhoto._id, {
+    aiError: undefined,
+    aiModel: args.aiModel ?? aiPhoto.aiModel,
+    aiStatus: "ready",
+    shopifyFileDeletedAt: undefined,
+    shopifyFileId: undefined,
+    shopifyFileStatus: undefined,
+    storageId: args.storageId,
+    status: "ready",
+    url: url ?? undefined,
+    updatedAt: now,
+  });
+
+  await syncProductPhotoFlags(ctx, aiPhoto.productId);
+
+  return aiPhoto._id;
+}
+
 export async function applyMarkAiFailed(
   ctx: MutationCtx,
   args: {
@@ -1452,6 +1506,20 @@ export const markAiReadyInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     return await applyMarkAiReady(ctx, args);
+  },
+});
+
+export const whitenAiReadyInternal = internalMutation({
+  args: {
+    storageId: v.id("_storage"),
+    url: v.optional(v.string()),
+    aiGeneration: v.number(),
+    aiPhotoId: v.optional(v.id("productPhotos")),
+    originalPhotoId: v.optional(v.id("productPhotos")),
+    aiModel: v.optional(aiImageModel),
+  },
+  handler: async (ctx, args) => {
+    return await applyWhitenAiReady(ctx, args);
   },
 });
 

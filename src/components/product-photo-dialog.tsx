@@ -852,6 +852,7 @@ export function ProductPhotoDialog({
 
     triggerHaptic();
     setError(null);
+    setOfferWhitenAfterRegen(false);
     setIsApproving(true);
 
     try {

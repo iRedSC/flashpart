@@ -205,10 +205,16 @@ export const markReady = internalMutation({
     aiShopifyFileUrl: v.optional(v.string()),
     productId: v.id("products"),
     aiImageModel: v.optional(aiImageModel),
+    /**
+     * When false, keep existing needsPhotoReview (on-demand whiten after
+     * approve). Default true for new generations / regens.
+     */
+    requirePhotoReview: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
     const product = await ctx.db.get(args.productId);
+    const requirePhotoReview = args.requirePhotoReview !== false;
 
     await ctx.db.patch(args.productId, {
       aiImageError: undefined,
@@ -217,7 +223,7 @@ export const markReady = internalMutation({
       aiShopifyFileId: args.aiShopifyFileId,
       aiShopifyFileStatus: args.aiShopifyFileStatus,
       aiShopifyFileUrl: args.aiShopifyFileUrl,
-      needsPhotoReview: true,
+      ...(requirePhotoReview ? { needsPhotoReview: true } : {}),
       pendingOperation: undefined,
       updatedAt: now,
       ...(product ? needsRepublishPatch(product) : {}),

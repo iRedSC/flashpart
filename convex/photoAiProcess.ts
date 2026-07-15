@@ -38,10 +38,25 @@ const productPhotosModel = {
   markAiReadyInternal: makeFunctionReference(
     "productPhotos.js:markAiReadyInternal",
   ) as any,
+  whitenAiReadyInternal: makeFunctionReference(
+    "productPhotos.js:whitenAiReadyInternal",
+  ) as any,
   markAiFailedInternal: makeFunctionReference(
     "productPhotos.js:markAiFailedInternal",
   ) as any,
 };
+
+/** Best-effort whitening; keep Gemini output if codecs fail. */
+async function maybeWhitenBackground(
+  data: ArrayBuffer,
+  mimeType: string,
+): Promise<{ data: ArrayBuffer; mimeType: string }> {
+  try {
+    return await whitenOffWhiteBackground(data, mimeType);
+  } catch {
+    return { data, mimeType };
+  }
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const shopifyModel = {
@@ -343,10 +358,7 @@ export const processProductPhoto = internalAction({
         const shouldWhiten =
           !args.isRegeneration && payload.aiImageWhitenBackground !== false;
         const output = shouldWhiten
-          ? await whitenOffWhiteBackground(
-              generated.data,
-              generated.mimeType,
-            )
+          ? await maybeWhitenBackground(generated.data, generated.mimeType)
           : generated;
         const storageId = await ctx.storage.store(
           new Blob([new Uint8Array(output.data)], {
@@ -437,10 +449,7 @@ export const processProductPhoto = internalAction({
       const shouldWhiten =
         !args.isRegeneration && payload.aiImageWhitenBackground !== false;
       const output = shouldWhiten
-        ? await whitenOffWhiteBackground(
-            generated.data,
-            generated.mimeType,
-          )
+        ? await maybeWhitenBackground(generated.data, generated.mimeType)
         : generated;
       const extension = output.mimeType.includes("png") ? "png" : "jpg";
       const aiFile = await uploadImageBufferToShopify(connection, {
@@ -526,7 +535,7 @@ export const whitenAiBackground = action({
       const url = await ctx.storage.getUrl(storageId);
 
       try {
-        await ctx.runMutation(productPhotosModel.markAiReadyInternal, {
+        await ctx.runMutation(productPhotosModel.whitenAiReadyInternal, {
           originalPhotoId: payload.originalPhotoId,
           storageId,
           url: url ?? undefined,
@@ -579,6 +588,8 @@ export const whitenAiBackground = action({
       aiShopifyFileUrl: aiFile.url,
       productId: payload.productId,
       aiImageModel: payload.aiImageModel,
+      // Do not re-open review if the operator already approved.
+      requirePhotoReview: false,
     });
 
     if (previousAiShopifyFileId) {
