@@ -21,7 +21,14 @@ import {
   uploadImageBufferToShopify,
 } from "./shopifyClient";
 
-const SHOPIFY_SCOPES = ["read_products", "write_products", "read_files", "write_files"];
+const SHOPIFY_SCOPES = [
+  "read_products",
+  "write_products",
+  "read_files",
+  "write_files",
+  "read_publications",
+  "write_publications",
+];
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 type ShopifyAccessTokenResponse = {

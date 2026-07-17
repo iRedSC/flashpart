@@ -2,7 +2,11 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireSessionUser } from "./authUtils";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { duplicatePolicy, shopifyPublishTarget } from "./schema";
+import {
+  duplicatePolicy,
+  shopifyPublishTarget,
+  shopifySalesChannelId,
+} from "./schema";
 import { aiImageEditStrength, aiImageModel } from "./photoAiConstants";
 import {
   DEFAULT_AI_IMAGE_EDIT_STRENGTH,
@@ -10,6 +14,11 @@ import {
   GEMINI_IMAGE_MODEL,
 } from "./photoAiConstants";
 import type { AiImageEditStrength, AiImageModelId } from "./photoAiConstants";
+import {
+  DEFAULT_SHOPIFY_SALES_CHANNELS,
+  normalizeShopifyShippingPackageId,
+  resolveShopifySalesChannels,
+} from "./shopifyPublishSettings";
 import { normalizeTagString } from "./tags";
 
 const DEFAULT_MAX_PRODUCT_PHOTOS = 5;
@@ -29,6 +38,7 @@ const defaultSettings = {
   maxProductPhotos: DEFAULT_MAX_PRODUCT_PHOTOS,
   shopifyPublishTarget: "draft" as const,
   shopifyProductType: "Part" as const,
+  shopifySalesChannels: [...DEFAULT_SHOPIFY_SALES_CHANNELS],
   updatedAt: 0,
 };
 
@@ -92,6 +102,12 @@ export const get = query({
       ...stored,
       ...resolveAiImageSettings(stored),
       maxProductPhotos: resolveMaxProductPhotos(stored),
+      shopifySalesChannels: resolveShopifySalesChannels(
+        stored?.shopifySalesChannels,
+      ),
+      shopifyShippingPackageId:
+        normalizeShopifyShippingPackageId(stored?.shopifyShippingPackageId) ??
+        "",
     };
   },
 });
@@ -257,6 +273,67 @@ export const setShopifyDefaultTags = mutation({
     }
 
     return { shopifyDefaultTags };
+  },
+});
+
+export const setShopifyShippingPackageId = mutation({
+  args: {
+    sessionToken: v.string(),
+    shopifyShippingPackageId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const settings = await getSettingsDocument(ctx);
+    const now = Date.now();
+    const shopifyShippingPackageId =
+      normalizeShopifyShippingPackageId(args.shopifyShippingPackageId) ?? "";
+
+    if (settings) {
+      await ctx.db.patch(settings._id, {
+        shopifyShippingPackageId: shopifyShippingPackageId || undefined,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("appSettings", {
+        ...defaultSettings,
+        ...(shopifyShippingPackageId
+          ? { shopifyShippingPackageId }
+          : {}),
+        updatedAt: now,
+      });
+    }
+
+    return { shopifyShippingPackageId };
+  },
+});
+
+export const setShopifySalesChannels = mutation({
+  args: {
+    sessionToken: v.string(),
+    shopifySalesChannels: v.array(shopifySalesChannelId),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const settings = await getSettingsDocument(ctx);
+    const now = Date.now();
+    const shopifySalesChannels = resolveShopifySalesChannels(
+      args.shopifySalesChannels,
+    );
+
+    if (settings) {
+      await ctx.db.patch(settings._id, {
+        shopifySalesChannels,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("appSettings", {
+        ...defaultSettings,
+        shopifySalesChannels,
+        updatedAt: now,
+      });
+    }
+
+    return { shopifySalesChannels };
   },
 });
 

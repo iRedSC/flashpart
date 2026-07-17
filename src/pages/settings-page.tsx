@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
+import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
 import { Switch } from "../components/ui/switch";
 import { useAppData } from "../data/app-data-provider";
@@ -23,6 +24,11 @@ import {
   type AiImageModelId,
 } from "../lib/ai-image-settings";
 import { convexApi } from "../lib/convex-api";
+import {
+  DEFAULT_SHOPIFY_SALES_CHANNELS,
+  SHOPIFY_SALES_CHANNEL_OPTIONS,
+  type ShopifySalesChannelId,
+} from "../../convex/shopifyPublishSettings";
 
 export function SettingsPage() {
   const {
@@ -39,6 +45,8 @@ export function SettingsPage() {
     setShopifyDefaultTags,
     setShopifyProductType,
     setShopifyPublishTarget,
+    setShopifySalesChannels,
+    setShopifyShippingPackageId,
     session,
     settings,
     shopifyConnection,
@@ -54,6 +62,9 @@ export function SettingsPage() {
   );
   const [defaultTags, setDefaultTags] = React.useState(
     settings?.shopifyDefaultTags ?? "",
+  );
+  const [shippingPackageId, setShippingPackageId] = React.useState(
+    settings?.shopifyShippingPackageId ?? "",
   );
   const [aiImageDefaultPrompt, setAiImageDefaultPromptState] = React.useState(
     settings?.aiImageDefaultPrompt ?? DEFAULT_AI_IMAGE_PROMPT,
@@ -90,6 +101,8 @@ export function SettingsPage() {
     settings?.aiImageUpgradeModelOnRegen === true;
   const aiImageWhitenBackground =
     settings?.aiImageWhitenBackground !== false;
+  const selectedSalesChannels =
+    settings?.shopifySalesChannels ?? DEFAULT_SHOPIFY_SALES_CHANNELS;
 
   React.useEffect(() => {
     setProductType(settings?.shopifyProductType ?? "Part");
@@ -98,6 +111,10 @@ export function SettingsPage() {
   React.useEffect(() => {
     setDefaultTags(settings?.shopifyDefaultTags ?? "");
   }, [settings?.shopifyDefaultTags]);
+
+  React.useEffect(() => {
+    setShippingPackageId(settings?.shopifyShippingPackageId ?? "");
+  }, [settings?.shopifyShippingPackageId]);
 
   React.useEffect(() => {
     setAiImageDefaultPromptState(
@@ -549,6 +566,82 @@ export function SettingsPage() {
               </Button>
             </div>
           </form>
+
+          <div className="mt-6 grid gap-4 border-t border-slate-200 pt-6">
+            <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
+              <label
+                className="grid gap-2 text-sm font-medium"
+                htmlFor="shipping-package-id"
+              >
+                Default shipping package ID
+                <Input
+                  id="shipping-package-id"
+                  onBlur={() => {
+                    if (
+                      shippingPackageId !==
+                      (settings?.shopifyShippingPackageId ?? "")
+                    ) {
+                      void setShopifyShippingPackageId(shippingPackageId).catch(
+                        () => undefined,
+                      );
+                    }
+                  }}
+                  onChange={(event) =>
+                    setShippingPackageId(event.currentTarget.value)
+                  }
+                  placeholder="gid://shopify/CustomShippingPackage/123456789"
+                  value={shippingPackageId}
+                />
+              </label>
+              <p className="text-sm text-slate-500">
+                Applied to every published variant. Paste the package GID or
+                numeric ID from Shopify admin.
+              </p>
+            </div>
+
+            <div className="grid gap-3 rounded-lg border border-slate-200 p-4">
+              <div>
+                <p className="text-sm font-medium">Sales channels</p>
+                <p className="text-sm text-slate-500">
+                  Products are published to the selected channels. Reconnect
+                  Shopify if publication scopes are missing.
+                </p>
+              </div>
+              <div className="grid gap-3">
+                {SHOPIFY_SALES_CHANNEL_OPTIONS.map((channel) => {
+                  const checked = selectedSalesChannels.includes(channel.id);
+
+                  return (
+                    <label
+                      className="flex items-center gap-3 text-sm"
+                      htmlFor={`sales-channel-${channel.id}`}
+                      key={channel.id}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        id={`sales-channel-${channel.id}`}
+                        onCheckedChange={(nextChecked) => {
+                          const enabled = nextChecked === true;
+                          const next: ShopifySalesChannelId[] = enabled
+                            ? selectedSalesChannels.includes(channel.id)
+                              ? selectedSalesChannels
+                              : [...selectedSalesChannels, channel.id]
+                            : selectedSalesChannels.filter(
+                                (id) => id !== channel.id,
+                              );
+
+                          void setShopifySalesChannels(next).catch(
+                            () => undefined,
+                          );
+                        }}
+                      />
+                      {channel.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

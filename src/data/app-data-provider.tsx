@@ -9,6 +9,7 @@ import {
   isGroupCaptureComplete,
 } from "../lib/product-state";
 import type { AiImageEditStrength, AiImageModelId } from "../lib/ai-image-settings";
+import type { ShopifySalesChannelId } from "../../convex/shopifyPublishSettings";
 
 type Product = FunctionReturnType<typeof convexApi.products.list>[number];
 type Group = FunctionReturnType<typeof convexApi.groups.list>[number];
@@ -24,6 +25,8 @@ type Settings = Omit<
   autoArchiveCompleteGroups: boolean;
   duplicatePolicy: DuplicatePolicy;
   shopifyPublishTarget: ShopifyPublishTarget;
+  shopifySalesChannels: ShopifySalesChannelId[];
+  shopifyShippingPackageId: string;
 };
 type ShopifyConnection = FunctionReturnType<typeof convexApi.shopify.currentConnection>;
 type ConvexCaptureUpload = {
@@ -128,6 +131,12 @@ type AppDataContextValue = {
   setShopifyDefaultTags: (
     shopifyDefaultTags: string,
   ) => Promise<{ shopifyDefaultTags: string | undefined } | null>;
+  setShopifyShippingPackageId: (
+    shopifyShippingPackageId: string,
+  ) => Promise<{ shopifyShippingPackageId: string } | null>;
+  setShopifySalesChannels: (
+    shopifySalesChannels: ShopifySalesChannelId[],
+  ) => Promise<{ shopifySalesChannels: ShopifySalesChannelId[] } | null>;
   setAiImageDefaultPrompt: (
     aiImageDefaultPrompt: string,
   ) => Promise<{ aiImageDefaultPrompt: string } | null>;
@@ -434,6 +443,12 @@ export function AppDataProvider({
   );
   const setShopifyDefaultTagsMutation = useMutation(
     convexApi.settings.setShopifyDefaultTags,
+  );
+  const setShopifyShippingPackageIdMutation = useMutation(
+    convexApi.settings.setShopifyShippingPackageId,
+  );
+  const setShopifySalesChannelsMutation = useMutation(
+    convexApi.settings.setShopifySalesChannels,
   );
   const setAiImageDefaultPromptMutation = useMutation(
     convexApi.settings.setAiImageDefaultPrompt,
@@ -1061,6 +1076,44 @@ export function AppDataProvider({
               shopifyDefaultTags,
             }),
           label: "Saving default Shopify tags",
+        }),
+      setShopifyShippingPackageId: (shopifyShippingPackageId) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  shopifyShippingPackageId,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setShopifyShippingPackageIdMutation({
+              sessionToken: session.sessionToken,
+              shopifyShippingPackageId,
+            }),
+          label: "Saving Shopify shipping package",
+        }),
+      setShopifySalesChannels: (shopifySalesChannels) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  shopifySalesChannels,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setShopifySalesChannelsMutation({
+              sessionToken: session.sessionToken,
+              shopifySalesChannels,
+            }),
+          label: "Saving Shopify sales channels",
         }),
       setAiImageDefaultPrompt: (aiImageDefaultPrompt) =>
         runOptimistic({
@@ -1759,6 +1812,8 @@ export function AppDataProvider({
       setShopifyPublishTargetMutation,
       setShopifyProductTypeMutation,
       setShopifyDefaultTagsMutation,
+      setShopifyShippingPackageIdMutation,
+      setShopifySalesChannelsMutation,
       disconnectShopifyMutation,
       photosByProductId,
       settings,

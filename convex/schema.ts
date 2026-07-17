@@ -19,6 +19,13 @@ export const shopifyPublishTarget = v.union(
   v.literal("published"),
 );
 
+export const shopifySalesChannelId = v.union(
+  v.literal("online_store"),
+  v.literal("pos"),
+  v.literal("shop"),
+  v.literal("google_youtube"),
+);
+
 export const shopifyFileStatus = v.union(
   v.literal("uploaded"),
   v.literal("processing"),
@@ -117,6 +124,10 @@ export default defineSchema({
     shopifyTokenLastFour: v.optional(v.string()),
     shopifyProductType: v.optional(v.string()),
     shopifyDefaultTags: v.optional(v.string()),
+    /** Shipping package GID or numeric id assigned to published variants. */
+    shopifyShippingPackageId: v.optional(v.string()),
+    /** Sales channels to publish listings to (by stable app id). */
+    shopifySalesChannels: v.optional(v.array(shopifySalesChannelId)),
     autoArchiveComplete: v.optional(v.boolean()),
     autoArchiveCompleteGroups: v.optional(v.boolean()),
     updatedAt: v.number(),

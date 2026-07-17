@@ -170,6 +170,12 @@ export const convexApi = {
     setShopifyDefaultTags: deployedFunction<
       typeof api.settings.setShopifyDefaultTags
     >("settings.js:setShopifyDefaultTags"),
+    setShopifyShippingPackageId: deployedFunction<
+      typeof api.settings.setShopifyShippingPackageId
+    >("settings.js:setShopifyShippingPackageId"),
+    setShopifySalesChannels: deployedFunction<
+      typeof api.settings.setShopifySalesChannels
+    >("settings.js:setShopifySalesChannels"),
     setAiImageDefaultPrompt: deployedFunction<
       typeof api.settings.setAiImageDefaultPrompt
     >("settings.js:setAiImageDefaultPrompt"),

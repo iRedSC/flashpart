@@ -1,4 +1,8 @@
 import { ConvexError } from "convex/values";
+import {
+  publicationMatchesChannel,
+  type ShopifySalesChannelId,
+} from "./shopifyPublishSettings";
 
 export const SHOPIFY_API_VERSION = "2026-04";
 
@@ -583,12 +587,30 @@ export async function updateShopifyProduct(
   return data.productUpdate.product;
 }
 
+function inventoryItemInput(input: {
+  shippingPackageId?: string;
+  sku: string;
+}) {
+  return {
+    sku: input.sku,
+    tracked: true,
+    ...(input.shippingPackageId
+      ? {
+          measurement: {
+            shippingPackageId: input.shippingPackageId,
+          },
+        }
+      : {}),
+  };
+}
+
 export async function createShopifyVariant(
   connection: ShopifyConnection,
   input: {
     barcode: string;
     price: number;
     productId: string;
+    shippingPackageId?: string;
     sku: string;
   },
 ) {
@@ -623,9 +645,7 @@ export async function createShopifyVariant(
       variants: [
         {
           barcode: input.barcode,
-          inventoryItem: {
-            sku: input.sku,
-          },
+          inventoryItem: inventoryItemInput(input),
           price: input.price.toFixed(2),
         },
       ],
@@ -646,6 +666,7 @@ export async function updateShopifyVariant(
     barcode: string;
     price: number;
     productId: string;
+    shippingPackageId?: string;
     sku: string;
     variantId: string;
   },
@@ -676,9 +697,7 @@ export async function updateShopifyVariant(
         {
           barcode: input.barcode,
           id: input.variantId,
-          inventoryItem: {
-            sku: input.sku,
-          },
+          inventoryItem: inventoryItemInput(input),
           price: input.price.toFixed(2),
         },
       ],
@@ -691,6 +710,93 @@ export async function updateShopifyVariant(
   }
 
   return variant;
+}
+
+export async function listShopifyPublications(
+  connection: ShopifyConnection,
+) {
+  const data = await shopifyGraphql<{
+    publications: {
+      nodes: Array<{
+        id: string;
+        name?: string | null;
+        catalog?: { title?: string | null } | null;
+      }>;
+    };
+  }>(
+    connection,
+    `query listPublications {
+      publications(first: 50) {
+        nodes {
+          id
+          name
+          catalog {
+            title
+          }
+        }
+      }
+    }`,
+  );
+
+  return data.publications.nodes.map((publication) => ({
+    id: publication.id,
+    name: publication.catalog?.title?.trim() || publication.name?.trim() || "",
+  }));
+}
+
+export async function publishProductToSalesChannels(
+  connection: ShopifyConnection,
+  input: {
+    channelIds: ShopifySalesChannelId[];
+    productId: string;
+  },
+) {
+  if (input.channelIds.length === 0) {
+    return { publicationIds: [] as string[] };
+  }
+
+  const publications = await listShopifyPublications(connection);
+  const publicationIds = publications
+    .filter((publication) =>
+      publication.name.length > 0 &&
+      input.channelIds.some((channelId) =>
+        publicationMatchesChannel(publication.name, channelId),
+      ),
+    )
+    .map((publication) => publication.id);
+
+  if (publicationIds.length === 0) {
+    throw new ConvexError(
+      "None of the configured Shopify sales channels were found on this store.",
+    );
+  }
+
+  await shopifyGraphql<{
+    publishablePublish: {
+      publishable: { id: string } | null;
+    };
+  }>(
+    connection,
+    `mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+      publishablePublish(id: $id, input: $input) {
+        publishable {
+          ... on Product {
+            id
+          }
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }`,
+    {
+      id: input.productId,
+      input: publicationIds.map((publicationId) => ({ publicationId })),
+    },
+  );
+
+  return { publicationIds };
 }
 
 export async function addFileReferenceToProduct(

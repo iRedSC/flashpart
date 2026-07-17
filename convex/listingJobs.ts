@@ -15,6 +15,7 @@ import {
   createShopifyVariant,
   deleteShopifyFiles,
   findProductBySku,
+  publishProductToSalesChannels,
   skuToShopifyHandle,
   updateShopifyProduct,
   updateShopifyVariant,
@@ -29,6 +30,10 @@ import {
   productHasPhotoRows,
 } from "./productPhotos";
 import { getSettingsDocument } from "./settings";
+import {
+  normalizeShopifyShippingPackageId,
+  resolveShopifySalesChannels,
+} from "./shopifyPublishSettings";
 import { mergeTagLists } from "./tags";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -302,6 +307,12 @@ export const jobPayload = internalQuery({
         shopifyDefaultTags: settings?.shopifyDefaultTags,
         shopifyProductType: settings?.shopifyProductType ?? "Part",
         shopifyPublishTarget: settings?.shopifyPublishTarget ?? "draft",
+        shopifySalesChannels: resolveShopifySalesChannels(
+          settings?.shopifySalesChannels,
+        ),
+        shopifyShippingPackageId: normalizeShopifyShippingPackageId(
+          settings?.shopifyShippingPackageId,
+        ),
       },
       useProductPhotos,
       approvedAiPhotoIds,
@@ -704,6 +715,7 @@ export const processQueuedJob = internalAction({
       const vendor = payload.product.vendor?.trim() || undefined;
       const descriptionHtml =
         payload.product.description?.trim() || undefined;
+      const shippingPackageId = payload.settings.shopifyShippingPackageId;
       const shopifyListing = {
         ...(descriptionHtml ? { descriptionHtml } : {}),
         handle,
@@ -734,6 +746,7 @@ export const processQueuedJob = internalAction({
                 barcode: payload.product.sku,
                 price: payload.product.price,
                 productId: product.id,
+                shippingPackageId,
                 sku: payload.product.sku,
                 variantId: existing.variantId,
               })
@@ -746,11 +759,19 @@ export const processQueuedJob = internalAction({
           barcode: payload.product.sku,
           price: payload.product.price,
           productId: product.id,
+          shippingPackageId,
           sku: payload.product.sku,
         });
         shopifyProductId = product.id;
         shopifyVariantId = variant.id;
         mode = "created";
+      }
+
+      if (payload.settings.shopifySalesChannels.length > 0) {
+        await publishProductToSalesChannels(payload.connection, {
+          channelIds: payload.settings.shopifySalesChannels,
+          productId: shopifyProductId,
+        });
       }
 
       if (useProductPhotos && publishFileIds) {
