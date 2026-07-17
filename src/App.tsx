@@ -2,6 +2,7 @@ import { ConvexProvider, ConvexReactClient, useAction } from "convex/react";
 import * as React from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthPage } from "./components/auth/auth-page";
+import { AuthSessionErrorBoundary } from "./components/auth/auth-session-error-boundary";
 import { AppShell, RootRedirect } from "./components/shell/app-shell";
 import { AppDataProvider } from "./data/app-data-provider";
 import {
@@ -79,23 +80,25 @@ function AuthenticatedApp() {
 
   return session ? (
     <BrowserRouter>
-      <AppDataProvider session={session}>
-        <Routes>
-          <Route
-            element={<AppShell onSignOut={handleSignOut} session={session} />}
-          >
-            <Route index element={<RootRedirect />} />
-            <Route path="/products" element={<ProductsPage />} />
-            <Route path="/groups" element={<GroupsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
+      <AuthSessionErrorBoundary onInvalidSession={handleSignOut}>
+        <AppDataProvider session={session}>
+          <Routes>
             <Route
-              path="/capture/selection/:selectionId"
-              element={<CapturePage />}
-            />
-            <Route path="/capture/:groupId" element={<CapturePage />} />
-          </Route>
-        </Routes>
-      </AppDataProvider>
+              element={<AppShell onSignOut={handleSignOut} session={session} />}
+            >
+              <Route index element={<RootRedirect />} />
+              <Route path="/products" element={<ProductsPage />} />
+              <Route path="/groups" element={<GroupsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route
+                path="/capture/selection/:selectionId"
+                element={<CapturePage />}
+              />
+              <Route path="/capture/:groupId" element={<CapturePage />} />
+            </Route>
+          </Routes>
+        </AppDataProvider>
+      </AuthSessionErrorBoundary>
     </BrowserRouter>
   ) : (
     <AuthPage onSignedIn={setSession} />
