@@ -105,6 +105,9 @@ export const convexApi = {
     listForProducts: deployedFunction<typeof api.productPhotos.listForProducts>(
       "productPhotos.js:listForProducts",
     ),
+    listExportPhotosForProducts: deployedFunction<
+      typeof api.productPhotos.listExportPhotosForProducts
+    >("productPhotos.js:listExportPhotosForProducts"),
     generateUploadUrl: deployedFunction<
       typeof api.productPhotos.generateUploadUrl
     >("productPhotos.js:generateUploadUrl"),

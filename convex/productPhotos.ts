@@ -971,6 +971,45 @@ export const listForProducts = query({
   },
 });
 
+/**
+ * Like listForProducts, but re-signs Convex storage URLs when storageId is
+ * present so ZIP export can fetch blobs even if the stored url has expired.
+ */
+export const listExportPhotosForProducts = query({
+  args: {
+    sessionToken: v.string(),
+    productIds: v.array(v.id("products")),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+
+    const uniqueIds = [...new Set(args.productIds)];
+    const photosByProductId: Record<string, Doc<"productPhotos">[]> = {};
+
+    await Promise.all(
+      uniqueIds.map(async (productId) => {
+        const photos = await listPhotosForProduct(ctx, productId);
+        photosByProductId[productId] = await Promise.all(
+          photos.map(async (photo) => {
+            if (!photo.storageId) {
+              return photo;
+            }
+
+            const freshUrl = await ctx.storage.getUrl(photo.storageId);
+            if (!freshUrl) {
+              return photo;
+            }
+
+            return { ...photo, url: freshUrl };
+          }),
+        );
+      }),
+    );
+
+    return photosByProductId;
+  },
+});
+
 export const generateUploadUrl = mutation({
   args: {
     sessionToken: v.string(),

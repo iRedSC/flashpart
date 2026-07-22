@@ -34,6 +34,7 @@ import {
   ArchiveRestore,
   Camera,
   Check,
+  Download,
   FilePenLine,
   FolderPlus,
   Globe,
@@ -48,6 +49,7 @@ import {
   Upload,
 } from "lucide-react";
 import { DescriptionField } from "../components/description-field";
+import { ExportPhotosDialog } from "../components/export-photos-dialog";
 import { ProductRowActionItems } from "../components/product-row-actions";
 import {
   ProductStatusIcons,
@@ -767,6 +769,7 @@ export function ProductsPage() {
     }),
   );
   const [addToGroupOpen, setAddToGroupOpen] = React.useState(false);
+  const [exportPhotosOpen, setExportPhotosOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [addPartOpen, setAddPartOpen] = React.useState(false);
   const [addPartSku, setAddPartSku] = React.useState("");
@@ -2004,6 +2007,13 @@ export function ProductsPage() {
               Capture photos
             </DropdownMenuItem>
             <DropdownMenuItem
+              disabled={!hasSelection}
+              onSelect={() => setExportPhotosOpen(true)}
+            >
+              <Download />
+              Export photos
+            </DropdownMenuItem>
+            <DropdownMenuItem
               disabled={!selectedCanPublish}
               onSelect={() =>
                 void handlePublishSelected().catch(() => undefined)
@@ -2404,6 +2414,14 @@ export function ProductsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ExportPhotosDialog
+        onOpenChange={setExportPhotosOpen}
+        open={exportPhotosOpen}
+        photosByProductId={photosByProductId}
+        products={selectedRows.map((row) => row.original)}
+        sessionToken={session.sessionToken}
+      />
 
       <ProductPhotoDialog
         onClose={() => setPhotoProductId(null)}
