@@ -758,6 +758,31 @@ export function CapturePage() {
             </div>
           </div>
 
+          {/* Hide part-advance while a preview is up — Save / Retake only.
+              Otherwise Skip / Next product can discard the shot and jump parts. */}
+          {hasPreview ? null : secondaryIsNext ? (
+            <Button
+              className="h-11 w-full shrink-0 text-slate-500"
+              disabled={isSaving}
+              onClick={handleNextProduct}
+              type="button"
+              variant="ghost"
+            >
+              Next product
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button
+              className="h-11 w-full shrink-0 text-slate-500"
+              disabled={isSaving}
+              onClick={() => void handleSave(false)}
+              type="button"
+              variant="ghost"
+            >
+              Skip photo for this part
+            </Button>
+          )}
+
           <div
             className={cn(
               "relative min-h-0 w-full flex-1 overflow-hidden rounded-2xl",
@@ -885,30 +910,6 @@ export function CapturePage() {
                 </>
               )}
             </Button>
-            {/* Hide part-advance while a preview is up — Save / Retake only.
-                Otherwise Skip / Next product can discard the shot and jump parts. */}
-            {hasPreview ? null : secondaryIsNext ? (
-              <Button
-                className="h-11 w-full text-slate-500"
-                disabled={isSaving}
-                onClick={handleNextProduct}
-                type="button"
-                variant="ghost"
-              >
-                Next product
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            ) : (
-              <Button
-                className="h-11 w-full text-slate-500"
-                disabled={isSaving}
-                onClick={() => void handleSave(false)}
-                type="button"
-                variant="ghost"
-              >
-                Skip photo for this part
-              </Button>
-            )}
           </div>
         </div>
       ) : (
