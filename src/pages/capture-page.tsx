@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Maximize2,
   RefreshCcw,
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -878,6 +879,18 @@ export function CapturePage() {
                       : `${originalCount}/${maxProductPhotos}`}
                   </span>
                 ) : null}
+                <button
+                  aria-label="Open full device camera"
+                  className="absolute bottom-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur transition-colors active:bg-black/80 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={atMaxPhotos || isSaving || photosLoading}
+                  onClick={() => {
+                    triggerHaptic();
+                    fileInputRef.current?.click();
+                  }}
+                  type="button"
+                >
+                  <Maximize2 className="h-4 w-4" />
+                </button>
               </>
             )}
           </div>
