@@ -6,6 +6,7 @@ export type ExportProduct = {
   sku: string;
   shopifyFileUrl?: string;
   aiShopifyFileUrl?: string;
+  archivedAt?: number;
 };
 
 export type ExportImagePlan = {

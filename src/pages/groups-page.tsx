@@ -4,12 +4,14 @@ import {
   ArchiveRestore,
   Camera,
   Check,
+  Download,
   FolderPlus,
   MoreVertical,
   Plus,
   Trash2,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ExportPhotosDialog } from "../components/export-photos-dialog";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -18,6 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
+import { Checkbox } from "../components/ui/checkbox";
 import { CreateGroupDialog } from "../components/create-group-dialog";
 import {
   DropdownMenu,
@@ -32,6 +35,8 @@ import {
   groupProductProgress,
   isGroupArchived,
 } from "../lib/product-state";
+import { cn } from "../lib/utils";
+import type { Id } from "../../convex/_generated/dataModel";
 
 const VIEW_ACTIVE = "active";
 const VIEW_ARCHIVED = "archived";
@@ -44,9 +49,14 @@ export function GroupsPage() {
     deleteGroup,
     groups,
     products,
+    session,
     unarchiveGroup,
   } = useAppData();
   const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
+  const [exportPhotosOpen, setExportPhotosOpen] = React.useState(false);
+  const [selectedGroupIds, setSelectedGroupIds] = React.useState<
+    Set<Id<"groups">>
+  >(() => new Set());
   const [searchParams, setSearchParams] = useSearchParams();
   const viewFilter: GroupsView =
     searchParams.get("view") === VIEW_ARCHIVED ? VIEW_ARCHIVED : VIEW_ACTIVE;
@@ -60,8 +70,26 @@ export function GroupsPage() {
   );
   const viewFilterLabel =
     viewFilter === VIEW_ARCHIVED ? "Archived" : "Active";
+  const selectedCount = selectedGroupIds.size;
+  const hasSelection = selectedCount > 0;
+  const allVisibleSelected =
+    visibleGroups.length > 0 &&
+    visibleGroups.every((group) => selectedGroupIds.has(group._id));
+  const someVisibleSelected =
+    !allVisibleSelected &&
+    visibleGroups.some((group) => selectedGroupIds.has(group._id));
+  const exportProducts = React.useMemo(
+    () =>
+      products.filter(
+        (product) =>
+          product.groupId !== undefined &&
+          selectedGroupIds.has(product.groupId),
+      ),
+    [products, selectedGroupIds],
+  );
 
   function setViewFilter(value: GroupsView) {
+    setSelectedGroupIds(new Set());
     setSearchParams(
       (params) => {
         const next = new URLSearchParams(params);
@@ -76,6 +104,32 @@ export function GroupsPage() {
       },
       { replace: true },
     );
+  }
+
+  function toggleGroupSelected(groupId: Id<"groups">, selected: boolean) {
+    setSelectedGroupIds((current) => {
+      const next = new Set(current);
+      if (selected) {
+        next.add(groupId);
+      } else {
+        next.delete(groupId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible(selected: boolean) {
+    setSelectedGroupIds((current) => {
+      const next = new Set(current);
+      for (const group of visibleGroups) {
+        if (selected) {
+          next.add(group._id);
+        } else {
+          next.delete(group._id);
+        }
+      }
+      return next;
+    });
   }
 
   return (
@@ -106,14 +160,60 @@ export function GroupsPage() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {visibleGroups.length > 0 ? (
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <Checkbox
+                aria-label="Select all groups"
+                checked={
+                  allVisibleSelected
+                    ? true
+                    : someVisibleSelected
+                      ? "indeterminate"
+                      : false
+                }
+                onCheckedChange={(value) =>
+                  toggleSelectAllVisible(value === true)
+                }
+              />
+              {hasSelection ? (
+                <span className="shrink-0">
+                  {selectedCount.toLocaleString()} selected
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
-        <Button
-          className="h-11 shrink-0 rounded-xl md:h-10 md:rounded-md"
-          onClick={() => setCreateGroupOpen(true)}
-        >
-          <Plus className="h-4 w-4" />
-          New group
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {hasSelection ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  aria-label="Bulk actions"
+                  className="h-11 w-11 rounded-xl p-0 md:h-10 md:w-10 md:rounded-md"
+                  variant="outline"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  disabled={exportProducts.length === 0}
+                  onSelect={() => setExportPhotosOpen(true)}
+                >
+                  <Download />
+                  Export photos
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          <Button
+            className="h-11 shrink-0 rounded-xl md:h-10 md:rounded-md"
+            onClick={() => setCreateGroupOpen(true)}
+          >
+            <Plus className="h-4 w-4" />
+            New group
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -124,35 +224,55 @@ export function GroupsPage() {
           const archived = isGroupArchived(group);
           const activeCount =
             progress.pending + progress.captured + progress.published;
+          const isSelected = selectedGroupIds.has(group._id);
 
           return (
             <Card
-              className="relative transition-colors hover:border-slate-300"
+              className={cn(
+                "relative transition-colors hover:border-slate-300",
+                isSelected && "border-slate-950",
+              )}
               key={group._id}
             >
               <CardHeader>
                 <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <CardTitle className="truncate">
-                      {/* Stretched link: the whole card opens the filtered
-                          products page; buttons below sit above it. */}
-                      <Link
-                        className="after:absolute after:inset-0 after:rounded-xl"
-                        to={`/products?group=${group._id}${
-                          archived && activeCount === 0 && progress.archived > 0
-                            ? "&view=archived"
-                            : ""
-                        }`}
-                      >
-                        {group.name}
-                      </Link>
-                    </CardTitle>
-                    <CardDescription>
-                      {progress.total.toLocaleString()} products
-                      {progress.archived > 0
-                        ? ` · ${progress.archived.toLocaleString()} archived`
-                        : null}
-                    </CardDescription>
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div
+                      className="relative z-10 pt-1"
+                      onClick={(event) => event.preventDefault()}
+                    >
+                      <Checkbox
+                        aria-label={`Select ${group.name}`}
+                        checked={isSelected}
+                        onCheckedChange={(value) =>
+                          toggleGroupSelected(group._id, value === true)
+                        }
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <CardTitle className="truncate">
+                        {/* Stretched link: the whole card opens the filtered
+                            products page; buttons below sit above it. */}
+                        <Link
+                          className="after:absolute after:inset-0 after:rounded-xl"
+                          to={`/products?group=${group._id}${
+                            archived &&
+                            activeCount === 0 &&
+                            progress.archived > 0
+                              ? "&view=archived"
+                              : ""
+                          }`}
+                        >
+                          {group.name}
+                        </Link>
+                      </CardTitle>
+                      <CardDescription>
+                        {progress.total.toLocaleString()} products
+                        {progress.archived > 0
+                          ? ` · ${progress.archived.toLocaleString()} archived`
+                          : null}
+                      </CardDescription>
+                    </div>
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -270,6 +390,14 @@ export function GroupsPage() {
         onOpenChange={setCreateGroupOpen}
         open={createGroupOpen}
         ungroupedCount={ungroupedCount}
+      />
+
+      <ExportPhotosDialog
+        onOpenChange={setExportPhotosOpen}
+        open={exportPhotosOpen}
+        photosByProductId={{}}
+        products={exportProducts}
+        sessionToken={session.sessionToken}
       />
     </div>
   );

@@ -138,8 +138,12 @@ export function ExportPhotosDialog({
           <DialogTitle>Export photos</DialogTitle>
           <DialogDescription>
             Download a ZIP of original and AI photos for{" "}
-            {products.length.toLocaleString()} selected product
-            {products.length === 1 ? "" : "s"}. Missing photos are skipped.
+            {products.length.toLocaleString()} product
+            {products.length === 1 ? "" : "s"}
+            {products.some((product) => product.archivedAt !== undefined)
+              ? " (including archived)"
+              : ""}
+            . Missing photos are skipped.
           </DialogDescription>
         </DialogHeader>
 
