@@ -1582,6 +1582,7 @@ export const getPhotoForDeletion = internalQuery({
     return {
       photoId: photo._id,
       productId: photo.productId,
+      ownerType: photo.ownerType,
       shopifyFileIds,
       shopifyStatus: product?.shopifyStatus,
     };

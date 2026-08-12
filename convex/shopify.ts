@@ -758,6 +758,10 @@ export const removeGalleryPhotoFromShopify = action({
       throw new ConvexError("Photo not found.");
     }
 
+    if (deletion.ownerType !== "gallery") {
+      throw new ConvexError("Gallery photo not found.");
+    }
+
     if (deletion.shopifyFileIds.length > 0) {
       if (!connection) {
         throw new ConvexError("Connect Shopify before removing stored photos.");
