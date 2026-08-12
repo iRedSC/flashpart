@@ -12,6 +12,10 @@ import type { ActionCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireSessionUser } from "./authUtils";
 import {
+  shopifyPhotoAltLabel,
+  shopifyPhotoKindLabel,
+} from "./photoOwnership";
+import {
   createShopifyFile,
   createStagedImageUpload,
   deleteShopifyFiles,
@@ -460,7 +464,7 @@ async function promotePhotoWithConnection(
     : mimeType.includes("webp")
       ? "webp"
       : "jpg";
-  const kindLabel = photo.kind === "ai" ? "ai" : "original";
+  const kindLabel = shopifyPhotoKindLabel(photo.kind);
   const data = await blob.arrayBuffer();
   let createdShopifyFileId: string | undefined;
   let persistedShopifyFileId = false;
@@ -470,7 +474,7 @@ async function promotePhotoWithConnection(
     file = await uploadImageBufferToShopify(
       connection,
       {
-        alt: `${sku} ${kindLabel} photo`,
+        alt: `${sku} ${shopifyPhotoAltLabel(photo.kind)} photo`,
         data,
         filename: `${sku}-${kindLabel}-${photo.sortOrder}.${extension}`,
         mimeType,

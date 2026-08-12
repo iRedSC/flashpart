@@ -21,6 +21,7 @@ import type * as photoAi from "../photoAi.js";
 import type * as photoAiConstants from "../photoAiConstants.js";
 import type * as photoAiProcess from "../photoAiProcess.js";
 import type * as photoGc from "../photoGc.js";
+import type * as photoOwnership from "../photoOwnership.js";
 import type * as productPhotos from "../productPhotos.js";
 import type * as productState from "../productState.js";
 import type * as products from "../products.js";
@@ -28,6 +29,7 @@ import type * as settings from "../settings.js";
 import type * as shopify from "../shopify.js";
 import type * as shopifyClient from "../shopifyClient.js";
 import type * as shopifyModel from "../shopifyModel.js";
+import type * as shopifyPublishSettings from "../shopifyPublishSettings.js";
 import type * as tags from "../tags.js";
 import type * as whitenBackground from "../whitenBackground.js";
 
@@ -51,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   photoAiConstants: typeof photoAiConstants;
   photoAiProcess: typeof photoAiProcess;
   photoGc: typeof photoGc;
+  photoOwnership: typeof photoOwnership;
   productPhotos: typeof productPhotos;
   productState: typeof productState;
   products: typeof products;
@@ -58,6 +61,7 @@ declare const fullApi: ApiFromModules<{
   shopify: typeof shopify;
   shopifyClient: typeof shopifyClient;
   shopifyModel: typeof shopifyModel;
+  shopifyPublishSettings: typeof shopifyPublishSettings;
   tags: typeof tags;
   whitenBackground: typeof whitenBackground;
 }>;

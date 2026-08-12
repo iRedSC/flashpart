@@ -1,6 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { aiImageEditStrength, aiImageModel } from "./photoAiConstants";
+import { photoOwnerType } from "./photoOwnership";
 import {
   aiImageStatus,
   captureStatus,
@@ -234,7 +235,18 @@ export default defineSchema({
     .index("by_group", ["groupId"]),
 
   productPhotos: defineTable({
+    /**
+     * Required while all photos are product-owned. Gallery rows will make this
+     * optional later; until then product queries keep using by_product*.
+     */
     productId: v.id("products"),
+    /**
+     * Soft ownership (model A). Dual-written with productId for product rows.
+     * Optional only so existing rows validate before backfill migration runs.
+     */
+    ownerType: v.optional(photoOwnerType),
+    /** String form of product id, or future gallery album id. */
+    ownerId: v.optional(v.string()),
     kind: photoKind,
     storageId: v.optional(v.id("_storage")),
     url: v.optional(v.string()),
@@ -258,6 +270,8 @@ export default defineSchema({
   })
     .index("by_product", ["productId"])
     .index("by_product_kind", ["productId", "kind"])
+    .index("by_owner", ["ownerType", "ownerId"])
+    .index("by_owner_kind", ["ownerType", "ownerId", "kind"])
     .index("by_source", ["sourcePhotoId"])
     .index("by_status", ["status"])
     .index("by_storage", ["storageId"]),
