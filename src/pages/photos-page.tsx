@@ -1,6 +1,7 @@
 import * as React from "react";
-import { useMutation, useQuery } from "convex/react";
-import { Camera, ImageIcon, Loader2, Trash2 } from "lucide-react";
+import { useAction, useMutation, useQuery } from "convex/react";
+import { Camera, ImageIcon, Loader2, Sparkles, Trash2 } from "lucide-react";
+import { GalleryPhotoDialog } from "../components/gallery-photo-dialog";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -19,7 +20,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 export function PhotosPage() {
   const { session } = useAppData();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-  const photos = useQuery(convexApi.galleryPhotos.list, {
+  const pairs = useQuery(convexApi.galleryPhotos.listPairs, {
     sessionToken: session.sessionToken,
   });
   const generateUploadUrl = useMutation(
@@ -27,12 +28,18 @@ export function PhotosPage() {
   );
   const createFromUpload = useMutation(convexApi.galleryPhotos.createFromUpload);
   const deletePhoto = useMutation(convexApi.galleryPhotos.deletePhoto);
+  const deleteShopifyPhoto = useAction(
+    convexApi.shopify.removeGalleryPhotoFromShopify,
+  );
   const deleteUploadedStorage = useMutation(
     convexApi.productPhotos.deleteUploadedStorage,
   );
 
   const [isCapturing, setIsCapturing] = React.useState(false);
   const [deletingId, setDeletingId] = React.useState<Id<"productPhotos"> | null>(
+    null,
+  );
+  const [editingId, setEditingId] = React.useState<Id<"productPhotos"> | null>(
     null,
   );
   const [error, setError] = React.useState<string | null>(null);
@@ -71,11 +78,12 @@ export function PhotosPage() {
       }
 
       storageId = result.storageId as Id<"_storage">;
-      await createFromUpload({
+      const originalPhotoId = await createFromUpload({
         sessionToken: session.sessionToken,
         storageId,
       });
       triggerHaptic();
+      setEditingId(originalPhotoId);
     } catch (uploadError) {
       if (storageId) {
         try {
@@ -102,20 +110,34 @@ export function PhotosPage() {
     }
   }
 
-  async function handleDelete(photoId: Id<"productPhotos">) {
+  async function handleDelete(originalPhotoId: Id<"productPhotos">, aiPhotoId?: Id<"productPhotos">) {
     if (deletingId) {
       return;
     }
 
-    setDeletingId(photoId);
+    setDeletingId(originalPhotoId);
     setError(null);
 
     try {
+      if (aiPhotoId) {
+        try {
+          await deleteShopifyPhoto({
+            sessionToken: session.sessionToken,
+            photoId: aiPhotoId,
+          });
+        } catch {
+          // May not be on Shopify; continue with Convex delete.
+        }
+      }
+
       await deletePhoto({
         sessionToken: session.sessionToken,
-        photoId,
+        photoId: originalPhotoId,
       });
       triggerHaptic();
+      if (editingId === originalPhotoId) {
+        setEditingId(null);
+      }
     } catch (deleteError) {
       setError(
         deleteError instanceof Error
@@ -127,7 +149,7 @@ export function PhotosPage() {
     }
   }
 
-  const isLoading = photos === undefined;
+  const isLoading = pairs === undefined;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -135,7 +157,7 @@ export function PhotosPage() {
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Photos</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Capture photos for later use.
+            Capture, edit with AI, and upload to Shopify.
           </p>
         </div>
         <Button
@@ -180,9 +202,9 @@ export function PhotosPage() {
           <CardDescription>
             {isLoading
               ? "Loading…"
-              : photos.length === 0
+              : pairs.length === 0
                 ? "No photos yet."
-                : `${photos.length.toLocaleString()} photo${photos.length === 1 ? "" : "s"}`}
+                : `${pairs.length.toLocaleString()} photo${pairs.length === 1 ? "" : "s"}`}
           </CardDescription>
         </CardHeader>
         <CardContent className="min-h-0 flex-1 overflow-y-auto pb-6">
@@ -190,55 +212,112 @@ export function PhotosPage() {
             <div className="flex items-center justify-center py-16 text-slate-400">
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
-          ) : photos.length === 0 ? (
+          ) : pairs.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-center text-slate-400">
               <ImageIcon className="h-10 w-10" />
               <p className="text-sm">Take a photo to get started.</p>
             </div>
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {photos.map((photo) => (
-                <li
-                  className="group relative aspect-square overflow-hidden rounded-md bg-slate-100"
-                  key={photo._id}
-                >
-                  {photo.url ? (
-                    <img
-                      alt=""
-                      className="h-full w-full object-cover"
-                      src={photo.url}
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-slate-400">
-                      <ImageIcon className="h-6 w-6" />
-                    </div>
-                  )}
-                  <Button
-                    aria-label="Delete photo"
-                    className={cn(
-                      "absolute right-2 top-2 h-8 w-8 bg-white/90 opacity-100 shadow-sm sm:opacity-0 sm:group-hover:opacity-100",
-                      deletingId === photo._id && "opacity-100",
-                    )}
-                    disabled={deletingId === photo._id}
-                    onClick={() => {
-                      void handleDelete(photo._id);
-                    }}
-                    size="icon"
-                    type="button"
-                    variant="outline"
+              {pairs.map(({ original, ai }) => {
+                const thumbUrl = ai?.url ?? original.url;
+                const generating =
+                  ai?.aiStatus === "generating" ||
+                  ai?.aiStatus === "pending" ||
+                  ai?.status === "uploading";
+                const onShopify =
+                  ai?.shopifyFileStatus === "ready" ||
+                  ai?.status === "promoted";
+                const needsReview =
+                  ai?.aiStatus === "ready" &&
+                  ai.approvedAt == null &&
+                  !onShopify;
+
+                return (
+                  <li
+                    className="group relative aspect-square overflow-hidden rounded-md bg-slate-100"
+                    key={original._id}
                   >
-                    {deletingId === photo._id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
-                </li>
-              ))}
+                    <button
+                      className="h-full w-full"
+                      onClick={() => {
+                        triggerHaptic();
+                        setEditingId(original._id);
+                      }}
+                      type="button"
+                    >
+                      {thumbUrl ? (
+                        <img
+                          alt=""
+                          className="h-full w-full object-cover"
+                          src={thumbUrl}
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-slate-400">
+                          {generating ? (
+                            <Loader2 className="h-6 w-6 animate-spin" />
+                          ) : (
+                            <ImageIcon className="h-6 w-6" />
+                          )}
+                        </div>
+                      )}
+                    </button>
+
+                    {generating ? (
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-slate-950/70 px-2 py-1 text-center text-[10px] text-white">
+                        Editing…
+                      </div>
+                    ) : null}
+
+                    {onShopify ? (
+                      <div className="pointer-events-none absolute left-2 top-2 rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        Shopify
+                      </div>
+                    ) : needsReview ? (
+                      <div className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        <Sparkles className="h-3 w-3" />
+                        Review
+                      </div>
+                    ) : null}
+
+                    <Button
+                      aria-label="Delete photo"
+                      className={cn(
+                        "absolute right-2 top-2 h-8 w-8 bg-white/90 opacity-100 shadow-sm sm:opacity-0 sm:group-hover:opacity-100",
+                        deletingId === original._id && "opacity-100",
+                      )}
+                      disabled={deletingId === original._id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleDelete(original._id, ai?._id);
+                      }}
+                      size="icon"
+                      type="button"
+                      variant="outline"
+                    >
+                      {deletingId === original._id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </CardContent>
       </Card>
+
+      <GalleryPhotoDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingId(null);
+          }
+        }}
+        open={editingId != null}
+        originalPhotoId={editingId}
+      />
     </div>
   );
 }

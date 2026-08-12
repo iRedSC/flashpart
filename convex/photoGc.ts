@@ -54,6 +54,11 @@ async function runGcPromotedStorage(ctx: MutationCtx, requestedLimit?: number) {
   for (const photo of promoted) {
     scanned += 1;
 
+    // Gallery keeps Convex blobs for re-upload / remove-from-Shopify.
+    if (photo.ownerType === "gallery") {
+      continue;
+    }
+
     // Only GC when Shopify identity + ready URL remain alongside storageId.
     if (!photo.shopifyFileId || !photo.url || !photo.storageId) {
       continue;
