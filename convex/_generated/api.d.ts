@@ -13,6 +13,7 @@ import type * as authModel from "../authModel.js";
 import type * as authUtils from "../authUtils.js";
 import type * as captures from "../captures.js";
 import type * as crons from "../crons.js";
+import type * as galleryPhotos from "../galleryPhotos.js";
 import type * as groups from "../groups.js";
 import type * as http from "../http.js";
 import type * as listingJobs from "../listingJobs.js";
@@ -45,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   authUtils: typeof authUtils;
   captures: typeof captures;
   crons: typeof crons;
+  galleryPhotos: typeof galleryPhotos;
   groups: typeof groups;
   http: typeof http;
   listingJobs: typeof listingJobs;

@@ -1,14 +1,12 @@
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import { ConvexError } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
 
 /**
  * Soft ownership for productPhotos (model A).
  *
- * Product path keeps required `productId` + by_product indexes unchanged.
- * `ownerType` / `ownerId` are dual-written so a future gallery owner can share
- * the same table without a second photo pipeline.
- *
- * Until gallery lands, every row is product-owned: ownerId === String(productId).
+ * Product path keeps `productId` + by_product indexes for product-owned rows.
+ * Gallery rows use ownerType/ownerId without a productId.
  */
 
 export const photoOwnerType = v.union(
@@ -18,9 +16,18 @@ export const photoOwnerType = v.union(
 
 export type PhotoOwnerType = "product" | "gallery";
 
+/** Shared single-tenant gallery bucket until albums exist. */
+export const DEFAULT_GALLERY_OWNER_ID = "default";
+
 export type ProductPhotoOwnership = {
   productId: Id<"products">;
   ownerType: "product";
+  ownerId: string;
+};
+
+export type GalleryPhotoOwnership = {
+  productId?: undefined;
+  ownerType: "gallery";
   ownerId: string;
 };
 
@@ -33,6 +40,31 @@ export function productPhotoOwnership(
     ownerType: "product",
     ownerId: productId,
   };
+}
+
+/** Fields to set on gallery-owned photo inserts. */
+export function galleryPhotoOwnership(
+  ownerId: string = DEFAULT_GALLERY_OWNER_ID,
+): GalleryPhotoOwnership {
+  return {
+    ownerType: "gallery",
+    ownerId,
+  };
+}
+
+/** Product-only helpers must call this before using photo.productId. */
+export function requirePhotoProductId(
+  photo: Doc<"productPhotos">,
+): Id<"products"> {
+  if (photo.productId == null) {
+    throw new ConvexError("Photo is not linked to a product.");
+  }
+
+  return photo.productId;
+}
+
+export function isGalleryPhoto(photo: Doc<"productPhotos">): boolean {
+  return photo.ownerType === "gallery";
 }
 
 /**

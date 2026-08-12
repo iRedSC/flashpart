@@ -589,6 +589,10 @@ export const getShopifyProductIdForPhoto = internalQuery({
       return null;
     }
 
+    if (!photo.productId) {
+      return null;
+    }
+
     const product = await ctx.db.get(photo.productId);
     return product?.shopifyProductId ?? null;
   },
