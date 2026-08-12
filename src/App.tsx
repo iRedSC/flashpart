@@ -16,6 +16,7 @@ import { usePreventPinchZoom } from "./lib/use-prevent-pinch-zoom";
 import { useIsMobile } from "./lib/use-is-mobile";
 import { CapturePage } from "./pages/capture-page";
 import { GroupsPage } from "./pages/groups-page";
+import { PhotosPage } from "./pages/photos-page";
 import { ProductsPage } from "./pages/products-page";
 import { SettingsPage } from "./pages/settings-page";
 
@@ -89,6 +90,7 @@ function AuthenticatedApp() {
               <Route index element={<RootRedirect />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/groups" element={<GroupsPage />} />
+              <Route path="/photos" element={<PhotosPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route
                 path="/capture/selection/:selectionId"

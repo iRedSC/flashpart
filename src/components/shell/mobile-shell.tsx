@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Boxes, ListChecks, LogOut, Settings } from "lucide-react";
+import { Boxes, Images, ListChecks, LogOut, Settings } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Button } from "../ui/button";
 import { LogoMark } from "../logo-mark";
@@ -10,6 +10,7 @@ import { MutationErrorBanner } from "./mutation-error-banner";
 const tabs = [
   { to: "/groups", label: "Groups", icon: ListChecks },
   { to: "/products", label: "Products", icon: Boxes },
+  { to: "/photos", label: "Photos", icon: Images },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -77,7 +78,7 @@ export function MobileShell({ onSignOut }: MobileShellProps) {
         aria-label="Primary"
         className="z-20 shrink-0 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
       >
-        <div className="grid h-16 grid-cols-3">
+        <div className="grid h-16 grid-cols-4">
           {tabs.map((tab) => (
             <NavLink
               className={({ isActive }) =>
