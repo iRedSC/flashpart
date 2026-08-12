@@ -12,6 +12,7 @@ import { requireSessionUser } from "./authUtils";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
 import type { AiImageModelId } from "./photoAiConstants";
 import { aiImageModel } from "./photoAiConstants";
+import { productPhotoOwnership } from "./photoOwnership";
 import { productErrorFields, isLinkedToShopify, needsRepublishPatch } from "./productState";
 import { photoKind, shopifyFileStatus } from "./schema";
 import {
@@ -487,6 +488,7 @@ export async function applyMarkAiGenerating(
     // already generating — e.g. reserved slot or interrupted regen).
     // Callers schedule Shopify fileDelete with previousShopifyFileIds.
     await ctx.db.patch(existingAi._id, {
+      ...productPhotoOwnership(args.productId),
       aiError: undefined,
       aiGeneration,
       aiPrompt: prompt || existingAi.aiPrompt,
@@ -505,7 +507,7 @@ export async function applyMarkAiGenerating(
     aiPhotoId = existingAi._id;
   } else {
     aiPhotoId = await ctx.db.insert("productPhotos", {
-      productId: args.productId,
+      ...productPhotoOwnership(args.productId),
       kind: "ai",
       status: "uploading",
       sortOrder: original.sortOrder,
@@ -1084,8 +1086,10 @@ async function insertReservedOriginalPair(
   const now = Date.now();
   const isFirstMultiPhotoRows = originals.length === 0;
 
+  const ownership = productPhotoOwnership(args.productId);
+
   const originalPhotoId = await ctx.db.insert("productPhotos", {
-    productId: args.productId,
+    ...ownership,
     kind: "original",
     status: "uploading",
     sortOrder,
@@ -1096,7 +1100,7 @@ async function insertReservedOriginalPair(
 
   // Pending until finalize schedules AI — do not mark generating on reserve.
   const aiPhotoId = await ctx.db.insert("productPhotos", {
-    productId: args.productId,
+    ...ownership,
     kind: "ai",
     status: "uploading",
     sortOrder,
@@ -1163,6 +1167,7 @@ async function finalizeReservedOriginal(
   const url = await ctx.storage.getUrl(args.storageId);
   const now = Date.now();
   const patch: Partial<Doc<"productPhotos">> = {
+    ...productPhotoOwnership(original.productId),
     storageId: args.storageId,
     status: "ready",
     url: url ?? undefined,
@@ -1308,6 +1313,7 @@ export const replaceOriginalFromUpload = mutation({
     }
 
     await ctx.db.patch(args.photoId, {
+      ...productPhotoOwnership(photo.productId),
       storageId: args.storageId,
       url: url ?? undefined,
       status: "ready",

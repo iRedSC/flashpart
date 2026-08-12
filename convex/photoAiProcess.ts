@@ -13,6 +13,10 @@ import {
   isAiImageModel,
 } from "./photoAiConstants";
 import {
+  shopifyPhotoAltLabel,
+  shopifyPhotoKindLabel,
+} from "./photoOwnership";
+import {
   deleteShopifyFiles,
   uploadImageBufferToShopify,
 } from "./shopifyClient";
@@ -453,9 +457,9 @@ export const processProductPhoto = internalAction({
         : generated;
       const extension = output.mimeType.includes("png") ? "png" : "jpg";
       const aiFile = await uploadImageBufferToShopify(connection, {
-        alt: `${payload.sku} AI photo`,
+        alt: `${payload.sku} ${shopifyPhotoAltLabel("ai")} photo`,
         data: output.data,
-        filename: `${payload.sku}-ai.${extension}`,
+        filename: `${payload.sku}-${shopifyPhotoKindLabel("ai")}.${extension}`,
         mimeType: output.mimeType,
       });
 
@@ -576,9 +580,9 @@ export const whitenAiBackground = action({
     const extension = whitened.mimeType.includes("png") ? "png" : "jpg";
     const previousAiShopifyFileId = payload.aiShopifyFileId;
     const aiFile = await uploadImageBufferToShopify(connection, {
-      alt: `${payload.sku} AI photo`,
+      alt: `${payload.sku} ${shopifyPhotoAltLabel("ai")} photo`,
       data: whitened.data,
-      filename: `${payload.sku}-ai.${extension}`,
+      filename: `${payload.sku}-${shopifyPhotoKindLabel("ai")}.${extension}`,
       mimeType: whitened.mimeType,
     });
 
