@@ -223,6 +223,7 @@ async function schedulePromotedStorageGc(ctx: ActionCtx) {
 type PromotePhotoRow = {
   _id: Id<"productPhotos">;
   kind: "original" | "ai";
+  ownerType?: "product" | "gallery";
   storageId?: Id<"_storage">;
   shopifyFileId?: string;
   shopifyFileStatus?: "uploaded" | "processing" | "ready" | "failed";
@@ -364,15 +365,15 @@ async function finishPromoteFromShopifyFile(
   });
 
   // Only clear the storage blob this promote started with — never a regen's.
-  if (photo.storageId) {
+  // Gallery keeps Convex blobs for easy re-upload / remove.
+  if (photo.ownerType !== "gallery" && photo.storageId) {
     await ctx.runMutation(productPhotosModel.clearStorageIdInternal, {
       photoId,
       expectedStorageId: photo.storageId,
       expectedAiGeneration: options.expectedAiGeneration,
     });
+    await schedulePromotedStorageGc(ctx);
   }
-
-  await schedulePromotedStorageGc(ctx);
 
   return {
     shopifyFileId: file.id,
@@ -546,13 +547,16 @@ async function promotePhotoWithConnection(
     expectedAiGeneration,
     markAsPromoted: true,
   });
-  await ctx.runMutation(productPhotosModel.clearStorageIdInternal, {
-    photoId,
-    expectedStorageId: storageId,
-    expectedAiGeneration,
-  });
-
-  await schedulePromotedStorageGc(ctx);
+  // Keep gallery Convex blobs so operators can re-upload or remove without
+  // losing the edited image (product path still GCs after promote).
+  if (photo.ownerType !== "gallery") {
+    await ctx.runMutation(productPhotosModel.clearStorageIdInternal, {
+      photoId,
+      expectedStorageId: storageId,
+      expectedAiGeneration,
+    });
+    await schedulePromotedStorageGc(ctx);
+  }
 
   return {
     shopifyFileId: file.id,
@@ -728,6 +732,68 @@ export const promotePhotoToShopify = action({
     return await promotePhotoWithConnection(ctx, connection, args.photoId, {
       requireApprovedAi: true,
     });
+  },
+});
+
+/**
+ * Delete Shopify Files for a gallery photo and clear local Shopify identity.
+ * Keeps the Convex edited image so it can be uploaded again.
+ */
+export const removeGalleryPhotoFromShopify = action({
+  args: {
+    sessionToken: v.string(),
+    photoId: v.id("productPhotos"),
+  },
+  handler: async (ctx, args) => {
+    const [connection, deletion] = await Promise.all([
+      ctx.runQuery(shopifyModel.currentActiveConnection, {
+        sessionToken: args.sessionToken,
+      }),
+      ctx.runQuery(productPhotosModel.getPhotoForDeletion, {
+        photoId: args.photoId,
+      }),
+    ]);
+
+    if (!deletion) {
+      throw new ConvexError("Photo not found.");
+    }
+
+    if (deletion.ownerType !== "gallery") {
+      throw new ConvexError("Gallery photo not found.");
+    }
+
+    if (deletion.shopifyFileIds.length > 0) {
+      if (!connection) {
+        throw new ConvexError("Connect Shopify before removing stored photos.");
+      }
+
+      try {
+        await deleteShopifyFiles(connection, deletion.shopifyFileIds);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        const alreadyGone =
+          /not found|does not exist|FILE_DOES_NOT_EXIST|already deleted/i.test(
+            message,
+          );
+
+        if (!alreadyGone) {
+          throw error instanceof ConvexError
+            ? error
+            : new ConvexError(message);
+        }
+      }
+    }
+
+    await ctx.runMutation(
+      makeFunctionReference("galleryPhotos.js:clearShopifyIdentity") as any,
+      {
+        sessionToken: args.sessionToken,
+        photoId: args.photoId,
+      },
+    );
+
+    return { deletedFileIds: deletion.shopifyFileIds };
   },
 });
 

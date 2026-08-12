@@ -50,6 +50,16 @@ const productPhotosModel = {
   ) as any,
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const galleryPhotosModel = {
+  processingPayload: makeFunctionReference(
+    "galleryPhotos.js:processingPayload",
+  ) as any,
+  markAiGeneratingInternal: makeFunctionReference(
+    "galleryPhotos.js:markAiGeneratingInternal",
+  ) as any,
+};
+
 /** Best-effort whitening; keep Gemini output if codecs fail. */
 async function maybeWhitenBackground(
   data: ArrayBuffer,
@@ -477,6 +487,138 @@ export const processProductPhoto = internalAction({
             ? error.message
             : "AI photo generation failed.",
         productId: args.productId,
+      });
+    }
+  },
+});
+
+/**
+ * Gallery path: edit an original with Gemini and store the AI sibling in Convex.
+ * Does not require a productId or Shopify connection.
+ */
+export const processGalleryPhoto = internalAction({
+  args: {
+    originalPhotoId: v.id("productPhotos"),
+    aiGeneration: v.optional(v.number()),
+    isRegeneration: v.optional(v.boolean()),
+    modelOverride: v.optional(aiImageModel),
+    previousShopifyFileIds: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    let aiGeneration = args.aiGeneration;
+    let previousShopifyFileIds = args.previousShopifyFileIds ?? [];
+
+    if (aiGeneration === undefined) {
+      const marked = await ctx.runMutation(
+        galleryPhotosModel.markAiGeneratingInternal,
+        {
+          originalPhotoId: args.originalPhotoId,
+        },
+      );
+      aiGeneration = marked.aiGeneration as number;
+      const fromMark = (marked.previousShopifyFileIds ?? []) as string[];
+      if (fromMark.length > 0) {
+        previousShopifyFileIds = [...previousShopifyFileIds, ...fromMark];
+      }
+    }
+
+    try {
+      const payload = await ctx.runQuery(galleryPhotosModel.processingPayload, {
+        originalPhotoId: args.originalPhotoId,
+        isRegeneration: args.isRegeneration,
+        modelOverride: args.modelOverride,
+      });
+
+      if (!payload) {
+        throw new ConvexError("Gallery photo is missing image data.");
+      }
+
+      if (previousShopifyFileIds.length > 0) {
+        const connection = await ctx.runQuery(
+          shopifyModel.firstActiveConnection,
+          {},
+        );
+        if (connection) {
+          await detachAndDeleteShopifyFilesBestEffort(
+            ctx,
+            connection,
+            previousShopifyFileIds,
+            undefined,
+          );
+        }
+      }
+
+      let originalData: ArrayBuffer;
+      let originalMimeType = "image/jpeg";
+
+      if (payload.originalStorageId) {
+        const blob = await ctx.storage.get(
+          payload.originalStorageId as Id<"_storage">,
+        );
+
+        if (!blob) {
+          throw new ConvexError("Could not load the gallery photo.");
+        }
+
+        originalMimeType = blob.type || "image/jpeg";
+        originalData = await blob.arrayBuffer();
+      } else if (payload.originalUrl) {
+        const originalResponse = await fetch(payload.originalUrl);
+
+        if (!originalResponse.ok) {
+          throw new ConvexError("Could not download the gallery photo.");
+        }
+
+        originalMimeType =
+          originalResponse.headers.get("content-type") ?? "image/jpeg";
+        originalData = await originalResponse.arrayBuffer();
+      } else {
+        throw new ConvexError("Gallery photo is missing image data.");
+      }
+
+      const generated = await generateEditedImage({
+        editStrength: payload.aiImageEditStrength,
+        imageData: originalData,
+        mimeType: originalMimeType,
+        model: payload.aiImageModel,
+        prompt: payload.aiImagePrompt,
+      });
+      const shouldWhiten =
+        !args.isRegeneration && payload.aiImageWhitenBackground !== false;
+      const output = shouldWhiten
+        ? await maybeWhitenBackground(generated.data, generated.mimeType)
+        : generated;
+      const storageId = await ctx.storage.store(
+        new Blob([new Uint8Array(output.data)], {
+          type: output.mimeType,
+        }),
+      );
+      const url = await ctx.storage.getUrl(storageId);
+
+      try {
+        await ctx.runMutation(productPhotosModel.markAiReadyInternal, {
+          originalPhotoId: args.originalPhotoId,
+          storageId,
+          url: url ?? undefined,
+          aiGeneration,
+          aiModel: payload.aiImageModel,
+        });
+      } catch (markError) {
+        try {
+          await ctx.storage.delete(storageId);
+        } catch {
+          // Storage may already be gone.
+        }
+        throw markError;
+      }
+    } catch (error) {
+      await ctx.runMutation(productPhotosModel.markAiFailedInternal, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "AI photo generation failed.",
+        originalPhotoId: args.originalPhotoId,
+        aiGeneration,
       });
     }
   },

@@ -12,7 +12,12 @@ import { requireSessionUser } from "./authUtils";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
 import type { AiImageModelId } from "./photoAiConstants";
 import { aiImageModel } from "./photoAiConstants";
-import { productPhotoOwnership, requirePhotoProductId } from "./photoOwnership";
+import {
+  DEFAULT_GALLERY_OWNER_ID,
+  galleryPhotoOwnership,
+  productPhotoOwnership,
+  requirePhotoProductId,
+} from "./photoOwnership";
 import { productErrorFields, isLinkedToShopify, needsRepublishPatch } from "./productState";
 import { photoKind, shopifyFileStatus } from "./schema";
 import {
@@ -442,6 +447,15 @@ async function resolveAiPhotoRow(
   throw new ConvexError("Provide aiPhotoId or originalPhotoId.");
 }
 
+async function syncProductPhotoFlagsIfLinked(
+  ctx: MutationCtx,
+  productId: Id<"products"> | undefined,
+) {
+  if (productId) {
+    await syncProductPhotoFlags(ctx, productId);
+  }
+}
+
 export async function applyMarkAiGenerating(
   ctx: MutationCtx,
   args: {
@@ -525,6 +539,89 @@ export async function applyMarkAiGenerating(
   return { aiPhotoId, aiGeneration, previousShopifyFileIds };
 }
 
+/**
+ * Mark AI generating from an original row alone (product or gallery).
+ * Gallery rows skip product flag sync.
+ */
+export async function applyMarkAiGeneratingFromOriginal(
+  ctx: MutationCtx,
+  args: {
+    originalPhotoId: Id<"productPhotos">;
+    prompt?: string;
+  },
+): Promise<{
+  aiPhotoId: Id<"productPhotos">;
+  aiGeneration: number;
+  previousShopifyFileIds: string[];
+}> {
+  const original = await ctx.db.get(args.originalPhotoId);
+
+  if (!original || original.kind !== "original") {
+    throw new ConvexError("Original photo not found.");
+  }
+
+  if (original.productId != null) {
+    return await applyMarkAiGenerating(ctx, {
+      productId: original.productId,
+      originalPhotoId: args.originalPhotoId,
+      prompt: args.prompt,
+    });
+  }
+
+  if (original.ownerType !== "gallery") {
+    throw new ConvexError("Photo is not linked to a product or gallery.");
+  }
+
+  const ownership = galleryPhotoOwnership(
+    original.ownerId ?? DEFAULT_GALLERY_OWNER_ID,
+  );
+  const now = Date.now();
+  const existingAi = await getAiForOriginal(ctx, args.originalPhotoId);
+  const prompt = args.prompt?.trim();
+  const aiGeneration = (existingAi?.aiGeneration ?? 0) + 1;
+  const previousShopifyFileIds: string[] = [];
+
+  if (existingAi?.shopifyFileId) {
+    previousShopifyFileIds.push(existingAi.shopifyFileId);
+  }
+
+  let aiPhotoId: Id<"productPhotos">;
+
+  if (existingAi) {
+    await ctx.db.patch(existingAi._id, {
+      ...ownership,
+      aiError: undefined,
+      aiGeneration,
+      aiPrompt: prompt || existingAi.aiPrompt,
+      aiStatus: "generating",
+      approvedAt: undefined,
+      shopifyFileDeletedAt: undefined,
+      shopifyFileId: undefined,
+      shopifyFileStatus: undefined,
+      sortOrder: original.sortOrder,
+      status: "uploading",
+      url: existingAi.storageId ? existingAi.url : undefined,
+      updatedAt: now,
+    });
+    aiPhotoId = existingAi._id;
+  } else {
+    aiPhotoId = await ctx.db.insert("productPhotos", {
+      ...ownership,
+      kind: "ai",
+      status: "uploading",
+      sortOrder: original.sortOrder,
+      sourcePhotoId: args.originalPhotoId,
+      aiStatus: "generating",
+      aiGeneration,
+      aiPrompt: prompt || undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return { aiPhotoId, aiGeneration, previousShopifyFileIds };
+}
+
 export async function applyMarkAiReady(
   ctx: MutationCtx,
   args: {
@@ -574,7 +671,7 @@ export async function applyMarkAiReady(
     updatedAt: now,
   });
 
-  await syncProductPhotoFlags(ctx, requirePhotoProductId(aiPhoto));
+  await syncProductPhotoFlagsIfLinked(ctx, aiPhoto.productId);
 
   return aiPhoto._id;
 }
@@ -628,7 +725,7 @@ export async function applyWhitenAiReady(
     updatedAt: now,
   });
 
-  await syncProductPhotoFlags(ctx, requirePhotoProductId(aiPhoto));
+  await syncProductPhotoFlagsIfLinked(ctx, aiPhoto.productId);
 
   return aiPhoto._id;
 }
@@ -663,10 +760,10 @@ export async function applyMarkAiFailed(
     updatedAt: now,
   });
 
-  const productId = requirePhotoProductId(aiPhoto);
-  const product = await ctx.db.get(productId);
+  const productId = aiPhoto.productId;
+  const product = productId ? await ctx.db.get(productId) : null;
 
-  if (product) {
+  if (productId && product) {
     // Mirror legacy photoAi.markFailed so list/archive surfaces the failure.
     await ctx.db.patch(productId, {
       aiImageError: args.error,
@@ -684,7 +781,7 @@ export async function applyMarkAiFailed(
     await maybeUnarchiveGroupForActiveProduct(ctx, product.groupId, now);
   }
 
-  await syncProductPhotoFlags(ctx, productId);
+  await syncProductPhotoFlagsIfLinked(ctx, productId);
 
   return aiPhoto._id;
 }
@@ -710,7 +807,7 @@ export async function applyApproveAiPhoto(
     updatedAt: now,
   });
 
-  await syncProductPhotoFlags(ctx, requirePhotoProductId(photo));
+  await syncProductPhotoFlagsIfLinked(ctx, photo.productId);
 }
 
 export async function applyMarkPromoted(
@@ -786,7 +883,9 @@ export async function applyMarkPromoted(
   }
 
   await ctx.db.patch(args.photoId, patch);
-  await ctx.db.patch(requirePhotoProductId(photo), { updatedAt: now });
+  if (photo.productId) {
+    await ctx.db.patch(photo.productId, { updatedAt: now });
+  }
 }
 
 /**
@@ -835,9 +934,10 @@ export async function applyMarkPromoteFailed(
   }
 
   await ctx.db.patch(args.photoId, patch);
-  const productId = requirePhotoProductId(photo);
-  await ctx.db.patch(productId, { updatedAt: now });
-  await syncProductPhotoFlags(ctx, productId);
+  if (photo.productId) {
+    await ctx.db.patch(photo.productId, { updatedAt: now });
+  }
+  await syncProductPhotoFlagsIfLinked(ctx, photo.productId);
 }
 
 export async function applyClearStorageId(
@@ -1439,9 +1539,14 @@ export const getPhotoForPromote = internalQuery({
       ? await ctx.db.get(photo.productId)
       : null;
 
+    const galleryHint =
+      photo.ownerType === "gallery"
+        ? `gallery-${String(photo._id).slice(-8)}`
+        : "product";
+
     return {
       photo,
-      sku: product?.sku ?? (photo.ownerType === "gallery" ? "gallery" : "product"),
+      sku: product?.sku ?? galleryHint,
     };
   },
 });
@@ -1477,6 +1582,7 @@ export const getPhotoForDeletion = internalQuery({
     return {
       photoId: photo._id,
       productId: photo.productId,
+      ownerType: photo.ownerType,
       shopifyFileIds,
       shopifyStatus: product?.shopifyStatus,
     };

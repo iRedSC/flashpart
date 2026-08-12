@@ -69,9 +69,21 @@ export const convexApi = {
     list: deployedFunction<typeof api.galleryPhotos.list>(
       "galleryPhotos.js:list",
     ),
+    listPairs: deployedFunction<typeof api.galleryPhotos.listPairs>(
+      "galleryPhotos.js:listPairs",
+    ),
+    getPair: deployedFunction<typeof api.galleryPhotos.getPair>(
+      "galleryPhotos.js:getPair",
+    ),
     createFromUpload: deployedFunction<
       typeof api.galleryPhotos.createFromUpload
     >("galleryPhotos.js:createFromUpload"),
+    regenerate: deployedFunction<typeof api.galleryPhotos.regenerate>(
+      "galleryPhotos.js:regenerate",
+    ),
+    approveAiPhoto: deployedFunction<typeof api.galleryPhotos.approveAiPhoto>(
+      "galleryPhotos.js:approveAiPhoto",
+    ),
     deletePhoto: deployedFunction<typeof api.galleryPhotos.deletePhoto>(
       "galleryPhotos.js:deletePhoto",
     ),
@@ -228,6 +240,9 @@ export const convexApi = {
     promotePhotoToShopify: deployedFunction<
       typeof api.shopify.promotePhotoToShopify
     >("shopify.js:promotePhotoToShopify"),
+    removeGalleryPhotoFromShopify: deployedFunction<
+      typeof api.shopify.removeGalleryPhotoFromShopify
+    >("shopify.js:removeGalleryPhotoFromShopify"),
     deleteProductPhoto: deployedFunction<typeof api.shopify.deleteProductPhoto>(
       "shopify.js:deleteProductPhoto",
     ),
