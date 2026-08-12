@@ -1,41 +1,24 @@
 import * as React from "react";
 import { useConvex, useQuery } from "convex/react";
 import {
-  AlertCircle,
   Camera,
   Check,
-  ChevronLeft,
-  ChevronRight,
   Loader2,
-  PencilLine,
-  RefreshCcw,
   Replace,
-  Sparkles,
   Trash2,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+  PhotoReviewDialog,
+  photoReviewFooterButtonClass,
+} from "./photo-review-dialog";
 import { useAppData } from "../data/app-data-provider";
 import { cropImageFileToSquare } from "../lib/capture-image";
 import { convexApi } from "../lib/convex-api";
 import { triggerHaptic } from "../lib/haptics";
 import {
-  AI_IMAGE_MODEL_OPTIONS,
-  aiImageModelShortLabel,
   DEFAULT_AI_IMAGE_PROMPT,
+  aiImageModelShortLabel,
   type AiImageModelId,
 } from "../lib/ai-image-settings";
 import {
@@ -48,14 +31,11 @@ import {
   type ProductPhoto,
   type ProductPhotoPair,
 } from "../lib/product-photo";
-import { cn } from "../lib/utils";
 import type { Id } from "../../convex/_generated/dataModel";
 
 type Product = ReturnType<typeof useAppData>["products"][number];
 type PhotoView = "original" | "ai";
 type CaptureMode = "add" | "replace";
-
-const REGEN_LONG_PRESS_MS = 500;
 
 type DialogPair = {
   original: ProductPhoto | null;
@@ -244,7 +224,6 @@ export function ProductPhotoDialog({
     settings?.aiImageDefaultPrompt?.trim() || DEFAULT_AI_IMAGE_PROMPT;
   const maxProductPhotos = settings?.maxProductPhotos ?? 5;
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-  const touchStartXRef = React.useRef<number | null>(null);
   const initializedForProductRef = React.useRef<string | null>(null);
   /** After add, focus the new pair once listByProduct includes this original. */
   const pendingFocusOriginalIdRef = React.useRef<string | null>(null);
@@ -263,12 +242,6 @@ export function ProductPhotoDialog({
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [stage, setStage] = React.useState<string | null>(null);
-  const [regenModelMenu, setRegenModelMenu] = React.useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const regenLongPressTimerRef = React.useRef<number | null>(null);
-  const suppressRegenClickRef = React.useRef(false);
   const previewUrl = React.useMemo(
     () => (captureFile ? URL.createObjectURL(captureFile) : null),
     [captureFile],
@@ -486,8 +459,6 @@ export function ProductPhotoDialog({
       aiFailed ||
       captureFile,
   );
-  const canNavigatePairs = pairs.length > 1 && !captureFile;
-  const displayUrl = activeView === "ai" ? aiUrl : originalUrl;
   const currentAiNeedsApproval =
     currentPair?.ai != null
       ? needsAiPhotoApproval(currentPair.ai)
@@ -537,23 +508,6 @@ export function ProductPhotoDialog({
     setError(null);
   }
 
-  function goToPair(nextIndex: number) {
-    if (pairs.length === 0) {
-      return;
-    }
-
-    const clamped = Math.max(0, Math.min(nextIndex, pairs.length - 1));
-
-    if (clamped === safePairIndex) {
-      return;
-    }
-
-    setPairIndex(clamped);
-    setPromptDirty(false);
-    setError(null);
-    triggerHaptic();
-  }
-
   function openPromptDialog() {
     const pairPrompt = currentPair?.ai?.aiPrompt?.trim();
     setDraftPrompt(pairPrompt || prompt);
@@ -578,31 +532,6 @@ export function ProductPhotoDialog({
   function applyDefaultPrompt() {
     setDraftPrompt(defaultPrompt);
     triggerHaptic();
-  }
-
-  function handleTouchStart(event: React.TouchEvent<HTMLDivElement>) {
-    touchStartXRef.current = event.changedTouches[0]?.clientX ?? null;
-  }
-
-  function handleTouchEnd(event: React.TouchEvent<HTMLDivElement>) {
-    const startX = touchStartXRef.current;
-
-    if (startX === null || captureFile || pairs.length <= 1) {
-      return;
-    }
-
-    const endX = event.changedTouches[0]?.clientX ?? startX;
-    const deltaX = endX - startX;
-
-    if (Math.abs(deltaX) < 48) {
-      return;
-    }
-
-    if (deltaX < 0) {
-      goToPair(safePairIndex + 1);
-    } else {
-      goToPair(safePairIndex - 1);
-    }
   }
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -763,21 +692,6 @@ export function ProductPhotoDialog({
     } finally {
       setIsWhitening(false);
     }
-  }
-
-  function clearRegenLongPressTimer() {
-    if (regenLongPressTimerRef.current != null) {
-      window.clearTimeout(regenLongPressTimerRef.current);
-      regenLongPressTimerRef.current = null;
-    }
-  }
-
-  function openRegenModelMenu(x: number, y: number, fromLongPress = false) {
-    clearRegenLongPressTimer();
-    if (fromLongPress) {
-      suppressRegenClickRef.current = true;
-    }
-    setRegenModelMenu({ x, y });
   }
 
   async function resolveNextProductNeedingApproval(
@@ -941,459 +855,177 @@ export function ProductPhotoDialog({
     }
   }
 
-  const footerButtonClass = "h-9 shrink-0 px-2.5 text-xs sm:px-3 sm:text-sm";
+  const footerOverride = captureFile ? (
+    <>
+      <Button
+        className={photoReviewFooterButtonClass}
+        disabled={isBusy}
+        onClick={resetCapture}
+        variant="ghost"
+      >
+        Cancel
+      </Button>
+      <Button
+        className={photoReviewFooterButtonClass}
+        disabled={isBusy}
+        onClick={() => handleTakePhoto(captureMode)}
+        variant="outline"
+      >
+        <Camera className="h-3.5 w-3.5" />
+        Retake
+      </Button>
+      <Button
+        className={photoReviewFooterButtonClass}
+        disabled={!canSaveCapture}
+        onClick={() => void handleSave()}
+      >
+        {isSaving ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Check className="h-3.5 w-3.5" />
+        )}
+        Save
+      </Button>
+    </>
+  ) : showExistingOriginalActions ? (
+    <>
+      <Button
+        className={photoReviewFooterButtonClass}
+        disabled={!canAddPhoto || isBusy}
+        onClick={() => handleTakePhoto("add")}
+        variant="outline"
+      >
+        <Camera className="h-3.5 w-3.5" />
+        Add photo
+      </Button>
+      <Button
+        className={photoReviewFooterButtonClass}
+        disabled={!canReplacePhoto || isBusy}
+        onClick={() => handleTakePhoto("replace")}
+        variant="outline"
+      >
+        <Replace className="h-3.5 w-3.5" />
+        Replace photo
+      </Button>
+      <Button
+        className={photoReviewFooterButtonClass}
+        disabled={isBusy}
+        onClick={() => void handleDeleteOriginal()}
+        variant="outline"
+      >
+        {isDeleting ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Trash2 className="h-3.5 w-3.5" />
+        )}
+        Delete
+      </Button>
+    </>
+  ) : activeView === "original" ? (
+    <Button
+      className={photoReviewFooterButtonClass}
+      disabled={!canAddPhoto || isBusy}
+      onClick={() => handleTakePhoto("add")}
+      variant="outline"
+    >
+      <Camera className="h-3.5 w-3.5" />
+      {originalCount > 0 ? "Add photo" : "Take photo"}
+    </Button>
+  ) : undefined;
+
+  const aiFooterExtra = currentAiNeedsApproval ? (
+    <Button
+      className={photoReviewFooterButtonClass}
+      disabled={isBusy}
+      onClick={() => void handleApprove()}
+    >
+      {isApproving ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <Check className="h-3.5 w-3.5" />
+      )}
+      Approve →
+    </Button>
+  ) : null;
 
   return (
     <>
-      <Dialog
+      <input
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        onChange={(event) => void handleFileChange(event)}
+        ref={fileInputRef}
+        type="file"
+      />
+      <PhotoReviewDialog
+        activeView={activeView}
+        aiAbsent={aiAbsent}
+        aiError={
+          currentPair?.ai?.aiError ?? product?.aiImageError ?? null
+        }
+        aiFailed={aiFailed}
+        aiFooterExtra={aiFooterExtra}
+        aiGenerating={aiGenerating}
+        aiModelLabel={aiModelLabel}
+        aiTabDisabled={!originalUrl && !aiGenerating && !aiFailed && !aiUrl}
+        aiUrl={aiUrl}
+        busy={isBusy}
+        canRegenerate={Boolean(originalUrl || currentPair?.original)}
+        defaultPrompt={defaultPrompt}
+        description={product?.sku}
+        draftPrompt={draftPrompt}
+        emptyOriginalDisabled={!canAddPhoto || isBusy}
+        emptyOriginalLabel={originalCount > 0 ? "Add photo" : "Take photo"}
+        error={error}
+        footerOverride={footerOverride}
+        notice={
+          !canTakePhoto
+            ? "Assign this product to a group to take its photo."
+            : null
+        }
+        onActiveViewChange={switchView}
+        onDraftPromptChange={setDraftPrompt}
+        onEmptyOriginalClick={() => handleTakePhoto("add")}
         onOpenChange={(open) => {
           if (!open) {
             handleClose();
           }
         }}
-        open={product !== null}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader className="min-w-0 overflow-hidden pr-6">
-            <DialogTitle className="truncate" title={product?.name}>
-              {product?.name ?? "Product photo"}
-            </DialogTitle>
-            <DialogDescription className="truncate font-mono">
-              {product?.sku}
-            </DialogDescription>
-          </DialogHeader>
-
-          <input
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            onChange={(event) => void handleFileChange(event)}
-            ref={fileInputRef}
-            type="file"
-          />
-
-          {hasPhotoTabs ? (
-            <div className="flex rounded-lg bg-slate-100 p-1">
-              <button
-                className={cn(
-                  "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  activeView === "original"
-                    ? "bg-white text-slate-950 shadow-sm"
-                    : "text-slate-600",
-                )}
-                onClick={() => switchView("original")}
-                type="button"
-              >
-                Original
-              </button>
-              <button
-                className={cn(
-                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  activeView === "ai"
-                    ? "bg-white text-slate-950 shadow-sm"
-                    : "text-slate-600",
-                )}
-                disabled={!originalUrl && !aiGenerating && !aiFailed && !aiUrl}
-                onClick={() => switchView("ai")}
-                type="button"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                AI
-              </button>
-            </div>
-          ) : null}
-
-          <div
-            className="relative aspect-square w-full overflow-hidden rounded-xl bg-slate-100"
-            onTouchEnd={handleTouchEnd}
-            onTouchStart={handleTouchStart}
-          >
-            {photosLoading ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
-                <Loader2 className="h-8 w-8 animate-spin" />
-                <span className="text-sm font-medium">Loading photos…</span>
-              </div>
-            ) : displayUrl ? (
-              <img
-                alt={`${activeView === "ai" ? "AI" : "Original"} photo for ${product?.sku ?? "product"}`}
-                className="absolute inset-0 h-full w-full object-cover"
-                src={displayUrl}
-              />
-            ) : activeView === "ai" && aiGenerating ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
-                <Loader2 className="h-8 w-8 animate-spin" />
-                <span className="text-sm font-medium">Generating AI photo…</span>
-              </div>
-            ) : activeView === "ai" && aiFailed ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-red-600">
-                <AlertCircle className="h-8 w-8" />
-                <span className="text-sm font-medium">
-                  {currentPair?.ai?.aiError ??
-                    product?.aiImageError ??
-                    "AI photo generation failed."}
-                </span>
-              </div>
-            ) : activeView === "ai" && aiAbsent ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-slate-500">
-                <Sparkles className="h-8 w-8" />
-                <span className="text-sm font-medium">
-                  No AI photo yet. Tap Regen to generate one.
-                </span>
-              </div>
-            ) : currentPair?.original?.status === "uploading" &&
-              !currentPair.original.url ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
-                <Loader2 className="h-8 w-8 animate-spin" />
-                <span className="text-sm font-medium">Uploading photo…</span>
-              </div>
-            ) : (
-              <button
-                className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500 transition-colors hover:bg-slate-200/60 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!canAddPhoto || isBusy}
-                onClick={() => handleTakePhoto("add")}
-                type="button"
-              >
-                <Camera className="h-8 w-8" />
-                <span className="text-sm font-medium">
-                  {originalCount > 0 ? "Add photo" : "Take photo"}
-                </span>
-              </button>
-            )}
-            {previewUrl ? (
-              <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white backdrop-blur">
-                {captureMode === "replace" ? "Replace photo" : "New photo"}
-              </span>
-            ) : null}
-            {pairPositionLabel && !previewUrl ? (
-              <span className="absolute right-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white backdrop-blur">
-                {pairPositionLabel}
-              </span>
-            ) : null}
-            {activeView === "ai" && aiModelLabel && displayUrl && !previewUrl ? (
-              <span className="absolute bottom-3 left-3 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium tracking-wide text-white backdrop-blur">
-                {aiModelLabel}
-              </span>
-            ) : null}
-            {activeView === "ai" && aiGenerating && displayUrl ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/35">
-                <Loader2 className="h-8 w-8 animate-spin text-white" />
-              </div>
-            ) : null}
-
-            {canNavigatePairs ? (
-              <>
-                <button
-                  aria-label="Previous photo"
-                  className="absolute left-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition-colors hover:bg-black/70 disabled:opacity-40"
-                  disabled={safePairIndex <= 0 || isBusy}
-                  onClick={() => goToPair(safePairIndex - 1)}
-                  type="button"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-                <button
-                  aria-label="Next photo"
-                  className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition-colors hover:bg-black/70 disabled:opacity-40"
-                  disabled={safePairIndex >= pairs.length - 1 || isBusy}
-                  onClick={() => goToPair(safePairIndex + 1)}
-                  type="button"
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
-              </>
-            ) : null}
-          </div>
-
-          {canNavigatePairs ? (
-            <div className="flex items-center justify-center gap-1.5">
-              {pairs.map((pair, index) => (
-                <button
-                  aria-label={`Photo ${index + 1}`}
-                  className={cn(
-                    "h-2 w-2 rounded-full transition-colors",
-                    index === safePairIndex ? "bg-slate-700" : "bg-slate-300",
-                  )}
-                  key={pair.original?._id ?? pair.ai?._id ?? index}
-                  onClick={() => goToPair(index)}
-                  type="button"
-                />
-              ))}
-            </div>
-          ) : null}
-
-          {error ? (
-            <p className="text-sm font-medium text-red-600">{error}</p>
-          ) : null}
-          {stage ? (
-            <p className="text-sm font-medium text-slate-600">{stage}</p>
-          ) : null}
-          {!canTakePhoto ? (
-            <p className="text-sm text-slate-500">
-              Assign this product to a group to take its photo.
-            </p>
-          ) : null}
-
-          <DialogFooter className="flex flex-row flex-nowrap items-center gap-1.5 overflow-x-auto sm:justify-start">
-            {activeView === "ai" && !captureFile ? (
-              <>
-                <Button
-                  className={footerButtonClass}
-                  disabled={isBusy || aiGenerating || photosLoading}
-                  onClick={openPromptDialog}
-                  variant="outline"
-                >
-                  <PencilLine className="h-3.5 w-3.5" />
-                  Prompt
-                </Button>
-                <Button
-                  className={footerButtonClass}
-                  disabled={
-                    isBusy ||
-                    aiGenerating ||
-                    photosLoading ||
-                    (!originalUrl && !currentPair?.original)
-                  }
-                  onClick={() => {
-                    if (suppressRegenClickRef.current) {
-                      suppressRegenClickRef.current = false;
-                      return;
-                    }
-                    void handleRegenerate();
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    if (
-                      isBusy ||
-                      aiGenerating ||
-                      photosLoading ||
-                      (!originalUrl && !currentPair?.original)
-                    ) {
-                      return;
-                    }
-                    openRegenModelMenu(event.clientX, event.clientY);
-                  }}
-                  onPointerCancel={clearRegenLongPressTimer}
-                  onPointerDown={(event) => {
-                    if (
-                      event.pointerType !== "touch" ||
-                      isBusy ||
-                      aiGenerating ||
-                      photosLoading ||
-                      (!originalUrl && !currentPair?.original)
-                    ) {
-                      return;
-                    }
-
-                    clearRegenLongPressTimer();
-                    const { clientX, clientY } = event;
-                    regenLongPressTimerRef.current = window.setTimeout(() => {
-                      regenLongPressTimerRef.current = null;
-                      triggerHaptic();
-                      openRegenModelMenu(clientX, clientY, true);
-                    }, REGEN_LONG_PRESS_MS);
-                  }}
-                  onPointerLeave={clearRegenLongPressTimer}
-                  onPointerUp={clearRegenLongPressTimer}
-                  variant="outline"
-                >
-                  {isRegenerating || aiGenerating ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="h-3.5 w-3.5" />
-                  )}
-                  Regen
-                </Button>
-                {aiUrl && !aiGenerating && !aiFailed ? (
-                  <Button
-                    className={footerButtonClass}
-                    disabled={isBusy}
-                    onClick={() => void handleWhitenBackground()}
-                    variant="outline"
-                  >
-                    {isWhitening ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-3.5 w-3.5" />
-                    )}
-                    Whiten
-                  </Button>
-                ) : null}
-                {currentAiNeedsApproval ? (
-                  <Button
-                    className={footerButtonClass}
-                    disabled={isBusy}
-                    onClick={() => void handleApprove()}
-                  >
-                    {isApproving ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Check className="h-3.5 w-3.5" />
-                    )}
-                    Approve →
-                  </Button>
-                ) : null}
-              </>
-            ) : captureFile ? (
-              <>
-                <Button
-                  className={footerButtonClass}
-                  disabled={isBusy}
-                  onClick={resetCapture}
-                  variant="ghost"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  className={footerButtonClass}
-                  disabled={isBusy}
-                  onClick={() => handleTakePhoto(captureMode)}
-                  variant="outline"
-                >
-                  <Camera className="h-3.5 w-3.5" />
-                  Retake
-                </Button>
-                <Button
-                  className={footerButtonClass}
-                  disabled={!canSaveCapture}
-                  onClick={() => void handleSave()}
-                >
-                  {isSaving ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Check className="h-3.5 w-3.5" />
-                  )}
-                  Save
-                </Button>
-              </>
-            ) : showExistingOriginalActions ? (
-              <>
-                <Button
-                  className={footerButtonClass}
-                  disabled={!canAddPhoto || isBusy}
-                  onClick={() => handleTakePhoto("add")}
-                  variant="outline"
-                >
-                  <Camera className="h-3.5 w-3.5" />
-                  Add photo
-                </Button>
-                <Button
-                  className={footerButtonClass}
-                  disabled={!canReplacePhoto || isBusy}
-                  onClick={() => handleTakePhoto("replace")}
-                  variant="outline"
-                >
-                  <Replace className="h-3.5 w-3.5" />
-                  Replace photo
-                </Button>
-                <Button
-                  className={footerButtonClass}
-                  disabled={isBusy}
-                  onClick={() => void handleDeleteOriginal()}
-                  variant="outline"
-                >
-                  {isDeleting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
-                  )}
-                  Delete
-                </Button>
-              </>
-            ) : (
-              <Button
-                className={footerButtonClass}
-                disabled={!canAddPhoto || isBusy}
-                onClick={() => handleTakePhoto("add")}
-                variant="outline"
-              >
-                <Camera className="h-3.5 w-3.5" />
-                {originalCount > 0 ? "Add photo" : "Take photo"}
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog onOpenChange={setPromptDialogOpen} open={promptDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>AI prompt</DialogTitle>
-            <DialogDescription>
-              Used for the next regeneration of {product?.sku ?? "this product"}.
-            </DialogDescription>
-          </DialogHeader>
-          <textarea
-            className="min-h-32 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-slate-950/10 focus:ring-2"
-            disabled={isBusy || aiGenerating}
-            onChange={(event) => setDraftPrompt(event.currentTarget.value)}
-            value={draftPrompt}
-          />
-          <DialogFooter>
-            <Button
-              className="sm:mr-auto"
-              disabled={
-                isBusy ||
-                aiGenerating ||
-                draftPrompt.trim() === defaultPrompt.trim()
-              }
-              onClick={applyDefaultPrompt}
-              variant="outline"
-            >
-              Use default
-            </Button>
-            <Button
-              disabled={isBusy || aiGenerating}
-              onClick={() => setPromptDialogOpen(false)}
-              variant="ghost"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={isBusy || aiGenerating || !draftPrompt.trim()}
-              onClick={savePrompt}
-            >
-              Save prompt
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <DropdownMenu
-        onOpenChange={(open) => {
-          if (!open) {
-            setRegenModelMenu(null);
-          }
+        onOpenPrompt={openPromptDialog}
+        onPairIndexChange={(index) => {
+          setPairIndex(index);
+          setPromptDirty(false);
+          setError(null);
         }}
-        open={regenModelMenu !== null}
-      >
-        {regenModelMenu ? (
-          <DropdownMenuTrigger asChild>
-            <span
-              className="pointer-events-none fixed h-0 w-0"
-              style={{
-                left: regenModelMenu.x,
-                top: regenModelMenu.y,
-              }}
-            />
-          </DropdownMenuTrigger>
-        ) : null}
-        <DropdownMenuContent
-          align="start"
-          onCloseAutoFocus={(event) => event.preventDefault()}
-        >
-          {AI_IMAGE_MODEL_OPTIONS.map((option) => (
-            <DropdownMenuItem
-              key={option.id}
-              onSelect={() => {
-                setRegenModelMenu(null);
-                void handleRegenerate(option.id);
-              }}
-            >
-              {option.label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        onPromptDialogOpenChange={setPromptDialogOpen}
+        onRegenerate={(model) => void handleRegenerate(model)}
+        onSavePrompt={savePrompt}
+        onUseDefaultPrompt={applyDefaultPrompt}
+        onWhiten={() => void handleWhitenBackground()}
+        open={product !== null}
+        originalUrl={originalUrl}
+        pairCount={pairs.length}
+        pairIndex={safePairIndex}
+        pairPositionLabel={pairPositionLabel}
+        photosLoading={photosLoading}
+        previewBadge={
+          previewUrl
+            ? captureMode === "replace"
+              ? "Replace photo"
+              : "New photo"
+            : null
+        }
+        previewUrl={previewUrl}
+        promptDescription={`Used for the next regeneration of ${product?.sku ?? "this product"}.`}
+        promptDialogOpen={promptDialogOpen}
+        regenerating={isRegenerating}
+        showViewTabs={hasPhotoTabs}
+        showWhiten={Boolean(aiUrl && !aiGenerating && !aiFailed)}
+        stage={stage}
+        title={product?.name ?? "Product photo"}
+        whitening={isWhitening}
+      />
     </>
   );
 }
