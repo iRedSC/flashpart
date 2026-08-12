@@ -75,6 +75,11 @@ async function backfillPhotoOwnershipBatch(
 
   for (const photo of photos) {
     scanned += 1;
+    if (photo.productId == null) {
+      skipped += 1;
+      continue;
+    }
+
     const ownership = productPhotoOwnership(photo.productId);
     if (
       photo.ownerType === ownership.ownerType &&

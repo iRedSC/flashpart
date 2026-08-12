@@ -65,6 +65,17 @@ export const convexApi = {
     ),
     remove: deployedFunction<typeof api.groups.remove>("groups.js:remove"),
   },
+  galleryPhotos: {
+    list: deployedFunction<typeof api.galleryPhotos.list>(
+      "galleryPhotos.js:list",
+    ),
+    createFromUpload: deployedFunction<
+      typeof api.galleryPhotos.createFromUpload
+    >("galleryPhotos.js:createFromUpload"),
+    deletePhoto: deployedFunction<typeof api.galleryPhotos.deletePhoto>(
+      "galleryPhotos.js:deletePhoto",
+    ),
+  },
   listingJobs: {
     list: deployedFunction<typeof api.listingJobs.list>("listingJobs.js:list"),
     enqueueCreateDrafts: deployedFunction<

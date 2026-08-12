@@ -66,7 +66,7 @@ type DialogPair = {
 
 function toClientPhoto(photo: {
   _id: Id<"productPhotos">;
-  productId: Id<"products">;
+  productId?: Id<"products">;
   kind: "original" | "ai";
   storageId?: Id<"_storage">;
   url?: string;
@@ -86,7 +86,7 @@ function toClientPhoto(photo: {
 }): ProductPhoto {
   return {
     _id: photo._id,
-    productId: photo.productId,
+    productId: photo.productId ?? "",
     kind: photo.kind,
     storageId: photo.storageId,
     url: photo.url,

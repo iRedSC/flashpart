@@ -7,6 +7,7 @@ import {
 } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import { aiImageModel, upgradeAiImageModel } from "./photoAiConstants";
+import { requirePhotoProductId } from "./photoOwnership";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
 import {
   applyApproveAiPhoto,
@@ -450,7 +451,8 @@ export const regenerateForPhoto = mutation({
       throw new ConvexError("Capture a product photo before regenerating.");
     }
 
-    const product = await ctx.db.get(original.productId);
+    const productId = requirePhotoProductId(original);
+    const product = await ctx.db.get(productId);
 
     if (!product) {
       throw new ConvexError("Product not found.");
@@ -467,17 +469,17 @@ export const regenerateForPhoto = mutation({
     // Clears shopifyFile* so promote cannot reuse a stale Shopify file after regen.
     const { aiGeneration, previousShopifyFileIds } =
       await applyMarkAiGenerating(ctx, {
-        productId: original.productId,
+        productId,
         originalPhotoId: args.originalPhotoId,
         prompt,
       });
 
-    await ctx.db.patch(original.productId, {
+    await ctx.db.patch(productId, {
       aiImagePrompt: prompt,
       updatedAt: now,
     });
     await ctx.scheduler.runAfter(0, photoAiModel.processProductPhoto, {
-      productId: original.productId,
+      productId,
       originalPhotoId: args.originalPhotoId,
       aiGeneration,
       isRegeneration: true,

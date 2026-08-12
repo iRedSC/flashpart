@@ -12,7 +12,7 @@ import { requireSessionUser } from "./authUtils";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
 import type { AiImageModelId } from "./photoAiConstants";
 import { aiImageModel } from "./photoAiConstants";
-import { productPhotoOwnership } from "./photoOwnership";
+import { productPhotoOwnership, requirePhotoProductId } from "./photoOwnership";
 import { productErrorFields, isLinkedToShopify, needsRepublishPatch } from "./productState";
 import { photoKind, shopifyFileStatus } from "./schema";
 import {
@@ -574,7 +574,7 @@ export async function applyMarkAiReady(
     updatedAt: now,
   });
 
-  await syncProductPhotoFlags(ctx, aiPhoto.productId);
+  await syncProductPhotoFlags(ctx, requirePhotoProductId(aiPhoto));
 
   return aiPhoto._id;
 }
@@ -628,7 +628,7 @@ export async function applyWhitenAiReady(
     updatedAt: now,
   });
 
-  await syncProductPhotoFlags(ctx, aiPhoto.productId);
+  await syncProductPhotoFlags(ctx, requirePhotoProductId(aiPhoto));
 
   return aiPhoto._id;
 }
@@ -663,11 +663,12 @@ export async function applyMarkAiFailed(
     updatedAt: now,
   });
 
-  const product = await ctx.db.get(aiPhoto.productId);
+  const productId = requirePhotoProductId(aiPhoto);
+  const product = await ctx.db.get(productId);
 
   if (product) {
     // Mirror legacy photoAi.markFailed so list/archive surfaces the failure.
-    await ctx.db.patch(aiPhoto.productId, {
+    await ctx.db.patch(productId, {
       aiImageError: args.error,
       aiImageStatus: "failed",
       ...productErrorFields(
@@ -683,7 +684,7 @@ export async function applyMarkAiFailed(
     await maybeUnarchiveGroupForActiveProduct(ctx, product.groupId, now);
   }
 
-  await syncProductPhotoFlags(ctx, aiPhoto.productId);
+  await syncProductPhotoFlags(ctx, productId);
 
   return aiPhoto._id;
 }
@@ -709,7 +710,7 @@ export async function applyApproveAiPhoto(
     updatedAt: now,
   });
 
-  await syncProductPhotoFlags(ctx, photo.productId);
+  await syncProductPhotoFlags(ctx, requirePhotoProductId(photo));
 }
 
 export async function applyMarkPromoted(
@@ -785,7 +786,7 @@ export async function applyMarkPromoted(
   }
 
   await ctx.db.patch(args.photoId, patch);
-  await ctx.db.patch(photo.productId, { updatedAt: now });
+  await ctx.db.patch(requirePhotoProductId(photo), { updatedAt: now });
 }
 
 /**
@@ -834,8 +835,9 @@ export async function applyMarkPromoteFailed(
   }
 
   await ctx.db.patch(args.photoId, patch);
-  await ctx.db.patch(photo.productId, { updatedAt: now });
-  await syncProductPhotoFlags(ctx, photo.productId);
+  const productId = requirePhotoProductId(photo);
+  await ctx.db.patch(productId, { updatedAt: now });
+  await syncProductPhotoFlags(ctx, productId);
 }
 
 export async function applyClearStorageId(
@@ -891,7 +893,8 @@ export async function applyDeletePhoto(
     throw new ConvexError("Photo not found.");
   }
 
-  const product = await ctx.db.get(photo.productId);
+  const productId = photo.productId;
+  const product = productId ? await ctx.db.get(productId) : null;
   const toDelete: Doc<"productPhotos">[] = [photo];
 
   if (photo.kind === "original") {
@@ -908,14 +911,16 @@ export async function applyDeletePhoto(
     await ctx.db.delete(row._id);
   }
 
-  if (product && isLinkedToShopify(product)) {
-    await ctx.db.patch(photo.productId, {
+  if (productId && product && isLinkedToShopify(product)) {
+    await ctx.db.patch(productId, {
       needsRepublish: true,
       updatedAt: Date.now(),
     });
   }
 
-  await syncProductPhotoFlags(ctx, photo.productId);
+  if (productId) {
+    await syncProductPhotoFlags(ctx, productId);
+  }
 }
 
 export const listByProduct = query({
@@ -1164,10 +1169,11 @@ async function finalizeReservedOriginal(
 
   await assertStorageIdAvailable(ctx, args.storageId, args.originalPhotoId);
 
+  const productId = requirePhotoProductId(original);
   const url = await ctx.storage.getUrl(args.storageId);
   const now = Date.now();
   const patch: Partial<Doc<"productPhotos">> = {
-    ...productPhotoOwnership(original.productId),
+    ...productPhotoOwnership(productId),
     storageId: args.storageId,
     status: "ready",
     url: url ?? undefined,
@@ -1184,7 +1190,7 @@ async function finalizeReservedOriginal(
   const { aiGeneration, previousShopifyFileIds } = await applyMarkAiGenerating(
     ctx,
     {
-      productId: original.productId,
+      productId,
       originalPhotoId: args.originalPhotoId,
     },
   );
@@ -1198,12 +1204,12 @@ async function finalizeReservedOriginal(
     productPatch.captureId = args.captureId;
   }
 
-  await ctx.db.patch(original.productId, productPatch);
+  await ctx.db.patch(productId, productPatch);
   // applyMarkAiGenerating already synced flags; sync again after product patch.
-  await syncProductPhotoFlags(ctx, original.productId);
+  await syncProductPhotoFlags(ctx, productId);
 
   await ctx.scheduler.runAfter(0, processProductPhotoRef, {
-    productId: original.productId,
+    productId,
     originalPhotoId: args.originalPhotoId,
     aiGeneration,
     previousShopifyFileIds:
@@ -1295,7 +1301,8 @@ export const replaceOriginalFromUpload = mutation({
       );
     }
 
-    const product = await ctx.db.get(photo.productId);
+    const productId = requirePhotoProductId(photo);
+    const product = await ctx.db.get(productId);
 
     if (!product) {
       throw new ConvexError("Product not found.");
@@ -1313,7 +1320,7 @@ export const replaceOriginalFromUpload = mutation({
     }
 
     await ctx.db.patch(args.photoId, {
-      ...productPhotoOwnership(photo.productId),
+      ...productPhotoOwnership(productId),
       storageId: args.storageId,
       url: url ?? undefined,
       status: "ready",
@@ -1326,7 +1333,7 @@ export const replaceOriginalFromUpload = mutation({
 
     const { aiGeneration, previousShopifyFileIds: aiShopifyFileIds } =
       await applyMarkAiGenerating(ctx, {
-        productId: photo.productId,
+        productId,
         originalPhotoId: args.photoId,
       });
     previousShopifyFileIds.push(...aiShopifyFileIds);
@@ -1355,11 +1362,11 @@ export const replaceOriginalFromUpload = mutation({
       productPatch.captureId = args.captureId;
     }
 
-    await ctx.db.patch(photo.productId, productPatch);
-    await syncProductPhotoFlags(ctx, photo.productId);
+    await ctx.db.patch(productId, productPatch);
+    await syncProductPhotoFlags(ctx, productId);
 
     await ctx.scheduler.runAfter(0, processProductPhotoRef, {
-      productId: photo.productId,
+      productId,
       originalPhotoId: args.photoId,
       aiGeneration,
       previousShopifyFileIds:
@@ -1393,7 +1400,8 @@ export const setSortOrder = mutation({
     }
 
     const now = Date.now();
-    const product = await ctx.db.get(photo.productId);
+    const productId = requirePhotoProductId(photo);
+    const product = await ctx.db.get(productId);
 
     await ctx.db.patch(args.photoId, {
       sortOrder: args.sortOrder,
@@ -1409,7 +1417,7 @@ export const setSortOrder = mutation({
       });
     }
 
-    await ctx.db.patch(photo.productId, {
+    await ctx.db.patch(productId, {
       updatedAt: now,
       ...(product ? needsRepublishPatch(product) : {}),
     });
@@ -1427,11 +1435,13 @@ export const getPhotoForPromote = internalQuery({
       return null;
     }
 
-    const product = await ctx.db.get(photo.productId);
+    const product = photo.productId
+      ? await ctx.db.get(photo.productId)
+      : null;
 
     return {
       photo,
-      sku: product?.sku ?? "product",
+      sku: product?.sku ?? (photo.ownerType === "gallery" ? "gallery" : "product"),
     };
   },
 });
@@ -1447,7 +1457,9 @@ export const getPhotoForDeletion = internalQuery({
       return null;
     }
 
-    const product = await ctx.db.get(photo.productId);
+    const product = photo.productId
+      ? await ctx.db.get(photo.productId)
+      : null;
     const shopifyFileIds: string[] = [];
 
     if (photo.shopifyFileId) {

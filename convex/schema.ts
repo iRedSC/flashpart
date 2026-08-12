@@ -236,16 +236,16 @@ export default defineSchema({
 
   productPhotos: defineTable({
     /**
-     * Required while all photos are product-owned. Gallery rows will make this
-     * optional later; until then product queries keep using by_product*.
+     * Set for product-owned photos. Omitted for gallery-owned rows.
+     * Product queries keep using by_product* (gallery rows are not indexed there).
      */
-    productId: v.id("products"),
+    productId: v.optional(v.id("products")),
     /**
      * Soft ownership (model A). Dual-written with productId for product rows.
-     * Optional only so existing rows validate before backfill migration runs.
+     * Optional only so older rows validate before backfill; new writes always set it.
      */
     ownerType: v.optional(photoOwnerType),
-    /** String form of product id, or future gallery album id. */
+    /** String form of product id, or gallery owner id (e.g. "default"). */
     ownerId: v.optional(v.string()),
     kind: photoKind,
     storageId: v.optional(v.id("_storage")),
