@@ -284,7 +284,8 @@ export function SettingsPage() {
               />
             </label>
             <p className="text-sm text-slate-500">
-              Applied to every part when it is uploaded to Shopify.
+              Default type when a part is uploaded to Shopify. Individual parts
+              can override this.
             </p>
           </div>
           <div className="grid gap-2 rounded-lg border border-slate-200 p-4">

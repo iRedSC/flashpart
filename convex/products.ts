@@ -169,6 +169,7 @@ export const create = mutation({
     price: v.number(),
     description: v.optional(v.string()),
     vendor: v.optional(v.string()),
+    productType: v.optional(v.string()),
     tags: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -178,6 +179,7 @@ export const create = mutation({
     const name = args.name.trim();
     const description = args.description?.trim() || undefined;
     const vendor = args.vendor?.trim() || undefined;
+    const productType = args.productType?.trim() || undefined;
     const tags = normalizeTagString(args.tags);
 
     if (!sku || !name) {
@@ -204,6 +206,7 @@ export const create = mutation({
       name,
       description,
       vendor,
+      productType,
       tags,
       price: args.price,
       phase: "imported",

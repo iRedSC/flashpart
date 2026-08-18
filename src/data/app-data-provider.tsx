@@ -39,6 +39,7 @@ type ImportedProduct = {
   price: number;
   description?: string;
   vendor?: string;
+  productType?: string;
   tags?: string;
 };
 type ExistingEntryBehavior = "overwrite" | "ignore";
@@ -874,6 +875,7 @@ export function AppDataProvider({
         const name = args.name.trim();
         const description = args.description?.trim() || undefined;
         const vendor = args.vendor?.trim() || undefined;
+        const productType = args.productType?.trim() || undefined;
         const tags = args.tags?.trim() || undefined;
         const now = Date.now();
         const optimisticId =
@@ -895,6 +897,7 @@ export function AppDataProvider({
                 pendingOperation: undefined,
                 phase: "imported",
                 price: args.price,
+                productType,
                 sku,
                 tags,
                 updatedAt: now,
@@ -908,6 +911,7 @@ export function AppDataProvider({
               description,
               name,
               price: args.price,
+              productType,
               sessionToken: session.sessionToken,
               sku,
               tags,

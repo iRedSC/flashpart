@@ -42,6 +42,17 @@ const defaultSettings = {
   updatedAt: 0,
 };
 
+export function resolveShopifyProductType(
+  productType: string | undefined,
+  settingsProductType: string | undefined,
+) {
+  return (
+    productType?.trim() ||
+    settingsProductType?.trim() ||
+    defaultSettings.shopifyProductType
+  );
+}
+
 export function resolveMaxProductPhotos(
   settings: { maxProductPhotos?: number } | null,
 ) {

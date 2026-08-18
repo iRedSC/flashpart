@@ -29,7 +29,7 @@ import {
   evaluateProductPhotosPublishGate,
   productHasPhotoRows,
 } from "./productPhotos";
-import { getSettingsDocument } from "./settings";
+import { getSettingsDocument, resolveShopifyProductType } from "./settings";
 import {
   normalizeShopifyShippingPackageId,
   resolveShopifySalesChannels,
@@ -707,7 +707,10 @@ export const processQueuedJob = internalAction({
       const publishTarget = payload.settings.shopifyPublishTarget;
       const shopifyStatus =
         publishTarget === "published" ? ("published" as const) : ("draft" as const);
-      const productType = payload.settings.shopifyProductType.trim() || "Part";
+      const productType = resolveShopifyProductType(
+        payload.product.productType,
+        payload.settings.shopifyProductType,
+      );
       const tags = mergeTagLists(
         payload.settings.shopifyDefaultTags,
         payload.product.tags,
