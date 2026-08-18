@@ -698,6 +698,7 @@ export function ProductsPage() {
     publishProducts,
     reorderProducts,
     session,
+    settings,
     shopifyConnection,
     unarchiveProducts,
     updateProduct,
@@ -777,6 +778,7 @@ export function ProductsPage() {
   const [addPartPrice, setAddPartPrice] = React.useState("");
   const [addPartDescription, setAddPartDescription] = React.useState("");
   const [addPartVendor, setAddPartVendor] = React.useState("");
+  const [addPartType, setAddPartType] = React.useState("");
   const [addPartTags, setAddPartTags] = React.useState("");
   const [addPartError, setAddPartError] = React.useState<string | null>(null);
   const [isAddingPart, setIsAddingPart] = React.useState(false);
@@ -1768,6 +1770,7 @@ export function ProductsPage() {
     setAddPartPrice("");
     setAddPartDescription("");
     setAddPartVendor("");
+    setAddPartType("");
     setAddPartTags("");
     setAddPartError(null);
     setIsAddingPart(false);
@@ -1779,6 +1782,7 @@ export function ProductsPage() {
     const price = Number.parseFloat(addPartPrice);
     const description = addPartDescription.trim() || undefined;
     const vendor = addPartVendor.trim() || undefined;
+    const productType = addPartType.trim() || undefined;
     const tags = normalizeTagString(addPartTags);
 
     if (!sku || !name) {
@@ -1802,6 +1806,7 @@ export function ProductsPage() {
         sku,
         tags,
         vendor,
+        productType,
       });
       setAddPartOpen(false);
       resetAddPartDialog();
@@ -2216,7 +2221,7 @@ export function ProductsPage() {
             <DialogTitle>Add part</DialogTitle>
             <DialogDescription>
               Enter the SKU, name, and price for a new product. Description,
-              vendor, and tags are optional.
+              vendor, type, and tags are optional.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -2293,6 +2298,20 @@ export function ProductsPage() {
                 }}
                 placeholder="Optional vendor"
                 value={addPartVendor}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium" htmlFor="add-part-type">
+                Type
+              </label>
+              <Input
+                id="add-part-type"
+                onChange={(event) => {
+                  setAddPartType(event.currentTarget.value);
+                  setAddPartError(null);
+                }}
+                placeholder={settings?.shopifyProductType ?? "Part"}
+                value={addPartType}
               />
             </div>
             <div className="grid gap-2">

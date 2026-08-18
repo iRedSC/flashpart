@@ -165,6 +165,8 @@ export default defineSchema({
     name: v.string(),
     description: v.optional(v.string()),
     vendor: v.optional(v.string()),
+    /** Shopify product type override; empty falls back to settings. */
+    productType: v.optional(v.string()),
     tags: v.optional(v.string()),
     price: v.number(),
     phase: v.optional(productPhase),
