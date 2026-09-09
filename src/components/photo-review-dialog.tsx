@@ -42,6 +42,7 @@ export type PhotoReviewDialogProps = {
 
   title: string;
   description?: string;
+  headerExtra?: React.ReactNode;
 
   activeView: PhotoReviewView;
   onActiveViewChange: (view: PhotoReviewView) => void;
@@ -112,6 +113,7 @@ export function PhotoReviewDialog({
   onOpenChange,
   title,
   description,
+  headerExtra,
   activeView,
   onActiveViewChange,
   showViewTabs = true,
@@ -236,6 +238,7 @@ export function PhotoReviewDialog({
               </DialogDescription>
             )}
           </DialogHeader>
+          {headerExtra}
 
           {showViewTabs ? (
             <div className="flex rounded-lg bg-slate-100 p-1">

@@ -157,6 +157,7 @@ export const convexApi = {
     ),
   },
   products: {
+    finishPhotos: deployedFunction<typeof api.products.finishPhotos>("products.js:finishPhotos"),
     list: deployedFunction<typeof api.products.list>("products.js:list"),
     update: deployedFunction<typeof api.products.update>("products.js:update"),
     create: deployedFunction<typeof api.products.create>("products.js:create"),
@@ -177,6 +178,7 @@ export const convexApi = {
     ),
   },
   settings: {
+    setShopifyInventoryLocationId: deployedFunction<typeof api.settings.setShopifyInventoryLocationId>("settings.js:setShopifyInventoryLocationId"),
     get: deployedFunction<typeof api.settings.get>("settings.js:get"),
     setDuplicatePolicy: deployedFunction<
       typeof api.settings.setDuplicatePolicy
@@ -222,6 +224,8 @@ export const convexApi = {
     >("settings.js:setMaxProductPhotos"),
   },
   shopify: {
+    productTypes: deployedFunction<typeof api.shopify.productTypes>("shopify.js:productTypes"),
+    inventoryLocations: deployedFunction<typeof api.shopify.inventoryLocations>("shopify.js:inventoryLocations"),
     currentConnection: deployedFunction<typeof api.shopify.currentConnection>(
       "shopify.js:currentConnection",
     ),

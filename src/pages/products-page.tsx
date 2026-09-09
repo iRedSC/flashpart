@@ -1,3 +1,6 @@
+import { ConditionSelect } from "../components/condition-select";
+import { ShopifyProductTypeSelect } from "../components/shopify-product-type-select";
+import type { Condition } from "../../convex/listingTypes";
 import * as React from "react";
 import { useQuery } from "convex/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -119,6 +122,7 @@ const VIEW_ARCHIVED = "archived";
 type ProductsView = typeof VIEW_ACTIVE | typeof VIEW_ARCHIVED;
 const desktopGridColumns =
   "grid-cols-[36px_48px_132px_minmax(200px,320px)_minmax(180px,280px)_96px_minmax(110px,160px)_minmax(140px,200px)_88px_minmax(110px,160px)_minmax(190px,280px)]";
+const refurbishedGridColumns = "grid-cols-[36px_48px_160px_132px_minmax(200px,320px)_minmax(180px,280px)_96px_minmax(110px,160px)_minmax(140px,200px)_88px_minmax(110px,160px)_minmax(190px,280px)]";
 const desktopTableMinWidth = 1540;
 const desktopRowHeight = 58;
 const desktopTableInputClass = "h-8 min-w-0 w-full px-1.5";
@@ -259,7 +263,7 @@ function DesktopProductRow({
     <TableRow
       className={cn(
         "group absolute left-0 grid w-full border-b border-slate-100 bg-white transition-[background,box-shadow] duration-150 hover:bg-slate-50 hover:shadow-[inset_3px_0_0_#020617]",
-        desktopGridColumns,
+        row.original.listingKind === "refurbished" ? refurbishedGridColumns : desktopGridColumns,
         isSelected && "bg-slate-50 shadow-[inset_3px_0_0_#020617]",
         isPending && "bg-amber-50/65 shadow-[inset_3px_0_0_#fcd34d]",
         isDragSource && "opacity-0",
@@ -426,13 +430,14 @@ function MobileProductCard({
         onClick={(event) => {
           if (
             (event.target as HTMLElement).closest(
-              "button, a, [role='button'], [role='checkbox'], input, label",
+              "button, a, [role='button'], [role='checkbox'], input, select, label",
             )
           ) {
             return;
           }
 
-          row.toggleSelected();
+          if (product.listingKind === "refurbished") onOpenPhoto(product);
+          else row.toggleSelected();
         }}
       >
         <div className="flex items-stretch gap-3.5">
@@ -680,7 +685,8 @@ function parseProductCsv(text: string) {
   };
 }
 
-export function ProductsPage() {
+export function ProductsPage({ refurbished = false }: { refurbished?: boolean; }) {
+  const [addCondition, setAddCondition] = React.useState<Condition>();
   const {
     assignProductsToGroup,
     createGroup,
@@ -692,17 +698,17 @@ export function ProductsPage() {
     groups,
     isProductPending,
     isLoading,
-    products,
+    products: allProducts,
     importProducts,
     listingJobs,
     publishProducts,
     reorderProducts,
     session,
-    settings,
     shopifyConnection,
     unarchiveProducts,
     updateProduct,
   } = useAppData();
+  const products = React.useMemo(() => allProducts.filter(product => (product.listingKind === "refurbished") === refurbished), [allProducts, refurbished]);
   const shopDomain = shopifyConnection?.shopDomain ?? null;
   const navigate = useNavigate();
   const parentRef = React.useRef<HTMLDivElement>(null);
@@ -711,7 +717,7 @@ export function ProductsPage() {
   const mobileListRef = React.useRef<HTMLDivElement>(null);
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [searchParams, setSearchParams] = useSearchParams();
-  const groupFilter = searchParams.get("group");
+  const groupFilter = refurbished ? null : searchParams.get("group");
   const viewFilter: ProductsView =
     searchParams.get("view") === VIEW_ARCHIVED ? VIEW_ARCHIVED : VIEW_ACTIVE;
   const filteredProducts = React.useMemo(() => {
@@ -899,6 +905,7 @@ export function ProductsPage() {
           />
         ),
       }),
+      ...(refurbished ? [columnHelper.display({ id: "condition", header: "Condition", cell: ({ row }) => <ConditionSelect value={row.original.condition} onChange={condition => { void updateProduct({ id: row.original._id, condition }).catch(() => undefined); }} /> })] : []),
       columnHelper.accessor("sku", {
         header: "SKU",
         cell: ({ row }) => (
@@ -1167,6 +1174,7 @@ export function ProductsPage() {
       }),
     ],
     [
+      refurbished,
       activeDescriptionId,
       existingShopifyProductIdByProductId,
       groupById,
@@ -1282,7 +1290,7 @@ export function ProductsPage() {
     [filteredProducts],
   );
   const activeFilterLabel = !groupFilter
-    ? "All products"
+    ? (refurbished ? "Refurbished" : "All parts")
     : groupFilter === UNGROUPED_FILTER
       ? "Ungrouped"
       : groupById.get(groupFilter as Id<"groups">) ?? "Group";
@@ -1301,6 +1309,7 @@ export function ProductsPage() {
     .filter(
       (product) =>
         !isArchived(product) &&
+        (product.listingKind !== "refurbished" || Boolean(product.condition && product.photosComplete)) &&
         canPublishProduct(
           {
             aiImageStatus: product.aiImageStatus,
@@ -1672,6 +1681,7 @@ export function ProductsPage() {
   }
 
   async function handleCaptureSelected() {
+    if (refurbished && selectedProductIds.length === 1) { navigate(`/capture/refurbished/${selectedProductIds[0]}`); return; }
     if (selectedProductIds.length === 0) {
       return;
     }
@@ -1765,6 +1775,7 @@ export function ProductsPage() {
   }
 
   function resetAddPartDialog() {
+    setAddCondition(undefined);
     setAddPartSku("");
     setAddPartName("");
     setAddPartPrice("");
@@ -1800,6 +1811,8 @@ export function ProductsPage() {
 
     try {
       await createProduct({
+        listingKind: refurbished ? "refurbished" : undefined,
+        condition: refurbished ? addCondition : undefined,
         description,
         name,
         price,
@@ -1896,6 +1909,7 @@ export function ProductsPage() {
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden md:overflow-visible">
       <div className="flex shrink-0 items-center justify-between gap-2 md:gap-4">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-sm text-slate-500">
+          {refurbished ? <h2 className="text-lg font-semibold text-slate-950">Refurbished</h2> : (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -1928,6 +1942,7 @@ export function ProductsPage() {
                 ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -1952,6 +1967,7 @@ export function ProductsPage() {
           <div className="hidden shrink-0 items-center gap-2 md:flex">
             <Button
               className="text-slate-950"
+              hidden={refurbished}
               onClick={() => setImportOpen(true)}
               variant="outline"
             >
@@ -1959,7 +1975,7 @@ export function ProductsPage() {
               Import CSV
             </Button>
             <Button
-              aria-label="Add part"
+              aria-label={refurbished ? "Add refurbished tool" : "Add part"}
               className="h-9 w-9 shrink-0 p-0 text-slate-950"
               onClick={() => setAddPartOpen(true)}
               variant="outline"
@@ -1968,7 +1984,7 @@ export function ProductsPage() {
             </Button>
           </div>
           <Button
-            aria-label="Add part"
+            aria-label={refurbished ? "Add refurbished tool" : "Add part"}
             className="h-9 w-9 shrink-0 p-0 text-slate-950 md:hidden"
             onClick={() => setAddPartOpen(true)}
             variant="outline"
@@ -1997,13 +2013,14 @@ export function ProductsPage() {
           <DropdownMenuContent align="end">
             <DropdownMenuItem
               disabled={!hasSelection}
+              hidden={refurbished}
               onSelect={() => setAddToGroupOpen(true)}
             >
               <FolderPlus />
               Add to group
             </DropdownMenuItem>
             <DropdownMenuItem
-              disabled={!hasSelection}
+              disabled={!hasSelection || (refurbished && selectedCount !== 1)}
               onSelect={() =>
                 void handleCaptureSelected().catch(() => undefined)
               }
@@ -2158,8 +2175,7 @@ export function ProductsPage() {
                   {importRows.length.toLocaleString()} valid product
                   {importRows.length === 1 ? "" : "s"}
                   {importSkippedRows > 0
-                    ? `, ${importSkippedRows.toLocaleString()} row${
-                        importSkippedRows === 1 ? "" : "s"
+                    ? `, ${importSkippedRows.toLocaleString()} row${importSkippedRows === 1 ? "" : "s"
                       } skipped`
                     : ""}
                 </p>
@@ -2218,7 +2234,7 @@ export function ProductsPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add part</DialogTitle>
+            <DialogTitle>{refurbished ? "Add refurbished tool" : "Add part"}</DialogTitle>
             <DialogDescription>
               Enter the SKU, name, and price for a new product. Description,
               vendor, type, and tags are optional.
@@ -2304,15 +2320,7 @@ export function ProductsPage() {
               <label className="text-sm font-medium" htmlFor="add-part-type">
                 Type
               </label>
-              <Input
-                id="add-part-type"
-                onChange={(event) => {
-                  setAddPartType(event.currentTarget.value);
-                  setAddPartError(null);
-                }}
-                placeholder={settings?.shopifyProductType ?? "Part"}
-                value={addPartType}
-              />
+              <ShopifyProductTypeSelect value={addPartType} onChange={setAddPartType} />
             </div>
             <div className="grid gap-2">
               <label className="text-sm font-medium" htmlFor="add-part-tags">
@@ -2328,6 +2336,7 @@ export function ProductsPage() {
                 value={addPartTags}
               />
             </div>
+            {refurbished && <label className="grid gap-2 text-sm font-medium">Condition<ConditionSelect value={addCondition} onChange={setAddCondition} /></label>}
             {addPartError ? (
               <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {addPartError}
@@ -2342,7 +2351,7 @@ export function ProductsPage() {
               disabled={isAddingPart}
               onClick={() => void handleAddPart().catch(() => undefined)}
             >
-              {isAddingPart ? "Adding..." : "Add part"}
+              {isAddingPart ? "Adding..." : refurbished ? "Add refurbished tool" : "Add part"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2634,14 +2643,14 @@ export function ProductsPage() {
               >
                 <table
                   className="grid w-full text-sm"
-                  style={{ minWidth: `${desktopTableMinWidth}px` }}
+                  style={{ minWidth: `${desktopTableMinWidth + (refurbished ? 160 : 0)}px` }}
                 >
                 <TableHeader className="sticky top-0 z-10 grid bg-slate-50">
                   {table.getHeaderGroups().map((headerGroup) => (
                     <TableRow
                       className={cn(
                         "grid border-b border-slate-200 hover:bg-slate-50",
-                        desktopGridColumns,
+                          refurbished ? refurbishedGridColumns : desktopGridColumns,
                       )}
                       key={headerGroup.id}
                     >
@@ -2721,7 +2730,7 @@ export function ProductsPage() {
               <div
                 className={cn(
                   "pointer-events-none relative grid h-full w-full rounded-md border border-slate-200 bg-white/75 text-sm shadow-lg backdrop-blur-sm",
-                  desktopGridColumns,
+                  refurbished ? refurbishedGridColumns : desktopGridColumns,
                 )}
               >
                 <div className="flex items-center px-2">

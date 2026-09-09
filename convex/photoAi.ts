@@ -1,3 +1,4 @@
+import { productSettingsScope } from "./listingTypes";
 import { ConvexError, v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import {
@@ -16,7 +17,7 @@ import {
   productHasPhotoRows,
 } from "./productPhotos";
 import { productErrorFields, needsRepublishPatch } from "./productState";
-import { resolveAiImageSettings } from "./settings";
+import { getWorkflowSettings, resolveAiImageSettings } from "./settings";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const photoAiModel = {
@@ -111,10 +112,7 @@ export const processingPayload = internalQuery({
       return null;
     }
 
-    const settings = await ctx.db
-      .query("appSettings")
-      .withIndex("by_key", (q) => q.eq("key", "singleton"))
-      .unique();
+    const settings = await getWorkflowSettings(ctx, productSettingsScope(product));
     const aiSettings = resolveAiImageSettings(settings);
     const aiImageModelId = args.modelOverride
       ? args.modelOverride
@@ -141,6 +139,7 @@ export const processingPayload = internalQuery({
 
       return {
         mode: "convex" as const,
+        preserveWear: product.listingKind === "refurbished",
         aiImageEditStrength: aiSettings.aiImageEditStrength,
         aiImageModel: aiImageModelId,
         aiImagePrompt:
@@ -163,6 +162,7 @@ export const processingPayload = internalQuery({
 
     return {
       mode: "shopify" as const,
+      preserveWear: product.listingKind === "refurbished",
       aiImageEditStrength: aiSettings.aiImageEditStrength,
       aiImageModel: aiImageModelId,
       aiImagePrompt:
@@ -312,10 +312,7 @@ export const scheduleProcessing = internalMutation({
     };
 
     if (args.resetPrompt) {
-      const settings = await ctx.db
-        .query("appSettings")
-        .withIndex("by_key", (q) => q.eq("key", "singleton"))
-        .unique();
+      const settings = await getWorkflowSettings(ctx, productSettingsScope(product));
       patch.aiImagePrompt = resolveAiImageSettings(settings).aiImageDefaultPrompt;
       patch.aiShopifyFileId = undefined;
       patch.aiShopifyFileStatus = undefined;
@@ -458,10 +455,7 @@ export const regenerateForPhoto = mutation({
       throw new ConvexError("Product not found.");
     }
 
-    const settings = await ctx.db
-      .query("appSettings")
-      .withIndex("by_key", (q) => q.eq("key", "singleton"))
-      .unique();
+    const settings = await getWorkflowSettings(ctx, productSettingsScope(product));
     const defaultPrompt = resolveAiImageSettings(settings).aiImageDefaultPrompt;
     const prompt = args.prompt?.trim() || product.aiImagePrompt || defaultPrompt;
     const now = Date.now();

@@ -1,5 +1,8 @@
+import { REFURBISHED_IMAGE_PROMPT } from "../../convex/listingTypes";
 import * as React from "react";
-import { useAction } from "convex/react";
+import { useSearchParams } from "react-router-dom";
+import { ShopifyProductTypeSelect } from "../components/shopify-product-type-select";
+import { useAction, useMutation } from "convex/react";
 import { Link2Off, Store } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -31,6 +34,18 @@ import {
 } from "../../convex/shopifyPublishSettings";
 
 export function SettingsPage() {
+  const [params, setParams] = useSearchParams();
+  const selected = params.get("tab");
+  const tab = selected === "parts" || selected === "refurbished" || selected === "gallery" ? selected : "shared";
+  return <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <nav aria-label="Settings sections" className="flex shrink-0 gap-1 border-b border-slate-200">
+      {(["shared", "parts", "refurbished", "gallery"] as const).map(value => <button key={value} type="button" aria-current={tab === value ? "page" : undefined} className={`px-3 py-3 text-sm font-medium capitalize ${tab === value ? "border-b-2 border-slate-950 text-slate-950" : "text-slate-500"}`} onClick={() => setParams({ tab: value })}>{value}</button>)}
+    </nav>
+    <SettingsPanel key={tab} tab={tab} />
+  </div>;
+}
+
+function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gallery"; }) {
   const {
     disconnectShopify,
     setAiImageDefaultPrompt,
@@ -51,15 +66,23 @@ export function SettingsPage() {
     settings,
     shopifyConnection,
   } = useAppData();
+  const loadLocations = useAction(convexApi.shopify.inventoryLocations);
+  const saveLocation = useMutation(convexApi.settings.setShopifyInventoryLocationId);
+  const [locations, setLocations] = React.useState<{ id: string; name: string; }[]>([]);
+  const [locationError, setLocationError] = React.useState("");
+  React.useEffect(() => {
+    if (tab !== "refurbished") return;
+    let cancelled = false;
+    void loadLocations({ sessionToken: session.sessionToken }).then(values => { if (!cancelled) setLocations(values); }).catch(error => { if (!cancelled) setLocationError(error instanceof Error ? error.message : "Could not load locations."); });
+    return () => { cancelled = true; };
+  }, [tab, loadLocations, session.sessionToken, shopifyConnection?.updatedAt]);
+  const defaultPrompt = tab === "refurbished" ? REFURBISHED_IMAGE_PROMPT : DEFAULT_AI_IMAGE_PROMPT;
   const startShopifyInstall = useAction(convexApi.shopify.startShopifyInstall);
   const [shopDomain, setShopDomain] = React.useState(
     shopifyConnection?.shopDomain ?? "",
   );
   const [message, setMessage] = React.useState("");
   const [isConnecting, setIsConnecting] = React.useState(false);
-  const [productType, setProductType] = React.useState(
-    settings?.shopifyProductType ?? "Part",
-  );
   const [defaultTags, setDefaultTags] = React.useState(
     settings?.shopifyDefaultTags ?? "",
   );
@@ -67,7 +90,7 @@ export function SettingsPage() {
     settings?.shopifyShippingPackageId ?? "",
   );
   const [aiImageDefaultPrompt, setAiImageDefaultPromptState] = React.useState(
-    settings?.aiImageDefaultPrompt ?? DEFAULT_AI_IMAGE_PROMPT,
+    settings?.aiImageDefaultPrompt ?? defaultPrompt,
   );
   const [aiImageModel, setAiImageModelState] = React.useState<AiImageModelId>(
     (settings?.aiImageModel as AiImageModelId | undefined) ??
@@ -105,10 +128,6 @@ export function SettingsPage() {
     settings?.shopifySalesChannels ?? DEFAULT_SHOPIFY_SALES_CHANNELS;
 
   React.useEffect(() => {
-    setProductType(settings?.shopifyProductType ?? "Part");
-  }, [settings?.shopifyProductType]);
-
-  React.useEffect(() => {
     setDefaultTags(settings?.shopifyDefaultTags ?? "");
   }, [settings?.shopifyDefaultTags]);
 
@@ -118,7 +137,7 @@ export function SettingsPage() {
 
   React.useEffect(() => {
     setAiImageDefaultPromptState(
-      settings?.aiImageDefaultPrompt ?? DEFAULT_AI_IMAGE_PROMPT,
+      settings?.aiImageDefaultPrompt ?? defaultPrompt,
     );
   }, [settings?.aiImageDefaultPrompt]);
 
@@ -180,6 +199,8 @@ export function SettingsPage() {
     }
   }
 
+  if (!settings) return <p className="text-sm text-slate-500">Loading settings…</p>;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] md:overflow-visible">
       <div>
@@ -188,6 +209,7 @@ export function SettingsPage() {
         </h2>
       </div>
 
+      {(tab === "parts" || tab === "refurbished") && (
       <Card>
         <CardHeader>
           <CardTitle>Listing defaults</CardTitle>
@@ -249,6 +271,7 @@ export function SettingsPage() {
               }
             />
           </div>
+            {tab === "parts" && (
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
             <div>
               <p className="font-medium">Auto-archive complete groups</p>
@@ -266,25 +289,14 @@ export function SettingsPage() {
               }
             />
           </div>
+            )}
           <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
             <label className="grid gap-2 text-sm font-medium" htmlFor="product-type">
               Shopify product type
-              <Input
-                id="product-type"
-                onBlur={() => {
-                  const value = productType.trim() || "Part";
-
-                  if (value !== (settings?.shopifyProductType ?? "Part")) {
-                    void setShopifyProductType(value).catch(() => undefined);
-                  }
-                }}
-                onChange={(event) => setProductType(event.currentTarget.value)}
-                placeholder="Part"
-                value={productType}
-              />
+                <ShopifyProductTypeSelect value={settings?.shopifyProductType ?? ""} onChange={value => { void setShopifyProductType(value).catch(() => undefined); }} />
             </label>
             <p className="text-sm text-slate-500">
-              Default type when a part is uploaded to Shopify. Individual parts
+                Default type when a listing is uploaded to Shopify. Individual listings
               can override this.
             </p>
           </div>
@@ -304,12 +316,22 @@ export function SettingsPage() {
               />
             </label>
             <p className="text-sm text-slate-500">
-              Comma-separated tags merged with each part&apos;s own tags on upload.
+              Comma-separated tags merged with each listing&apos;s own tags on upload.
+              {tab === "refurbished" && " Single Listing and Refurbished are always added."}
             </p>
           </div>
+            {tab === "refurbished" && <label className="grid gap-2 text-sm font-medium">Inventory location
+              <select aria-label="Inventory location" className="h-10 rounded-md border border-slate-200 bg-white px-3" value={settings?.shopifyInventoryLocationId ?? ""} onChange={event => {
+                setLocationError("");
+                void saveLocation({ sessionToken: session.sessionToken, shopifyInventoryLocationId: event.target.value }).catch(error => setLocationError(error instanceof Error ? error.message : "Could not save location."));
+              }}><option value="">Select location</option>{locations.map(location => <option value={location.id} key={location.id}>{location.name}</option>)}</select>
+              {locationError && <span className="text-red-600">{locationError}</span>}
+            </label>}
         </CardContent>
       </Card>
+      )}
 
+      {tab !== "shared" && (
       <Card>
         <CardHeader>
           <CardTitle>AI photo editing</CardTitle>
@@ -424,11 +446,11 @@ export function SettingsPage() {
                 id="ai-image-default-prompt"
                 onBlur={() => {
                   const value =
-                    aiImageDefaultPrompt.trim() || DEFAULT_AI_IMAGE_PROMPT;
+                      aiImageDefaultPrompt.trim() || defaultPrompt;
 
                   if (
                     value !==
-                    (settings?.aiImageDefaultPrompt ?? DEFAULT_AI_IMAGE_PROMPT)
+                      (settings?.aiImageDefaultPrompt ?? defaultPrompt)
                   ) {
                     void setAiImageDefaultPrompt(value).catch(() => undefined);
                   }
@@ -444,6 +466,7 @@ export function SettingsPage() {
               photo dialog are kept until the photo is retaken.
             </p>
           </div>
+            {tab === "parts" && (
           <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
             <label
               className="grid gap-2 text-sm font-medium"
@@ -512,10 +535,14 @@ export function SettingsPage() {
               <p className="text-sm text-red-600">{maxProductPhotosError}</p>
             ) : null}
           </div>
+            )}
         </CardContent>
       </Card>
+      )}
 
+      {tab !== "gallery" && (
       <Card>
+          {tab === "shared" && <>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -529,7 +556,9 @@ export function SettingsPage() {
             </Badge>
           </div>
         </CardHeader>
+          </>}
         <CardContent>
+            {tab === "shared" && (
           <form className="grid max-w-2xl gap-4" onSubmit={handleShopifySubmit}>
             <label className="grid gap-2 text-sm font-medium">
               Shop domain
@@ -566,8 +595,11 @@ export function SettingsPage() {
                 Disconnect
               </Button>
             </div>
+                {shopifyConnection && !["read_metaobjects", "read_locations", "write_inventory"].every(scope => shopifyConnection.scopes.includes(scope)) && <p className="text-sm text-amber-700">Reconnect this store to enable refurbished conditions and inventory locations.</p>}
           </form>
+            )}
 
+            {tab !== "shared" && <>
           <div className="mt-6 grid gap-4 border-t border-slate-200 pt-6">
             <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
               <label
@@ -643,8 +675,11 @@ export function SettingsPage() {
               </div>
             </div>
           </div>
+
+            </>}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

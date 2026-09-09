@@ -1,4 +1,5 @@
-import { Archive, ArchiveRestore, FolderPlus, RefreshCw, Send, Trash2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Camera, Archive, ArchiveRestore, FolderPlus, RefreshCw, Send, Trash2 } from "lucide-react";
 import {
   canPublishProduct,
   canRepublishProduct,
@@ -15,6 +16,9 @@ import { DropdownMenuItem } from "./ui/dropdown-menu";
 
 type Product = {
   _id: string;
+  listingKind?: "refurbished";
+  condition?: string;
+  photosComplete?: boolean;
   aiImageStatus?: "pending" | "generating" | "ready" | "failed";
   aiShopifyFileId?: string | null;
   archivedAt?: number;
@@ -54,6 +58,8 @@ export function ProductRowActionItems({
   photos?: ProductPhoto[] | null;
   product: Product;
 }) {
+  const navigate = useNavigate();
+  const refurbished = product.listingKind === "refurbished";
   const archived = isArchived(product);
   const archiveAllowed = canArchive(product);
   const photosLoading = photos === undefined;
@@ -67,7 +73,7 @@ export function ProductRowActionItems({
     shopifyProductId: product.shopifyProductId ?? undefined,
   };
   const canPublish =
-    !photosLoading && canPublishProduct(productFields, photos);
+    !photosLoading && (!refurbished || Boolean(product.condition && product.photosComplete)) && canPublishProduct(productFields, photos);
   const canRepublish =
     !photosLoading && canRepublishProduct(productFields, photos);
   const hasPhotoRows = (photos?.length ?? 0) > 0;
@@ -79,10 +85,11 @@ export function ProductRowActionItems({
 
   return (
     <>
-      <DropdownMenuItem onSelect={onAddToGroup}>
+      {refurbished && !product.shopifyProductId && !archived && <DropdownMenuItem onSelect={() => navigate(`/capture/refurbished/${product._id}`)}><Camera />Take photos</DropdownMenuItem>}
+      {!refurbished && <DropdownMenuItem onSelect={onAddToGroup}>
         <FolderPlus />
         Add to group
-      </DropdownMenuItem>
+      </DropdownMenuItem>}
       {canRepublish ? (
         <DropdownMenuItem
           disabled={photosLoading}

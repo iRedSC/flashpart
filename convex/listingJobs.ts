@@ -1,3 +1,4 @@
+import { productSettingsScope } from "./listingTypes";
 import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import type { Id } from "./_generated/dataModel";
@@ -10,6 +11,8 @@ import {
 } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import {
+  resolveConditionReference,
+  getShopifyLocations,
   addFileReferenceToProduct,
   createShopifyProduct,
   createShopifyVariant,
@@ -29,7 +32,7 @@ import {
   evaluateProductPhotosPublishGate,
   productHasPhotoRows,
 } from "./productPhotos";
-import { getSettingsDocument, resolveShopifyProductType } from "./settings";
+import { getWorkflowSettings, resolveShopifyProductType } from "./settings";
 import {
   normalizeShopifyShippingPackageId,
   resolveShopifySalesChannels,
@@ -98,6 +101,14 @@ export const enqueueCreateDrafts = mutation({
 
       if (!product) {
         continue;
+      }
+
+      if (product.listingKind === "refurbished") {
+        const settings = await getWorkflowSettings(ctx, "refurbished");
+        if (!product.condition) throw new Error(`Select a condition before publishing ${product.sku}.`);
+        if (!product.photosComplete) throw new Error(`Finish taking photos before publishing ${product.sku}.`);
+        if (!settings.shopifyInventoryLocationId) throw new Error("Choose an inventory location in Refurbished settings.");
+        if (!["read_metaobjects", "read_locations", "write_inventory"].every(scope => connection.scopes.includes(scope))) throw new Error("Reconnect Shopify in Shared settings to enable refurbished listings.");
       }
 
       // Already linked to Shopify: only allow when the caller explicitly
@@ -251,11 +262,7 @@ export const jobPayload = internalQuery({
     const connection = job.shopifyConnectionId
       ? await ctx.db.get(job.shopifyConnectionId)
       : null;
-    const settings =
-      (await ctx.db
-        .query("appSettings")
-        .withIndex("by_key", (q) => q.eq("key", "singleton"))
-        .unique()) ?? null;
+    const settings = await getWorkflowSettings(ctx, productSettingsScope(product));
 
     const useProductPhotos = product
       ? await productHasPhotoRows(ctx, product._id)
@@ -304,6 +311,7 @@ export const jobPayload = internalQuery({
       product,
       settings: {
         duplicatePolicy,
+        shopifyInventoryLocationId: settings.shopifyInventoryLocationId,
         shopifyDefaultTags: settings?.shopifyDefaultTags,
         shopifyProductType: settings?.shopifyProductType ?? "Part",
         shopifyPublishTarget: settings?.shopifyPublishTarget ?? "draft",
@@ -392,7 +400,7 @@ export const markJobSucceeded = internalMutation({
       updatedAt: now,
     });
 
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getWorkflowSettings(ctx, productSettingsScope(product));
     const shouldAutoArchive = settings?.autoArchiveComplete === true;
 
     // Multi-photo path: attach promoted AI file IDs in result only; keep product
@@ -597,6 +605,15 @@ export const processQueuedJob = internalAction({
         throw new Error(`Unsupported listing job type: ${payload.job.type}.`);
       }
 
+      const refurbished = payload.product.listingKind === "refurbished";
+      let conditionReference: string | undefined;
+      if (refurbished) {
+        if (!payload.product.condition || !payload.product.photosComplete) throw new Error("Select a condition and finish taking photos before publishing.");
+        if (!payload.settings.shopifyInventoryLocationId) throw new Error("Choose an inventory location in Refurbished settings.");
+        conditionReference = await resolveConditionReference(payload.connection, payload.product.condition);
+        const locations = await getShopifyLocations(payload.connection);
+        if (!locations.some(location => location.id === payload.settings.shopifyInventoryLocationId)) throw new Error("The refurbished inventory location is no longer active. Choose another location in settings.");
+      }
       const useProductPhotos = payload.useProductPhotos === true;
       let publishFileIds: string[] | undefined;
       let originalShopifyFileId: string | undefined;
@@ -712,6 +729,7 @@ export const processQueuedJob = internalAction({
         payload.settings.shopifyProductType,
       );
       const tags = mergeTagLists(
+        refurbished ? "Single Listing, Refurbished" : undefined,
         payload.settings.shopifyDefaultTags,
         payload.product.tags,
       );
@@ -720,6 +738,7 @@ export const processQueuedJob = internalAction({
         payload.product.description?.trim() || undefined;
       const shippingPackageId = payload.settings.shopifyShippingPackageId;
       const shopifyListing = {
+        conditionReference,
         ...(descriptionHtml ? { descriptionHtml } : {}),
         handle,
         productType,
@@ -759,6 +778,7 @@ export const processQueuedJob = internalAction({
       } else {
         const product = await createShopifyProduct(payload.connection, shopifyListing);
         const variant = await createShopifyVariant(payload.connection, {
+          inventoryLocationId: refurbished ? payload.settings.shopifyInventoryLocationId : undefined,
           barcode: payload.product.sku,
           price: payload.product.price,
           productId: product.id,
@@ -882,7 +902,7 @@ export const markSucceeded = mutation({
 
     if (args.shopifyProductId) {
       const product = await ctx.db.get(job.productId);
-      const settings = await getSettingsDocument(ctx);
+      const settings = await getWorkflowSettings(ctx, productSettingsScope(product));
       const shouldAutoArchive = settings?.autoArchiveComplete === true;
 
       await ctx.db.patch(job.productId, {

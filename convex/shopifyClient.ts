@@ -474,6 +474,7 @@ export async function findProductBySku(
 export async function createShopifyProduct(
   connection: ShopifyConnection,
   input: {
+    conditionReference?: string;
     descriptionHtml?: string;
     handle: string;
     productType?: string;
@@ -508,6 +509,7 @@ export async function createShopifyProduct(
     }`,
     {
       product: {
+        ...(input.conditionReference ? { metafields: [{ namespace: "custom", key: "condition", type: "metaobject_reference", value: input.conditionReference }] } : {}),
         ...(input.descriptionHtml
           ? { descriptionHtml: input.descriptionHtml }
           : {}),
@@ -531,6 +533,7 @@ export async function createShopifyProduct(
 export async function updateShopifyProduct(
   connection: ShopifyConnection,
   input: {
+    conditionReference?: string;
     descriptionHtml?: string;
     handle: string;
     productId: string;
@@ -566,6 +569,7 @@ export async function updateShopifyProduct(
     }`,
     {
       product: {
+        ...(input.conditionReference ? { metafields: [{ namespace: "custom", key: "condition", type: "metaobject_reference", value: input.conditionReference }] } : {}),
         ...(input.descriptionHtml
           ? { descriptionHtml: input.descriptionHtml }
           : {}),
@@ -607,6 +611,7 @@ function inventoryItemInput(input: {
 export async function createShopifyVariant(
   connection: ShopifyConnection,
   input: {
+    inventoryLocationId?: string;
     barcode: string;
     price: number;
     productId: string;
@@ -646,6 +651,7 @@ export async function createShopifyVariant(
         {
           barcode: input.barcode,
           inventoryItem: inventoryItemInput(input),
+          ...(input.inventoryLocationId ? { inventoryQuantities: [{ locationId: input.inventoryLocationId, availableQuantity: 1 }] } : {}),
           price: input.price.toFixed(2),
         },
       ],
@@ -870,4 +876,35 @@ export async function removeFileReferenceFromProduct(
       ],
     },
   );
+}
+
+export async function getShopifyProductTypes(connection: ShopifyConnection) {
+  const values: string[] = [];
+  let after: string | null = null;
+  do {
+    const data: { productTypes: { nodes: string[]; pageInfo: { endCursor: string | null; hasNextPage: boolean; }; }; } = await shopifyGraphql(connection,
+      `query ProductTypes($after: String) { productTypes(first: 250, after: $after) { nodes pageInfo { endCursor hasNextPage } } }`, { after });
+    values.push(...data.productTypes.nodes);
+    after = data.productTypes.pageInfo.hasNextPage ? data.productTypes.pageInfo.endCursor : null;
+  } while (after);
+  return [...new Set(values)].filter(Boolean).sort();
+}
+
+export async function getShopifyLocations(connection: ShopifyConnection) {
+  const locations: { id: string; name: string; }[] = [];
+  let after: string | null = null;
+  do {
+    const data: { locations: { nodes: { id: string; name: string; isActive: boolean; }[]; pageInfo: { endCursor: string | null; hasNextPage: boolean; }; }; } = await shopifyGraphql(connection,
+      `query Locations($after: String) { locations(first: 100, after: $after) { nodes { id name isActive } pageInfo { endCursor hasNextPage } } }`, { after });
+    locations.push(...data.locations.nodes.filter(location => location.isActive).map(({ id, name }) => ({ id, name })));
+    after = data.locations.pageInfo.hasNextPage ? data.locations.pageInfo.endCursor : null;
+  } while (after);
+  return locations;
+}
+
+export async function resolveConditionReference(connection: ShopifyConnection, handle: string) {
+  const data = await shopifyGraphql<{ metaobjectByHandle: { id: string; } | null; }>(connection,
+    `query Condition($handle: MetaobjectHandleInput!) { metaobjectByHandle(handle: $handle) { id } }`, { handle: { type: "condition", handle } });
+  if (!data.metaobjectByHandle) throw new ConvexError(`Shopify condition "${handle}" was not found. Check the condition metaobject entries.`);
+  return data.metaobjectByHandle.id;
 }

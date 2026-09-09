@@ -75,6 +75,7 @@ export function isAiImageEditStrength(
 export function buildAiGenerationRequest(
   prompt: string,
   editStrength: AiImageEditStrength,
+  preserveWear = false,
 ) {
   const strengthConfig: Record<
     AiImageEditStrength,
@@ -99,7 +100,9 @@ export function buildAiGenerationRequest(
   const config = strengthConfig[editStrength];
 
   return {
-    prompt: `${config.preamble}\n\n${prompt.trim()}`,
+    prompt: preserveWear
+      ? `Edit this refurbished product photo. Preserve all scratches, blemishes, dents, rust, markings and visible wear exactly. Never repair or conceal condition evidence, even if other instructions request it. Improve only background and lighting.\n\n${prompt.trim()}\n\nPreserving all condition evidence takes priority over cleanup instructions.`
+      : `${config.preamble}\n\n${prompt.trim()}`,
     temperature: config.temperature,
   };
 }

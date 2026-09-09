@@ -16,6 +16,8 @@ import {
   shopifyPhotoKindLabel,
 } from "./photoOwnership";
 import {
+  getShopifyProductTypes,
+  getShopifyLocations,
   createShopifyFile,
   createStagedImageUpload,
   deleteShopifyFiles,
@@ -26,6 +28,9 @@ import {
 } from "./shopifyClient";
 
 const SHOPIFY_SCOPES = [
+  "read_metaobjects",
+  "read_locations",
+  "write_inventory",
   "read_products",
   "write_products",
   "read_files",
@@ -1119,4 +1124,22 @@ export const handleShopifyCallback = httpAction(async (ctx, request) => {
     "Shopify connected",
     "You can close this tab and return to Flashpart.",
   );
+});
+
+export const productTypes = action({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args): Promise<string[]> => {
+    const connection = await ctx.runQuery(shopifyModel.currentActiveConnection, args);
+    if (!connection) throw new ConvexError("Connect Shopify to choose a product type.");
+    return getShopifyProductTypes(connection);
+  },
+});
+export const inventoryLocations = action({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args): Promise<{ id: string; name: string; }[]> => {
+    const connection = await ctx.runQuery(shopifyModel.currentActiveConnection, args);
+    if (!connection) throw new ConvexError("Connect Shopify to choose an inventory location.");
+    if (!connection.scopes.includes("read_locations")) throw new ConvexError("Reconnect Shopify in Shared settings to allow location access.");
+    return getShopifyLocations(connection);
+  },
 });

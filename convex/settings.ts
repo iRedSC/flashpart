@@ -1,3 +1,4 @@
+import { settingsScope, REFURBISHED_IMAGE_PROMPT, type SettingsScope } from "./listingTypes";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireSessionUser } from "./authUtils";
@@ -95,21 +96,51 @@ export function resolveAiImageSettings(
   };
 }
 
-export async function getSettingsDocument(ctx: QueryCtx | MutationCtx) {
+export async function getSettingsDocument(ctx: QueryCtx | MutationCtx, scope: SettingsScope = "parts") {
   return await ctx.db
     .query("appSettings")
-    .withIndex("by_key", (q) => q.eq("key", "singleton"))
+    .withIndex("by_key", (q) => q.eq("key", scope === "parts" ? "singleton" : scope))
     .unique();
 }
 
+export function defaultsForScope(scope: SettingsScope = "parts") {
+  return {
+    ...defaultSettings, key: scope === "parts" ? "singleton" as const : scope,
+    ...(scope === "refurbished" ? { aiImageDefaultPrompt: REFURBISHED_IMAGE_PROMPT, aiImageWhitenBackground: false } : {}),
+  };
+}
+
+export async function getWorkflowSettings(ctx: QueryCtx | MutationCtx, scope: SettingsScope = "parts") {
+  const stored = await getSettingsDocument(ctx, scope);
+  // Preserve the gallery's existing image defaults until its first independent save.
+  const galleryDefaults = !stored && scope === "gallery"
+    ? resolveAiImageSettings(await getSettingsDocument(ctx, "parts"))
+    : {};
+  return { ...defaultsForScope(scope), ...galleryDefaults, ...stored };
+}
+
+async function getSettingsForWrite(ctx: MutationCtx, scope: SettingsScope = "parts") {
+  const stored = await getSettingsDocument(ctx, scope);
+  // Gallery used the shared image settings before workflow tabs existed.
+  // Freeze those values before the first Parts edit so the tabs are independent.
+  if (scope === "parts" && !(await getSettingsDocument(ctx, "gallery"))) {
+    await ctx.db.insert("appSettings", {
+      ...defaultsForScope("gallery"),
+      ...resolveAiImageSettings(stored),
+      updatedAt: Date.now(),
+    });
+  }
+  return stored;
+}
+
 export const get = query({
-  args: { sessionToken: v.string() },
+  args: { scope: v.optional(settingsScope), sessionToken: v.string() },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const stored = await getSettingsDocument(ctx);
+    const stored = await getWorkflowSettings(ctx, args.scope);
 
     return {
-      ...defaultSettings,
+      ...defaultsForScope(args.scope),
       ...stored,
       ...resolveAiImageSettings(stored),
       maxProductPhotos: resolveMaxProductPhotos(stored),
@@ -125,12 +156,13 @@ export const get = query({
 
 export const setDuplicatePolicy = mutation({
   args: {
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
     duplicatePolicy,
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
 
     if (settings) {
@@ -140,7 +172,7 @@ export const setDuplicatePolicy = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         duplicatePolicy: args.duplicatePolicy,
         updatedAt: now,
       });
@@ -152,12 +184,13 @@ export const setDuplicatePolicy = mutation({
 
 export const setAutoArchiveComplete = mutation({
   args: {
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
     autoArchiveComplete: v.boolean(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
 
     if (settings) {
@@ -167,7 +200,7 @@ export const setAutoArchiveComplete = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         autoArchiveComplete: args.autoArchiveComplete,
         updatedAt: now,
       });
@@ -179,12 +212,13 @@ export const setAutoArchiveComplete = mutation({
 
 export const setAutoArchiveCompleteGroups = mutation({
   args: {
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
     autoArchiveCompleteGroups: v.boolean(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
 
     if (settings) {
@@ -194,7 +228,7 @@ export const setAutoArchiveCompleteGroups = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         autoArchiveCompleteGroups: args.autoArchiveCompleteGroups,
         updatedAt: now,
       });
@@ -206,12 +240,13 @@ export const setAutoArchiveCompleteGroups = mutation({
 
 export const setShopifyPublishTarget = mutation({
   args: {
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
     shopifyPublishTarget,
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
 
     if (settings) {
@@ -221,7 +256,7 @@ export const setShopifyPublishTarget = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         shopifyPublishTarget: args.shopifyPublishTarget,
         updatedAt: now,
       });
@@ -233,12 +268,13 @@ export const setShopifyPublishTarget = mutation({
 
 export const setShopifyProductType = mutation({
   args: {
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
     shopifyProductType: v.string(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
     const shopifyProductType = args.shopifyProductType.trim() || "Part";
 
@@ -249,7 +285,7 @@ export const setShopifyProductType = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         shopifyProductType,
         updatedAt: now,
       });
@@ -261,12 +297,13 @@ export const setShopifyProductType = mutation({
 
 export const setShopifyDefaultTags = mutation({
   args: {
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
     shopifyDefaultTags: v.string(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
     const shopifyDefaultTags = normalizeTagString(args.shopifyDefaultTags);
 
@@ -277,7 +314,7 @@ export const setShopifyDefaultTags = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         shopifyDefaultTags,
         updatedAt: now,
       });
@@ -289,12 +326,13 @@ export const setShopifyDefaultTags = mutation({
 
 export const setShopifyShippingPackageId = mutation({
   args: {
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
     shopifyShippingPackageId: v.string(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
     const shopifyShippingPackageId =
       normalizeShopifyShippingPackageId(args.shopifyShippingPackageId) ?? "";
@@ -306,7 +344,7 @@ export const setShopifyShippingPackageId = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         ...(shopifyShippingPackageId
           ? { shopifyShippingPackageId }
           : {}),
@@ -320,12 +358,13 @@ export const setShopifyShippingPackageId = mutation({
 
 export const setShopifySalesChannels = mutation({
   args: {
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
     shopifySalesChannels: v.array(shopifySalesChannelId),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
     const shopifySalesChannels = resolveShopifySalesChannels(
       args.shopifySalesChannels,
@@ -338,7 +377,7 @@ export const setShopifySalesChannels = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         shopifySalesChannels,
         updatedAt: now,
       });
@@ -351,14 +390,15 @@ export const setShopifySalesChannels = mutation({
 export const setAiImageDefaultPrompt = mutation({
   args: {
     aiImageDefaultPrompt: v.string(),
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
     const aiImageDefaultPrompt =
-      args.aiImageDefaultPrompt.trim() || DEFAULT_AI_IMAGE_PROMPT;
+      args.aiImageDefaultPrompt.trim() || defaultsForScope(args.scope).aiImageDefaultPrompt;
 
     if (settings) {
       await ctx.db.patch(settings._id, {
@@ -367,7 +407,7 @@ export const setAiImageDefaultPrompt = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         aiImageDefaultPrompt,
         updatedAt: now,
       });
@@ -380,11 +420,12 @@ export const setAiImageDefaultPrompt = mutation({
 export const setAiImageModel = mutation({
   args: {
     aiImageModel,
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
 
     if (settings) {
@@ -394,7 +435,7 @@ export const setAiImageModel = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         aiImageModel: args.aiImageModel,
         updatedAt: now,
       });
@@ -407,11 +448,12 @@ export const setAiImageModel = mutation({
 export const setAiImageEditStrength = mutation({
   args: {
     aiImageEditStrength,
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
 
     if (settings) {
@@ -421,7 +463,7 @@ export const setAiImageEditStrength = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         aiImageEditStrength: args.aiImageEditStrength,
         updatedAt: now,
       });
@@ -434,11 +476,12 @@ export const setAiImageEditStrength = mutation({
 export const setAiImageUpgradeModelOnRegen = mutation({
   args: {
     aiImageUpgradeModelOnRegen: v.boolean(),
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
 
     if (settings) {
@@ -448,7 +491,7 @@ export const setAiImageUpgradeModelOnRegen = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         aiImageUpgradeModelOnRegen: args.aiImageUpgradeModelOnRegen,
         updatedAt: now,
       });
@@ -461,11 +504,12 @@ export const setAiImageUpgradeModelOnRegen = mutation({
 export const setAiImageWhitenBackground = mutation({
   args: {
     aiImageWhitenBackground: v.boolean(),
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
 
     if (settings) {
@@ -475,7 +519,7 @@ export const setAiImageWhitenBackground = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         aiImageWhitenBackground: args.aiImageWhitenBackground,
         updatedAt: now,
       });
@@ -488,11 +532,12 @@ export const setAiImageWhitenBackground = mutation({
 export const setMaxProductPhotos = mutation({
   args: {
     maxProductPhotos: v.number(),
+    scope: v.optional(settingsScope),
     sessionToken: v.string(),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
-    const settings = await getSettingsDocument(ctx);
+    const settings = await getSettingsForWrite(ctx, args.scope);
     const now = Date.now();
     const maxProductPhotos = resolveMaxProductPhotos({
       maxProductPhotos: args.maxProductPhotos,
@@ -505,7 +550,7 @@ export const setMaxProductPhotos = mutation({
       });
     } else {
       await ctx.db.insert("appSettings", {
-        ...defaultSettings,
+        ...await getWorkflowSettings(ctx, args.scope),
         maxProductPhotos,
         updatedAt: now,
       });
@@ -515,3 +560,16 @@ export const setMaxProductPhotos = mutation({
   },
 });
 
+
+export const setShopifyInventoryLocationId = mutation({
+  args: { sessionToken: v.string(), shopifyInventoryLocationId: v.string() },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const location = args.shopifyInventoryLocationId;
+    if (location && !/^gid:\/\/shopify\/Location\/\d+$/.test(location)) throw new Error("Choose a Shopify location.");
+    const settings = await getSettingsDocument(ctx, "refurbished");
+    const patch = { shopifyInventoryLocationId: location || undefined, updatedAt: Date.now() };
+    if (settings) await ctx.db.patch(settings._id, patch);
+    else await ctx.db.insert("appSettings", { ...defaultsForScope("refurbished"), ...patch });
+  },
+});

@@ -1,3 +1,6 @@
+import { REFURBISHED_IMAGE_PROMPT } from "../../convex/listingTypes";
+import { useNavigate } from "react-router-dom";
+import { ConditionSelect } from "./condition-select";
 import * as React from "react";
 import { useConvex, useQuery } from "convex/react";
 import {
@@ -211,7 +214,8 @@ export function ProductPhotoDialog({
     approveAiPhoto,
     approvePhoto,
     deleteProductPhoto,
-    products,
+    products: allProducts,
+    updateProduct,
     regenerateAiImage,
     regenerateAiImageForPhoto,
     replaceProductPhoto,
@@ -219,10 +223,12 @@ export function ProductPhotoDialog({
     settings,
     whitenAiBackground,
   } = useAppData();
+  const navigate = useNavigate();
+  const products = React.useMemo(() => allProducts.filter(entry => entry.listingKind === product?.listingKind), [allProducts, product?.listingKind]);
   const convex = useConvex();
   const defaultPrompt =
-    settings?.aiImageDefaultPrompt?.trim() || DEFAULT_AI_IMAGE_PROMPT;
-  const maxProductPhotos = settings?.maxProductPhotos ?? 5;
+    settings?.aiImageDefaultPrompt?.trim() || (product?.listingKind === "refurbished" ? REFURBISHED_IMAGE_PROMPT : DEFAULT_AI_IMAGE_PROMPT);
+  const maxProductPhotos = product?.listingKind === "refurbished" ? Infinity : settings?.maxProductPhotos ?? 5;
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const initializedForProductRef = React.useRef<string | null>(null);
   /** After add, focus the new pair once listByProduct includes this original. */
@@ -325,8 +331,7 @@ export function ProductPhotoDialog({
         pendingFocusOriginalIdRef.current = null;
         setPairIndex(focusIndex);
         setPromptDirty(false);
-        initializedForProductRef.current = `${product._id}:${
-          pairs.some((pair) => pair.isLegacy) ? "legacy" : "photos"
+        initializedForProductRef.current = `${product._id}:${pairs.some((pair) => pair.isLegacy) ? "legacy" : "photos"
         }`;
         return;
       }
@@ -433,7 +438,7 @@ export function ProductPhotoDialog({
       !aiGenerating &&
       !aiFailed,
   );
-  const canTakePhoto = Boolean(product?.groupId);
+  const canTakePhoto = Boolean(product?.groupId || product?.listingKind === "refurbished");
   const isBusy =
     isSaving || isRegenerating || isWhitening || isApproving || isDeleting;
   const originalCount = pairs.filter((pair) => pair.original != null).length;
@@ -558,6 +563,8 @@ export function ProductPhotoDialog({
   }
 
   function handleTakePhoto(mode: CaptureMode = "add") {
+    if (product?.listingKind === "refurbished" && mode === "add") { navigate(`/capture/refurbished/${product._id}`); return; }
+
     if (mode === "add" && !canAddPhoto) {
       return;
     }
@@ -571,7 +578,7 @@ export function ProductPhotoDialog({
   }
 
   async function handleSave() {
-    if (!product?.groupId || !captureFile || isBusy) {
+    if (!product || (!product.groupId && product.listingKind !== "refurbished") || !captureFile || isBusy) {
       return;
     }
 
@@ -974,6 +981,10 @@ export function ProductPhotoDialog({
         canRegenerate={Boolean(originalUrl || currentPair?.original)}
         defaultPrompt={defaultPrompt}
         description={product?.sku}
+        headerExtra={product?.listingKind === "refurbished" ? <div className="flex items-center gap-3">
+          <ConditionSelect value={product.condition} onChange={condition => { void updateProduct({ id: product._id, condition }).catch(() => undefined); }} />
+          {!product.shopifyProductId && <Button variant="outline" onClick={() => navigate(`/capture/refurbished/${product._id}`)}>Take photos</Button>}
+        </div> : undefined}
         draftPrompt={draftPrompt}
         emptyOriginalDisabled={!canAddPhoto || isBusy}
         emptyOriginalLabel={originalCount > 0 ? "Add photo" : "Take photo"}

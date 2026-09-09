@@ -88,7 +88,9 @@ function AuthenticatedApp() {
               element={<AppShell onSignOut={handleSignOut} session={session} />}
             >
               <Route index element={<RootRedirect />} />
-              <Route path="/products" element={<ProductsPage />} />
+              <Route path="/products" element={<ProductsPage key="parts" />} />
+              <Route path="/refurbished" element={<ProductsPage key="refurbished" refurbished />} />
+              <Route path="/capture/refurbished/:productId" element={<CapturePage />} />
               <Route path="/groups" element={<GroupsPage />} />
               <Route path="/photos" element={<PhotosPage />} />
               <Route path="/settings" element={<SettingsPage />} />

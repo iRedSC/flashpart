@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import {
   Camera,
   Check,
@@ -43,9 +43,12 @@ const INLINE_CAMERA_UNAVAILABLE =
   "Inline camera is not available here. Use the camera picker instead.";
 
 export function CapturePage() {
-  const { groupId, selectionId } = useParams();
+  const { groupId, selectionId, productId } = useParams();
+  const refurbished = Boolean(productId);
+  const finishPhotos = useMutation(convexApi.products.finishPhotos);
+  const backPath = refurbished ? "/refurbished" : selectionId ? "/products" : "/groups";
   const navigate = useNavigate();
-  const { groups, products, settings, session, submitCapture } = useAppData();
+  const { groups, products, settings, session, submitCapture, isLoading } = useAppData();
   const isMobile = useIsMobile();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
@@ -75,7 +78,7 @@ export function CapturePage() {
     [selectedFile],
   );
   const { zoom, canZoom, cameraPlaneRef } = useCameraTrackZoom(cameraStream);
-  const maxProductPhotos = settings?.maxProductPhotos ?? 5;
+  const maxProductPhotos = refurbished ? Infinity : settings?.maxProductPhotos ?? 5;
 
   React.useEffect(() => {
     return () => {
@@ -100,10 +103,10 @@ export function CapturePage() {
     ? getCaptureSelection(selectionId)
     : null;
   const typedGroupId = groupId as Id<"groups"> | undefined;
-  const group = captureSelection
+  const group = refurbished ? { name: "Refurbished" } : captureSelection
     ? { name: captureSelection.label }
     : groups.find((item) => item._id === typedGroupId);
-  const groupProducts = captureSelection
+  const groupProducts = refurbished ? products.filter(product => product._id === productId) : captureSelection
     ? products.filter(
         (product) =>
           captureSelection.productIds.includes(product._id) &&
@@ -114,6 +117,7 @@ export function CapturePage() {
           product.groupId === typedGroupId && product.archivedAt === undefined,
       );
   const captureProductIds = React.useMemo(() => {
+    if (productId) return [productId as Id<"products">];
     if (captureSelection) {
       return captureSelection.productIds.filter((productId) =>
         products.some(
@@ -133,7 +137,7 @@ export function CapturePage() {
           product.groupId === typedGroupId && product.archivedAt === undefined,
       )
       .map((product) => product._id);
-  }, [captureSelection, products, typedGroupId]);
+  }, [captureSelection, products, typedGroupId, productId]);
   const photosByProductIdQuery = useQuery(
     convexApi.productPhotos.listForProducts,
     captureProductIds.length > 0
@@ -186,7 +190,7 @@ export function CapturePage() {
           product._id === heldProductId && product.archivedAt === undefined,
       ) ?? null)
     : null;
-  const currentProduct = heldProduct ?? nextUncaptured;
+  const currentProduct = refurbished ? products.find(p => p._id === productId && p.listingKind === "refurbished") ?? null : heldProduct ?? nextUncaptured;
   const queueLoading = !photosByProductIdReady && !heldProduct;
   const { completedCount, total: selectionTotal } = !photosByProductIdReady
     ? { completedCount: 0, total: groupProducts.length }
@@ -387,7 +391,7 @@ export function CapturePage() {
 
     const captureGroupId = resolveCaptureGroupId(currentProduct);
 
-    if (!captureGroupId) {
+    if (!captureGroupId && !refurbished) {
       return;
     }
 
@@ -507,6 +511,11 @@ export function CapturePage() {
   }
 
   function handleNextProduct() {
+    if (refurbished && currentProduct) {
+      setIsSaving(true);
+      void finishPhotos({ sessionToken: session.sessionToken, productId: currentProduct._id }).then(() => navigate("/refurbished")).catch(error => setUploadError(error instanceof Error ? error.message : "Could not finish photos.")).finally(() => setIsSaving(false));
+      return;
+    }
     triggerHaptic();
     setUploadError(null);
     setSelectedFile(null);
@@ -638,9 +647,9 @@ export function CapturePage() {
     navigate("/products", { replace: true });
   }, [captureSelection, navigate, selectionId]);
 
-  if (!group) {
-    const backTo = captureSelection || selectionId ? "/products" : "/groups";
-    const title = selectionId ? "Selection not found" : "Group not found";
+  if (!group || (refurbished && !isLoading && !currentProduct)) {
+    const backTo = backPath;
+    const title = refurbished ? "Refurbished listing not found" : selectionId ? "Selection not found" : "Group not found";
 
     return (
       <div className={cn(containerClass, isMobile && "pt-[calc(env(safe-area-inset-top)+1rem)]")}>
@@ -701,10 +710,10 @@ export function CapturePage() {
         )}
       >
         <Link
-          aria-label={captureSelection ? "Back to products" : "Back to groups"}
+          aria-label={refurbished ? "Back to refurbished" : captureSelection ? "Back to products" : "Back to groups"}
           className="-ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors active:bg-slate-200"
           onClick={() => triggerHaptic()}
-          to={captureSelection ? "/products" : "/groups"}
+          to={backPath}
         >
           <ChevronLeft className="h-6 w-6" />
         </Link>
@@ -712,16 +721,16 @@ export function CapturePage() {
           {group.name}
         </h2>
         <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-500">
-          {completedCount}/{selectionTotal}
+          {refurbished ? `${originalCount} photos` : `${completedCount}/${selectionTotal}`}
         </span>
       </header>
 
-      <div className="h-1 shrink-0 overflow-hidden rounded-full bg-slate-200">
+      {!refurbished && <div className="h-1 shrink-0 overflow-hidden rounded-full bg-slate-200">
         <div
           className="h-full rounded-full bg-slate-950 transition-[width] duration-300"
           style={{ width: `${progress}%` }}
         />
-      </div>
+      </div>}
 
       {queueLoading ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center">
@@ -732,12 +741,12 @@ export function CapturePage() {
           <div className="shrink-0 rounded-2xl border border-slate-200 bg-white px-4 py-3">
             <div className="flex items-start justify-between gap-3">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                {originalCount > 0 ? "Current part" : "Next part"}
+                {refurbished ? "Refurbished tool" : originalCount > 0 ? "Current part" : "Next part"}
               </p>
               <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-500">
                 {photosLoading
-                  ? `…/${maxProductPhotos} photos`
-                  : `${originalCount}/${maxProductPhotos} photos`}
+                  ? (refurbished ? "Loading photos…" : `…/${maxProductPhotos} photos`)
+                  : refurbished ? `${originalCount} photos` : `${originalCount}/${maxProductPhotos} photos`}
               </span>
             </div>
             <h3 className="mt-1 text-lg font-semibold leading-snug">
@@ -769,10 +778,10 @@ export function CapturePage() {
               type="button"
               variant="ghost"
             >
-              Next product
+              {refurbished ? "Done taking photos" : "Next product"}
               <ChevronRight className="h-4 w-4" />
             </Button>
-          ) : (
+          ) : refurbished ? null : (
             <Button
               className="h-11 w-full shrink-0 text-slate-500"
               disabled={isSaving}
@@ -875,8 +884,8 @@ export function CapturePage() {
                 {photosLoading || originalCount > 0 ? (
                   <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-semibold tabular-nums text-white backdrop-blur">
                     {photosLoading
-                      ? `…/${maxProductPhotos}`
-                      : `${originalCount}/${maxProductPhotos}`}
+                      ? (refurbished ? "…" : `…/${maxProductPhotos}`)
+                      : refurbished ? `${originalCount}` : `${originalCount}/${maxProductPhotos}`}
                   </span>
                 ) : null}
                 <button
@@ -940,7 +949,7 @@ export function CapturePage() {
 
                 triggerHaptic();
               }}
-              to={captureSelection ? "/products" : "/groups"}
+              to={backPath}
             >
               {captureSelection ? "Back to products" : "Back to groups"}
             </Link>

@@ -21,7 +21,7 @@ import {
   applyMarkAiGeneratingFromOriginal,
   getAiForOriginal,
 } from "./productPhotos";
-import { resolveAiImageSettings } from "./settings";
+import { getWorkflowSettings, resolveAiImageSettings } from "./settings";
 
 type DbCtx = QueryCtx | MutationCtx;
 
@@ -290,10 +290,7 @@ export const processingPayload = internalQuery({
       return null;
     }
 
-    const settings = await ctx.db
-      .query("appSettings")
-      .withIndex("by_key", (q) => q.eq("key", "singleton"))
-      .unique();
+    const settings = await getWorkflowSettings(ctx, "gallery");
     const aiSettings = resolveAiImageSettings(settings);
     const existingAi = await getAiForOriginal(ctx, args.originalPhotoId);
     const aiImageModelId = args.modelOverride

@@ -1177,7 +1177,7 @@ async function insertReservedOriginalPair(
   // overshoot. Abandoned empty slots are GC'd after ABANDONED_UPLOAD_TTL_MS.
   const originals = await getOriginalPhotos(ctx, args.productId);
 
-  if (originals.length >= maxPhotos) {
+  if (product.listingKind !== "refurbished" && originals.length >= maxPhotos) {
     throw new ConvexError(
       `This product already has the maximum of ${maxPhotos} photos.`,
     );
@@ -1191,6 +1191,7 @@ async function insertReservedOriginalPair(
   const now = Date.now();
   const isFirstMultiPhotoRows = originals.length === 0;
 
+  if (product.listingKind === "refurbished") await ctx.db.patch(product._id, { photosComplete: false });
   const ownership = productPhotoOwnership(args.productId);
 
   const originalPhotoId = await ctx.db.insert("productPhotos", {
