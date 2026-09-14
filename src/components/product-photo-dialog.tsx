@@ -1,6 +1,5 @@
 import { REFURBISHED_IMAGE_PROMPT } from "../../convex/listingTypes";
 import { useNavigate } from "react-router-dom";
-import { ConditionSelect } from "./condition-select";
 import * as React from "react";
 import { useConvex, useQuery } from "convex/react";
 import {
@@ -216,7 +215,6 @@ export function ProductPhotoDialog({
     approvePhoto,
     deleteProductPhoto,
     products: allProducts,
-    updateProduct,
     regenerateAiImage,
     regenerateAiImageForPhoto,
     replaceProductPhoto,
@@ -274,9 +272,16 @@ export function ProductPhotoDialog({
     () => buildDialogPairs(photos, product),
     [photos, product],
   );
+  const showCaptureTile = Boolean(
+    product?.listingKind === "refurbished" && !product.shopifyProductId,
+  );
+  const carouselPairCount = pairs.length + (showCaptureTile ? 1 : 0);
 
   const safePairIndex =
-    pairs.length === 0 ? 0 : Math.min(pairIndex, pairs.length - 1);
+    carouselPairCount === 0
+      ? 0
+      : Math.min(pairIndex, carouselPairCount - 1);
+  const captureTileActive = showCaptureTile && safePairIndex === pairs.length;
   const currentPair = pairs[safePairIndex] ?? null;
 
   React.useEffect(() => {
@@ -373,16 +378,16 @@ export function ProductPhotoDialog({
     if (pendingFocusOriginalIdRef.current) {
       return;
     }
-    if (pairs.length === 0) {
+    if (carouselPairCount === 0) {
       if (pairIndex !== 0) {
         setPairIndex(0);
       }
       return;
     }
-    if (pairIndex > pairs.length - 1) {
-      setPairIndex(pairs.length - 1);
+    if (pairIndex > carouselPairCount - 1) {
+      setPairIndex(carouselPairCount - 1);
     }
-  }, [pairIndex, pairs.length]);
+  }, [carouselPairCount, pairIndex]);
 
   // Keep prompt in sync with the active pair unless the user has dirty edits.
   const currentPairAiPrompt = currentPair?.ai?.aiPrompt;
@@ -439,7 +444,9 @@ export function ProductPhotoDialog({
       !aiGenerating &&
       !aiFailed,
   );
-  const canTakePhoto = Boolean(product?.groupId || product?.listingKind === "refurbished");
+  const canTakePhoto = Boolean(
+    product?.groupId || product?.listingKind === "refurbished",
+  );
   const isBusy =
     isSaving || isRegenerating || isWhitening || isApproving || isDeleting;
   const originalCount = pairs.filter((pair) => pair.original != null).length;
@@ -470,7 +477,9 @@ export function ProductPhotoDialog({
       ? needsAiPhotoApproval(currentPair.ai)
       : Boolean(product && currentPair?.isLegacy && needsPhotoApproval(product));
   const pairPositionLabel =
-    pairs.length > 0 ? `${safePairIndex + 1}/${pairs.length}` : null;
+    carouselPairCount > 0
+      ? `${safePairIndex + 1}/${carouselPairCount}`
+      : null;
   const showExistingOriginalActions =
     activeView === "original" &&
     !captureFile &&
@@ -980,15 +989,17 @@ export function ProductPhotoDialog({
         canRegenerate={Boolean(originalUrl || currentPair?.original)}
         defaultPrompt={defaultPrompt}
         description={product?.sku}
-        headerExtra={product?.listingKind === "refurbished" ? <div className="flex items-center gap-3">
-          <ConditionSelect value={product.condition} onChange={condition => { void updateProduct({ id: product._id, condition }).catch(() => undefined); }} />
-          {!product.shopifyProductId && <Button variant="outline" onClick={() => navigate(`/capture/refurbished/${product._id}`)}>Take photos</Button>}
-        </div> : undefined}
         draftPrompt={draftPrompt}
         emptyOriginalDisabled={!canAddPhoto || isBusy}
-        emptyOriginalLabel={originalCount > 0 ? "Add photo" : "Take photo"}
+        emptyOriginalLabel={
+          captureTileActive
+            ? "Take photo"
+            : originalCount > 0
+              ? "Add photo"
+              : "Take photo"
+        }
         error={error}
-        footerOverride={footerOverride}
+        footerOverride={captureTileActive ? null : footerOverride}
         notice={
           !canTakePhoto
             ? "Assign this product to a group to take its photo."
@@ -1005,6 +1016,9 @@ export function ProductPhotoDialog({
         onOpenPrompt={openPromptDialog}
         onPairIndexChange={(index) => {
           setPairIndex(index);
+          if (showCaptureTile && index === pairs.length) {
+            setActiveView("original");
+          }
           setPromptDirty(false);
           setError(null);
         }}
@@ -1015,7 +1029,7 @@ export function ProductPhotoDialog({
         onWhiten={() => void handleWhitenBackground()}
         open={product !== null}
         originalUrl={originalUrl}
-        pairCount={pairs.length}
+        pairCount={carouselPairCount}
         pairIndex={safePairIndex}
         pairPositionLabel={pairPositionLabel}
         photosLoading={photosLoading}
@@ -1030,7 +1044,7 @@ export function ProductPhotoDialog({
         promptDescription={`Used for the next regeneration of ${product?.sku ?? "this product"}.`}
         promptDialogOpen={promptDialogOpen}
         regenerating={isRegenerating}
-        showViewTabs={hasPhotoTabs}
+        showViewTabs={hasPhotoTabs && !captureTileActive}
         showWhiten={Boolean(aiUrl && !aiGenerating && !aiFailed)}
         stage={stage}
         title={product?.name ?? "Product photo"}
