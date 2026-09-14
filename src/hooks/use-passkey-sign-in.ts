@@ -51,12 +51,18 @@ export function usePasskeySignIn(onSignedIn: (session: AuthSession) => void) {
     [finishSignIn, startSignInForEmail],
   );
 
-  const trySignIn = React.useCallback(async () => {
-    const origin = window.location.origin;
-    const { options, challengeId } = await startSignIn({ origin });
-    const response = await startAuthentication({ optionsJSON: options });
-    await finishSignIn(challengeId, response);
-  }, [finishSignIn, startSignIn]);
+  const trySignIn = React.useCallback(
+    async ({ useBrowserAutofill = false } = {}) => {
+      const origin = window.location.origin;
+      const { options, challengeId } = await startSignIn({ origin });
+      const response = await startAuthentication({
+        optionsJSON: options,
+        useBrowserAutofill,
+      });
+      await finishSignIn(challengeId, response);
+    },
+    [finishSignIn, startSignIn],
+  );
 
   return { trySignIn, trySignInForEmail };
 }
