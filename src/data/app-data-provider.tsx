@@ -1,3 +1,5 @@
+import { useLocation } from "react-router-dom";
+import type { Condition, SettingsScope } from "../../convex/listingTypes";
 import * as React from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
@@ -34,6 +36,8 @@ type ConvexCaptureUpload = {
 };
 
 type ImportedProduct = {
+  listingKind?: "refurbished";
+  condition?: Condition;
   sku: string;
   name: string;
   price: number;
@@ -80,6 +84,8 @@ type AppDataContextValue = {
   isProductPending: (id: Id<"products">) => boolean;
   updateProduct: (args: {
     id: Id<"products">;
+    condition?: Condition;
+    productType?: string;
     sku?: string;
     name?: string;
     description?: string;
@@ -178,26 +184,26 @@ type AppDataContextValue = {
   uploadProductPhoto: (file: File) => Promise<ConvexCaptureUpload>;
   recordCapture: (args: {
     productId: Id<"products">;
-    groupId: Id<"groups">;
+    groupId?: Id<"groups">;
     /** When set, links the uploaded Convex blob as a productPhotos original. */
     storageId?: Id<"_storage">;
   }) => Promise<Id<"captures">>;
   submitCapture: (args: {
     productId: Id<"products">;
-    groupId: Id<"groups">;
+    groupId?: Id<"groups">;
     file?: File;
   }) => Promise<{ captureId: Id<"captures">; photoId?: Id<"productPhotos"> }>;
   /** Upload + createOriginal for an additional product photo (reuses submitCapture pieces). */
   addProductPhoto: (args: {
     productId: Id<"products">;
-    groupId: Id<"groups">;
+    groupId?: Id<"groups">;
     file: File;
   }) => Promise<{ captureId: Id<"captures">; photoId: Id<"productPhotos"> }>;
   /** Upload + replace an existing original in-place (same slot); resets paired AI. */
   replaceProductPhoto: (args: {
     photoId: Id<"productPhotos">;
     productId: Id<"products">;
-    groupId: Id<"groups">;
+    groupId?: Id<"groups">;
     file: File;
   }) => Promise<{ captureId: Id<"captures">; photoId: Id<"productPhotos"> }>;
   /** Deletes a productPhotos row (and AI child), including Shopify files when promoted. */
@@ -376,6 +382,10 @@ export function AppDataProvider({
   children: React.ReactNode;
   session: AuthSession;
 }) {
+  const location = useLocation();
+  const tab = new URLSearchParams(location.search).get("tab");
+  const settingsScope: SettingsScope = location.pathname.includes("/refurbished") || (location.pathname === "/settings" && tab === "refurbished")
+    ? "refurbished" : location.pathname === "/photos" || (location.pathname === "/settings" && tab === "gallery") ? "gallery" : "parts";
   const queryArgs = React.useMemo(
     () => ({ sessionToken: session.sessionToken }),
     [session.sessionToken],
@@ -383,7 +393,7 @@ export function AppDataProvider({
   const products = useQuery(convexApi.products.list, queryArgs);
   const groups = useQuery(convexApi.groups.list, queryArgs);
   const listingJobs = useQuery(convexApi.listingJobs.list, queryArgs);
-  const settings = useQuery(convexApi.settings.get, queryArgs);
+  const settings = useQuery(convexApi.settings.get, { ...queryArgs, scope: settingsScope });
   const shopifyConnection = useQuery(convexApi.shopify.currentConnection, queryArgs);
   const activeProductIds = React.useMemo(
     () =>
@@ -888,6 +898,8 @@ export function AppDataProvider({
               {
                 _creationTime: now,
                 _id: optimisticId,
+                listingKind: args.listingKind,
+                condition: args.condition,
                 createdAt: now,
                 description,
                 lastError: undefined,
@@ -908,6 +920,8 @@ export function AppDataProvider({
           }),
           commit: () =>
             createProductMutation({
+              listingKind: args.listingKind,
+              condition: args.condition,
               description,
               name,
               price: args.price,
@@ -971,7 +985,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   duplicatePolicy,
@@ -981,6 +995,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setDuplicatePolicyMutation({
+              scope: settingsScope,
               duplicatePolicy,
               sessionToken: session.sessionToken,
             }),
@@ -990,7 +1005,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   autoArchiveComplete,
@@ -1000,6 +1015,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setAutoArchiveCompleteMutation({
+              scope: settingsScope,
               autoArchiveComplete,
               sessionToken: session.sessionToken,
             }),
@@ -1009,7 +1025,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   autoArchiveCompleteGroups,
@@ -1019,6 +1035,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setAutoArchiveCompleteGroupsMutation({
+              scope: settingsScope,
               autoArchiveCompleteGroups,
               sessionToken: session.sessionToken,
             }),
@@ -1028,7 +1045,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   shopifyPublishTarget,
@@ -1038,6 +1055,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setShopifyPublishTargetMutation({
+              scope: settingsScope,
               sessionToken: session.sessionToken,
               shopifyPublishTarget,
             }),
@@ -1047,7 +1065,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   shopifyProductType,
@@ -1057,6 +1075,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setShopifyProductTypeMutation({
+              scope: settingsScope,
               sessionToken: session.sessionToken,
               shopifyProductType,
             }),
@@ -1066,7 +1085,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   shopifyDefaultTags,
@@ -1076,6 +1095,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setShopifyDefaultTagsMutation({
+              scope: settingsScope,
               sessionToken: session.sessionToken,
               shopifyDefaultTags,
             }),
@@ -1085,7 +1105,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   shopifyShippingPackageId,
@@ -1095,6 +1115,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setShopifyShippingPackageIdMutation({
+              scope: settingsScope,
               sessionToken: session.sessionToken,
               shopifyShippingPackageId,
             }),
@@ -1104,7 +1125,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   shopifySalesChannels,
@@ -1114,6 +1135,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setShopifySalesChannelsMutation({
+              scope: settingsScope,
               sessionToken: session.sessionToken,
               shopifySalesChannels,
             }),
@@ -1123,7 +1145,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   aiImageDefaultPrompt,
@@ -1133,6 +1155,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setAiImageDefaultPromptMutation({
+              scope: settingsScope,
               aiImageDefaultPrompt,
               sessionToken: session.sessionToken,
             }),
@@ -1142,7 +1165,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   aiImageModel,
@@ -1152,6 +1175,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setAiImageModelMutation({
+              scope: settingsScope,
               aiImageModel,
               sessionToken: session.sessionToken,
             }),
@@ -1161,7 +1185,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   aiImageEditStrength,
@@ -1171,6 +1195,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setAiImageEditStrengthMutation({
+              scope: settingsScope,
               aiImageEditStrength,
               sessionToken: session.sessionToken,
             }),
@@ -1180,7 +1205,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   aiImageUpgradeModelOnRegen,
@@ -1190,6 +1215,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setAiImageUpgradeModelOnRegenMutation({
+              scope: settingsScope,
               aiImageUpgradeModelOnRegen,
               sessionToken: session.sessionToken,
             }),
@@ -1199,7 +1225,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   aiImageWhitenBackground,
@@ -1209,6 +1235,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setAiImageWhitenBackgroundMutation({
+              scope: settingsScope,
               aiImageWhitenBackground,
               sessionToken: session.sessionToken,
             }),
@@ -1218,7 +1245,7 @@ export function AppDataProvider({
         runOptimistic({
           apply: (state) => ({
             ...state,
-            settings: state.settings
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
               ? {
                   ...state.settings,
                   maxProductPhotos,
@@ -1228,6 +1255,7 @@ export function AppDataProvider({
           }),
           commit: () =>
             setMaxProductPhotosMutation({
+              scope: settingsScope,
               maxProductPhotos,
               sessionToken: session.sessionToken,
             }),
@@ -1311,7 +1339,7 @@ export function AppDataProvider({
         const candidateIds = optimisticData.products
           .filter(
             (product) =>
-              product.groupId === undefined && product.archivedAt === undefined,
+              product.listingKind !== "refurbished" && product.groupId === undefined && product.archivedAt === undefined,
           )
           .map((product) => product._id);
 
@@ -1513,13 +1541,13 @@ export function AppDataProvider({
           (entry) => entry._id === args.productId,
         );
 
-        if (!product?.groupId) {
+        if (!product?.groupId && product?.listingKind !== "refurbished") {
           throw new Error(
             "This product is not in a group. Assign it to a group before adding photos.",
           );
         }
 
-        if (product.groupId !== args.groupId) {
+        if (product?.groupId !== args.groupId) {
           throw new Error(
             "groupId does not match the product's assigned group.",
           );
@@ -1558,13 +1586,13 @@ export function AppDataProvider({
           (entry) => entry._id === args.productId,
         );
 
-        if (!product?.groupId) {
+        if (!product?.groupId && product?.listingKind !== "refurbished") {
           throw new Error(
             "This product is not in a group. Assign it to a group before replacing photos.",
           );
         }
 
-        if (product.groupId !== args.groupId) {
+        if (product?.groupId !== args.groupId) {
           throw new Error(
             "groupId does not match the product's assigned group.",
           );
@@ -1804,6 +1832,7 @@ export function AppDataProvider({
       session.sessionToken,
       session,
       uploadCaptureFile,
+      settingsScope,
       setAiImageDefaultPromptMutation,
       setAiImageEditStrengthMutation,
       setAiImageModelMutation,

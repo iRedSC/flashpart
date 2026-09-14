@@ -133,7 +133,7 @@ export const assignFirstUngrouped = mutation({
     const products = await ctx.db.query("products").collect();
     const candidates = products.filter(
       (product) =>
-        product.groupId === undefined && product.archivedAt === undefined,
+        product.listingKind !== "refurbished" && product.groupId === undefined && product.archivedAt === undefined,
     );
     const now = Date.now();
 

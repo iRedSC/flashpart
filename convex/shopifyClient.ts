@@ -474,11 +474,13 @@ export async function findProductBySku(
 export async function createShopifyProduct(
   connection: ShopifyConnection,
   input: {
+    conditionReference?: string;
     descriptionHtml?: string;
     handle: string;
     productType?: string;
     publishTarget: "draft" | "published";
     tags?: string[];
+    templateSuffix?: string;
     title: string;
     vendor?: string;
   },
@@ -508,6 +510,7 @@ export async function createShopifyProduct(
     }`,
     {
       product: {
+        ...(input.conditionReference ? { metafields: [{ namespace: "custom", key: "condition", type: "metaobject_reference", value: input.conditionReference }] } : {}),
         ...(input.descriptionHtml
           ? { descriptionHtml: input.descriptionHtml }
           : {}),
@@ -515,6 +518,9 @@ export async function createShopifyProduct(
         ...(input.productType ? { productType: input.productType } : {}),
         status: input.publishTarget === "published" ? "ACTIVE" : "DRAFT",
         ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
+        ...(input.templateSuffix !== undefined
+          ? { templateSuffix: input.templateSuffix }
+          : {}),
         title: input.title,
         ...(input.vendor ? { vendor: input.vendor } : {}),
       },
@@ -531,12 +537,14 @@ export async function createShopifyProduct(
 export async function updateShopifyProduct(
   connection: ShopifyConnection,
   input: {
+    conditionReference?: string;
     descriptionHtml?: string;
     handle: string;
     productId: string;
     productType?: string;
     publishTarget: "draft" | "published";
     tags?: string[];
+    templateSuffix?: string;
     title: string;
     vendor?: string;
   },
@@ -566,6 +574,7 @@ export async function updateShopifyProduct(
     }`,
     {
       product: {
+        ...(input.conditionReference ? { metafields: [{ namespace: "custom", key: "condition", type: "metaobject_reference", value: input.conditionReference }] } : {}),
         ...(input.descriptionHtml
           ? { descriptionHtml: input.descriptionHtml }
           : {}),
@@ -574,6 +583,9 @@ export async function updateShopifyProduct(
         ...(input.productType ? { productType: input.productType } : {}),
         status: input.publishTarget === "published" ? "ACTIVE" : "DRAFT",
         ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
+        ...(input.templateSuffix !== undefined
+          ? { templateSuffix: input.templateSuffix }
+          : {}),
         title: input.title,
         ...(input.vendor ? { vendor: input.vendor } : {}),
       },
@@ -607,6 +619,7 @@ function inventoryItemInput(input: {
 export async function createShopifyVariant(
   connection: ShopifyConnection,
   input: {
+    inventoryLocationId?: string;
     barcode: string;
     price: number;
     productId: string;
@@ -646,6 +659,7 @@ export async function createShopifyVariant(
         {
           barcode: input.barcode,
           inventoryItem: inventoryItemInput(input),
+          ...(input.inventoryLocationId ? { inventoryQuantities: [{ locationId: input.inventoryLocationId, availableQuantity: 1 }] } : {}),
           price: input.price.toFixed(2),
         },
       ],
@@ -870,4 +884,89 @@ export async function removeFileReferenceFromProduct(
       ],
     },
   );
+}
+
+export async function getShopifyProductTypes(connection: ShopifyConnection) {
+  const values: string[] = [];
+  let after: string | null = null;
+  do {
+    const data: { productTypes: { nodes: string[]; pageInfo: { endCursor: string | null; hasNextPage: boolean; }; }; } = await shopifyGraphql(connection,
+      `query ProductTypes($after: String) { productTypes(first: 250, after: $after) { nodes pageInfo { endCursor hasNextPage } } }`, { after });
+    values.push(...data.productTypes.nodes);
+    after = data.productTypes.pageInfo.hasNextPage ? data.productTypes.pageInfo.endCursor : null;
+  } while (after);
+  return [...new Set(values)].filter(Boolean).sort();
+}
+
+export async function getShopifyProductVendors(connection: ShopifyConnection) {
+  const values: string[] = [];
+  let after: string | null = null;
+  do {
+    const data: { productVendors: { nodes: string[]; pageInfo: { endCursor: string | null; hasNextPage: boolean; }; }; } = await shopifyGraphql(connection,
+      `query ProductVendors($after: String) { productVendors(first: 250, after: $after) { nodes pageInfo { endCursor hasNextPage } } }`, { after });
+    values.push(...data.productVendors.nodes);
+    after = data.productVendors.pageInfo.hasNextPage
+      ? data.productVendors.pageInfo.endCursor
+      : null;
+  } while (after);
+  return [...new Set(values)].filter(Boolean).sort();
+}
+
+export async function getShopifyProductTemplates(
+  connection: ShopifyConnection,
+) {
+  const data = await shopifyGraphql<{
+    themes: {
+      nodes: Array<{
+        files: { nodes: Array<{ filename: string }> };
+      }>;
+    };
+  }>(
+    connection,
+    `query ProductTemplates {
+      themes(first: 1, roles: [MAIN]) {
+        nodes {
+          files(first: 250, filenames: ["templates/product.*"]) {
+            nodes { filename }
+          }
+        }
+      }
+    }`,
+    {},
+  );
+  const suffixes = new Set<string>();
+  for (const file of data.themes.nodes[0]?.files.nodes ?? []) {
+    const match = file.filename.match(
+      /^templates\/product(?:\.([a-zA-Z0-9_-]+))?\.(?:json|liquid)$/,
+    );
+    if (match) suffixes.add(match[1] ?? "");
+  }
+  suffixes.add("");
+  return [...suffixes]
+    .sort((left, right) =>
+      left === "" ? -1 : right === "" ? 1 : left.localeCompare(right),
+    )
+    .map((suffix) => ({
+      label: suffix || "Default product template",
+      suffix,
+    }));
+}
+
+export async function getShopifyLocations(connection: ShopifyConnection) {
+  const locations: { id: string; name: string; }[] = [];
+  let after: string | null = null;
+  do {
+    const data: { locations: { nodes: { id: string; name: string; isActive: boolean; }[]; pageInfo: { endCursor: string | null; hasNextPage: boolean; }; }; } = await shopifyGraphql(connection,
+      `query Locations($after: String) { locations(first: 100, after: $after) { nodes { id name isActive } pageInfo { endCursor hasNextPage } } }`, { after });
+    locations.push(...data.locations.nodes.filter(location => location.isActive).map(({ id, name }) => ({ id, name })));
+    after = data.locations.pageInfo.hasNextPage ? data.locations.pageInfo.endCursor : null;
+  } while (after);
+  return locations;
+}
+
+export async function resolveConditionReference(connection: ShopifyConnection, handle: string) {
+  const data = await shopifyGraphql<{ metaobjectByHandle: { id: string; } | null; }>(connection,
+    `query Condition($handle: MetaobjectHandleInput!) { metaobjectByHandle(handle: $handle) { id } }`, { handle: { type: "condition", handle } });
+  if (!data.metaobjectByHandle) throw new ConvexError(`Shopify condition "${handle}" was not found. Check the condition metaobject entries.`);
+  return data.metaobjectByHandle.id;
 }

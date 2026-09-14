@@ -16,6 +16,10 @@ import {
   shopifyPhotoKindLabel,
 } from "./photoOwnership";
 import {
+  getShopifyProductTypes,
+  getShopifyProductVendors,
+  getShopifyProductTemplates,
+  getShopifyLocations,
   createShopifyFile,
   createStagedImageUpload,
   deleteShopifyFiles,
@@ -26,12 +30,16 @@ import {
 } from "./shopifyClient";
 
 const SHOPIFY_SCOPES = [
+  "read_metaobjects",
+  "read_locations",
+  "write_inventory",
   "read_products",
   "write_products",
   "read_files",
   "write_files",
   "read_publications",
   "write_publications",
+  "read_themes",
 ];
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
@@ -1119,4 +1127,51 @@ export const handleShopifyCallback = httpAction(async (ctx, request) => {
     "Shopify connected",
     "You can close this tab and return to Flashpart.",
   );
+});
+
+export const productTypes = action({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args): Promise<string[]> => {
+    const connection = await ctx.runQuery(shopifyModel.currentActiveConnection, args);
+    if (!connection) throw new ConvexError("Connect Shopify to choose a product type.");
+    return getShopifyProductTypes(connection);
+  },
+});
+export const productVendors = action({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args): Promise<string[]> => {
+    const connection = await ctx.runQuery(
+      shopifyModel.currentActiveConnection,
+      args,
+    );
+    if (!connection) throw new ConvexError("Connect Shopify to choose a vendor.");
+    return getShopifyProductVendors(connection);
+  },
+});
+export const productTemplates = action({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args): Promise<{ label: string; suffix: string }[]> => {
+    const connection = await ctx.runQuery(
+      shopifyModel.currentActiveConnection,
+      args,
+    );
+    if (!connection) {
+      throw new ConvexError("Connect Shopify to choose a product template.");
+    }
+    if (!connection.scopes.includes("read_themes")) {
+      throw new ConvexError(
+        "Reconnect Shopify in Shared settings to allow product template access.",
+      );
+    }
+    return getShopifyProductTemplates(connection);
+  },
+});
+export const inventoryLocations = action({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args): Promise<{ id: string; name: string; }[]> => {
+    const connection = await ctx.runQuery(shopifyModel.currentActiveConnection, args);
+    if (!connection) throw new ConvexError("Connect Shopify to choose an inventory location.");
+    if (!connection.scopes.includes("read_locations")) throw new ConvexError("Reconnect Shopify in Shared settings to allow location access.");
+    return getShopifyLocations(connection);
+  },
 });

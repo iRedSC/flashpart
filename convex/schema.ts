@@ -1,3 +1,4 @@
+import { condition } from "./listingTypes";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { aiImageEditStrength, aiImageModel } from "./photoAiConstants";
@@ -104,7 +105,8 @@ export default defineSchema({
     .index("by_token_hash", ["tokenHash"]),
 
   appSettings: defineTable({
-    key: v.literal("singleton"),
+    key: v.union(v.literal("singleton"), v.literal("refurbished"), v.literal("gallery")),
+    shopifyInventoryLocationId: v.optional(v.string()),
     aiImageDefaultPrompt: v.optional(v.string()),
     aiImageEditStrength: v.optional(aiImageEditStrength),
     aiImageModel: v.optional(aiImageModel),
@@ -124,6 +126,8 @@ export default defineSchema({
     shopifyShopDomain: v.optional(v.string()),
     shopifyTokenLastFour: v.optional(v.string()),
     shopifyProductType: v.optional(v.string()),
+    /** Product theme template suffix. Empty or missing uses Shopify's default template. */
+    shopifyProductTemplateSuffix: v.optional(v.string()),
     shopifyDefaultTags: v.optional(v.string()),
     /** Shipping package GID or numeric id assigned to published variants. */
     shopifyShippingPackageId: v.optional(v.string()),
@@ -161,6 +165,9 @@ export default defineSchema({
     .index("by_shop_domain", ["shopDomain"]),
 
   products: defineTable({
+    listingKind: v.optional(v.literal("refurbished")),
+    condition: v.optional(condition),
+    photosComplete: v.optional(v.boolean()),
     sku: v.string(),
     name: v.string(),
     description: v.optional(v.string()),
@@ -217,7 +224,7 @@ export default defineSchema({
 
   captures: defineTable({
     productId: v.id("products"),
-    groupId: v.id("groups"),
+    groupId: v.optional(v.id("groups")),
     shopifyFileId: v.optional(v.string()),
     shopifyFileStatus: v.optional(shopifyFileStatus),
     shopifyFileUrl: v.optional(v.string()),

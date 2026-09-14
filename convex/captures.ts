@@ -92,7 +92,7 @@ export const recordConvexCapture = mutation({
   args: {
     sessionToken: v.string(),
     productId: v.id("products"),
-    groupId: v.id("groups"),
+    groupId: v.optional(v.id("groups")),
     /** max=1 Skip: permanently leave the capture queue without a photo. */
     completeWithoutPhoto: v.optional(v.boolean()),
   },
@@ -103,6 +103,8 @@ export const recordConvexCapture = mutation({
     if (!product) {
       throw new Error("Product not found");
     }
+
+    if (!args.groupId && product.listingKind !== "refurbished") throw new Error("Choose a capture group.");
 
     if (
       args.completeWithoutPhoto &&

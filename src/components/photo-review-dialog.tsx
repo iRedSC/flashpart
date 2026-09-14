@@ -236,7 +236,6 @@ export function PhotoReviewDialog({
               </DialogDescription>
             )}
           </DialogHeader>
-
           {showViewTabs ? (
             <div className="flex rounded-lg bg-slate-100 p-1">
               <button

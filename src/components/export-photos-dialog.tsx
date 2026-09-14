@@ -19,7 +19,7 @@ import {
   type ExportProduct,
 } from "../lib/export-photos";
 import type { ProductPhoto } from "../lib/product-photo";
-import type { Id } from "../../convex/_generated/dataModel";
+import { persistedProductIds } from "../lib/product-id";
 
 type ExportPhotosDialogProps = {
   open: boolean;
@@ -63,9 +63,7 @@ export function ExportPhotosDialog({
     setProgress(null);
 
     try {
-      const productIds = products.map(
-        (product) => product._id as Id<"products">,
-      );
+      const productIds = persistedProductIds(products);
 
       let exportPhotosByProductId = photosByProductId;
       try {

@@ -1,3 +1,4 @@
+import { condition, type Condition } from "./listingTypes";
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
@@ -87,6 +88,8 @@ export const update = mutation({
     vendor: v.optional(v.string()),
     tags: v.optional(v.string()),
     price: v.optional(v.number()),
+    condition: v.optional(condition),
+    productType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
@@ -98,6 +101,8 @@ export const update = mutation({
     }
 
     const patch: {
+      condition?: Condition;
+      productType?: string;
       description?: string;
       name?: string;
       needsRepublish?: true;
@@ -109,6 +114,22 @@ export const update = mutation({
     } = { updatedAt: Date.now() };
 
     let changed = false;
+    if (args.condition !== undefined) {
+      if (product.listingKind !== "refurbished") {
+        throw new ConvexError("Condition is only supported for refurbished listings.");
+      }
+      if (args.condition !== product.condition) {
+        patch.condition = args.condition;
+        changed = true;
+      }
+    }
+    if (args.productType !== undefined) {
+      const productType = args.productType.trim() || undefined;
+      if (productType !== product.productType) {
+        patch.productType = productType;
+        changed = true;
+      }
+    }
 
     if (args.sku !== undefined && args.sku !== product.sku) {
       patch.sku = args.sku;
@@ -164,6 +185,8 @@ export const update = mutation({
 export const create = mutation({
   args: {
     sessionToken: v.string(),
+    listingKind: v.optional(v.literal("refurbished")),
+    condition: v.optional(condition),
     sku: v.string(),
     name: v.string(),
     price: v.number(),
@@ -190,6 +213,10 @@ export const create = mutation({
       throw new ConvexError("Enter a valid price.");
     }
 
+    if (args.listingKind === "refurbished" && !args.condition) {
+      throw new ConvexError("Select a condition.");
+    }
+
     const existing = await ctx.db
       .query("products")
       .withIndex("by_sku", (q) => q.eq("sku", sku))
@@ -202,6 +229,8 @@ export const create = mutation({
     const now = Date.now();
 
     const id = await ctx.db.insert("products", {
+      listingKind: args.listingKind,
+      condition: args.listingKind === "refurbished" ? args.condition : undefined,
       sku,
       name,
       description,
@@ -246,7 +275,7 @@ export const importProducts = mutation({
         .first();
 
       if (existing) {
-        if (args.existingEntryBehavior === "ignore") {
+        if (args.existingEntryBehavior === "ignore" || existing.listingKind === "refurbished") {
           ignored += 1;
           continue;
         }
@@ -473,5 +502,17 @@ export const markShopifyFileDeleted = internalMutation({
         updatedAt: args.deletedAt,
       });
     }
+  },
+});
+
+export const finishPhotos = mutation({
+  args: { sessionToken: v.string(), productId: v.id("products") },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const product = await ctx.db.get(args.productId);
+    if (product?.listingKind !== "refurbished") throw new ConvexError("Refurbished listing not found.");
+    const photos = await ctx.db.query("productPhotos").withIndex("by_product_kind", q => q.eq("productId", args.productId).eq("kind", "original")).collect();
+    if (!photos.length || photos.some(p => p.status === "uploading" || p.status === "failed")) throw new ConvexError("Save all photos before finishing.");
+    await ctx.db.patch(product._id, { photosComplete: true, updatedAt: Date.now() });
   },
 });

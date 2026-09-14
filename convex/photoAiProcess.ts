@@ -188,6 +188,7 @@ function base64ToArrayBuffer(base64: string) {
 }
 
 async function generateEditedImage(input: {
+  preserveWear?: boolean;
   editStrength: string;
   imageData: ArrayBuffer;
   mimeType: string;
@@ -199,7 +200,7 @@ async function generateEditedImage(input: {
   const editStrength = isAiImageEditStrength(input.editStrength)
     ? input.editStrength
     : "balanced";
-  const generation = buildAiGenerationRequest(input.prompt, editStrength);
+  const generation = buildAiGenerationRequest(input.prompt, editStrength, input.preserveWear);
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
@@ -362,6 +363,7 @@ export const processProductPhoto = internalAction({
         }
 
         const generated = await generateEditedImage({
+          preserveWear: "preserveWear" in payload && payload.preserveWear === true,
           editStrength: payload.aiImageEditStrength,
           imageData: originalData,
           mimeType: originalMimeType,
@@ -453,6 +455,7 @@ export const processProductPhoto = internalAction({
         originalResponse.headers.get("content-type") ?? "image/jpeg";
       const originalData = await originalResponse.arrayBuffer();
       const generated = await generateEditedImage({
+        preserveWear: "preserveWear" in payload && payload.preserveWear === true,
         editStrength: payload.aiImageEditStrength,
         imageData: originalData,
         mimeType: originalMimeType,
