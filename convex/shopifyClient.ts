@@ -480,6 +480,7 @@ export async function createShopifyProduct(
     productType?: string;
     publishTarget: "draft" | "published";
     tags?: string[];
+    templateSuffix?: string;
     title: string;
     vendor?: string;
   },
@@ -517,6 +518,9 @@ export async function createShopifyProduct(
         ...(input.productType ? { productType: input.productType } : {}),
         status: input.publishTarget === "published" ? "ACTIVE" : "DRAFT",
         ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
+        ...(input.templateSuffix !== undefined
+          ? { templateSuffix: input.templateSuffix }
+          : {}),
         title: input.title,
         ...(input.vendor ? { vendor: input.vendor } : {}),
       },
@@ -540,6 +544,7 @@ export async function updateShopifyProduct(
     productType?: string;
     publishTarget: "draft" | "published";
     tags?: string[];
+    templateSuffix?: string;
     title: string;
     vendor?: string;
   },
@@ -578,6 +583,9 @@ export async function updateShopifyProduct(
         ...(input.productType ? { productType: input.productType } : {}),
         status: input.publishTarget === "published" ? "ACTIVE" : "DRAFT",
         ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
+        ...(input.templateSuffix !== undefined
+          ? { templateSuffix: input.templateSuffix }
+          : {}),
         title: input.title,
         ...(input.vendor ? { vendor: input.vendor } : {}),
       },
@@ -888,6 +896,46 @@ export async function getShopifyProductTypes(connection: ShopifyConnection) {
     after = data.productTypes.pageInfo.hasNextPage ? data.productTypes.pageInfo.endCursor : null;
   } while (after);
   return [...new Set(values)].filter(Boolean).sort();
+}
+
+export async function getShopifyProductTemplates(
+  connection: ShopifyConnection,
+) {
+  const data = await shopifyGraphql<{
+    themes: {
+      nodes: Array<{
+        files: { nodes: Array<{ filename: string }> };
+      }>;
+    };
+  }>(
+    connection,
+    `query ProductTemplates {
+      themes(first: 1, roles: [MAIN]) {
+        nodes {
+          files(first: 250, filenames: ["templates/product.*"]) {
+            nodes { filename }
+          }
+        }
+      }
+    }`,
+    {},
+  );
+  const suffixes = new Set<string>();
+  for (const file of data.themes.nodes[0]?.files.nodes ?? []) {
+    const match = file.filename.match(
+      /^templates\/product(?:\.([a-zA-Z0-9_-]+))?\.(?:json|liquid)$/,
+    );
+    if (match) suffixes.add(match[1] ?? "");
+  }
+  suffixes.add("");
+  return [...suffixes]
+    .sort((left, right) =>
+      left === "" ? -1 : right === "" ? 1 : left.localeCompare(right),
+    )
+    .map((suffix) => ({
+      label: suffix || "Default product template",
+      suffix,
+    }));
 }
 
 export async function getShopifyLocations(connection: ShopifyConnection) {

@@ -179,6 +179,9 @@ export const convexApi = {
   },
   settings: {
     setShopifyInventoryLocationId: deployedFunction<typeof api.settings.setShopifyInventoryLocationId>("settings.js:setShopifyInventoryLocationId"),
+    setShopifyProductTemplateSuffix: deployedFunction<
+      typeof api.settings.setShopifyProductTemplateSuffix
+    >("settings.js:setShopifyProductTemplateSuffix"),
     get: deployedFunction<typeof api.settings.get>("settings.js:get"),
     setDuplicatePolicy: deployedFunction<
       typeof api.settings.setDuplicatePolicy
@@ -225,6 +228,9 @@ export const convexApi = {
   },
   shopify: {
     productTypes: deployedFunction<typeof api.shopify.productTypes>("shopify.js:productTypes"),
+    productTemplates: deployedFunction<typeof api.shopify.productTemplates>(
+      "shopify.js:productTemplates",
+    ),
     inventoryLocations: deployedFunction<typeof api.shopify.inventoryLocations>("shopify.js:inventoryLocations"),
     currentConnection: deployedFunction<typeof api.shopify.currentConnection>(
       "shopify.js:currentConnection",

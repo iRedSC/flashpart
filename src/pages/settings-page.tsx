@@ -67,15 +67,49 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
     shopifyConnection,
   } = useAppData();
   const loadLocations = useAction(convexApi.shopify.inventoryLocations);
+  const loadProductTemplates = useAction(convexApi.shopify.productTemplates);
   const saveLocation = useMutation(convexApi.settings.setShopifyInventoryLocationId);
+  const saveProductTemplate = useMutation(
+    convexApi.settings.setShopifyProductTemplateSuffix,
+  );
   const [locations, setLocations] = React.useState<{ id: string; name: string; }[]>([]);
   const [locationError, setLocationError] = React.useState("");
+  const [productTemplates, setProductTemplates] = React.useState<
+    { label: string; suffix: string }[]
+  >([]);
+  const [productTemplateError, setProductTemplateError] = React.useState("");
   React.useEffect(() => {
     if (tab !== "refurbished") return;
     let cancelled = false;
     void loadLocations({ sessionToken: session.sessionToken }).then(values => { if (!cancelled) setLocations(values); }).catch(error => { if (!cancelled) setLocationError(error instanceof Error ? error.message : "Could not load locations."); });
     return () => { cancelled = true; };
   }, [tab, loadLocations, session.sessionToken, shopifyConnection?.updatedAt]);
+  React.useEffect(() => {
+    if (tab !== "refurbished") return;
+    let cancelled = false;
+    setProductTemplateError("");
+    void loadProductTemplates({ sessionToken: session.sessionToken })
+      .then((values) => {
+        if (!cancelled) setProductTemplates(values);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setProductTemplateError(
+            error instanceof Error
+              ? error.message
+              : "Could not load product templates.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    tab,
+    loadProductTemplates,
+    session.sessionToken,
+    shopifyConnection?.updatedAt,
+  ]);
   const defaultPrompt = tab === "refurbished" ? REFURBISHED_IMAGE_PROMPT : DEFAULT_AI_IMAGE_PROMPT;
   const startShopifyInstall = useAction(convexApi.shopify.startShopifyInstall);
   const [shopDomain, setShopDomain] = React.useState(
@@ -300,6 +334,17 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
               can override this.
             </p>
           </div>
+            {tab === "refurbished" && <label className="grid gap-2 text-sm font-medium">Product template
+              <select aria-label="Product template" className="h-10 rounded-md border border-slate-200 bg-white px-3" value={settings?.shopifyProductTemplateSuffix ?? ""} onChange={event => {
+                setProductTemplateError("");
+                void saveProductTemplate({ sessionToken: session.sessionToken, shopifyProductTemplateSuffix: event.target.value }).catch(error => setProductTemplateError(error instanceof Error ? error.message : "Could not save product template."));
+              }}>
+                {productTemplates.length === 0 && <option value="">Default product template</option>}
+                {productTemplates.map(template => <option value={template.suffix} key={template.suffix}>{template.label}</option>)}
+              </select>
+              <span className="text-sm font-normal text-slate-500">Applied to every refurbished product created or updated in Shopify.</span>
+              {productTemplateError && <span className="text-red-600">{productTemplateError}</span>}
+            </label>}
           <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
             <label className="grid gap-2 text-sm font-medium" htmlFor="default-tags">
               Default Shopify tags
@@ -595,7 +640,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
                 Disconnect
               </Button>
             </div>
-                {shopifyConnection && !["read_metaobjects", "read_locations", "write_inventory"].every(scope => shopifyConnection.scopes.includes(scope)) && <p className="text-sm text-amber-700">Reconnect this store to enable refurbished conditions and inventory locations.</p>}
+                {shopifyConnection && !["read_metaobjects", "read_locations", "write_inventory", "read_themes"].every(scope => shopifyConnection.scopes.includes(scope)) && <p className="text-sm text-amber-700">Reconnect this store to enable refurbished conditions, inventory locations, and product templates.</p>}
           </form>
             )}
 

@@ -314,6 +314,8 @@ export const jobPayload = internalQuery({
         shopifyInventoryLocationId: settings.shopifyInventoryLocationId,
         shopifyDefaultTags: settings?.shopifyDefaultTags,
         shopifyProductType: settings?.shopifyProductType ?? "Part",
+        shopifyProductTemplateSuffix:
+          settings?.shopifyProductTemplateSuffix ?? "",
         shopifyPublishTarget: settings?.shopifyPublishTarget ?? "draft",
         shopifySalesChannels: resolveShopifySalesChannels(
           settings?.shopifySalesChannels,
@@ -744,6 +746,12 @@ export const processQueuedJob = internalAction({
         productType,
         publishTarget,
         tags,
+        ...(refurbished
+          ? {
+              templateSuffix:
+                payload.settings.shopifyProductTemplateSuffix,
+            }
+          : {}),
         title: payload.product.name,
         vendor,
       };

@@ -39,6 +39,7 @@ const defaultSettings = {
   maxProductPhotos: DEFAULT_MAX_PRODUCT_PHOTOS,
   shopifyPublishTarget: "draft" as const,
   shopifyProductType: "Part" as const,
+  shopifyProductTemplateSuffix: "" as const,
   shopifySalesChannels: [...DEFAULT_SHOPIFY_SALES_CHANNELS],
   updatedAt: 0,
 };
@@ -571,5 +572,29 @@ export const setShopifyInventoryLocationId = mutation({
     const patch = { shopifyInventoryLocationId: location || undefined, updatedAt: Date.now() };
     if (settings) await ctx.db.patch(settings._id, patch);
     else await ctx.db.insert("appSettings", { ...defaultsForScope("refurbished"), ...patch });
+  },
+});
+
+export const setShopifyProductTemplateSuffix = mutation({
+  args: { sessionToken: v.string(), shopifyProductTemplateSuffix: v.string() },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const suffix = args.shopifyProductTemplateSuffix.trim();
+    if (suffix && !/^[a-zA-Z0-9_-]+$/.test(suffix)) {
+      throw new Error("Choose a Shopify product template.");
+    }
+    const settings = await getSettingsDocument(ctx, "refurbished");
+    const patch = {
+      shopifyProductTemplateSuffix: suffix || undefined,
+      updatedAt: Date.now(),
+    };
+    if (settings) await ctx.db.patch(settings._id, patch);
+    else {
+      await ctx.db.insert("appSettings", {
+        ...defaultsForScope("refurbished"),
+        ...patch,
+      });
+    }
+    return { shopifyProductTemplateSuffix: suffix };
   },
 });

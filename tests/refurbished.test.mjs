@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hashValue } from '../convex/authUtils.ts';
-import { getWorkflowSettings, setAiImageDefaultPrompt, setShopifyPublishTarget, setShopifyInventoryLocationId } from '../convex/settings.ts';
+import { getWorkflowSettings, setAiImageDefaultPrompt, setShopifyPublishTarget, setShopifyInventoryLocationId, setShopifyProductTemplateSuffix } from '../convex/settings.ts';
 import { create, update, finishPhotos, importProducts } from '../convex/products.ts';
 import { reserveOriginalSlot } from '../convex/productPhotos.ts';
 import { enqueueCreateDrafts } from '../convex/listingJobs.ts';
 import { processingPayload } from '../convex/photoAi.ts';
 import { buildAiGenerationRequest } from '../convex/photoAiConstants.ts';
 import { REFURBISHED_IMAGE_PROMPT } from '../convex/listingTypes.ts';
-import { createShopifyProduct, createShopifyVariant, updateShopifyVariant, resolveConditionReference, getShopifyProductTypes } from '../convex/shopifyClient.ts';
+import { createShopifyProduct, createShopifyVariant, updateShopifyVariant, resolveConditionReference, getShopifyProductTypes, getShopifyProductTemplates } from '../convex/shopifyClient.ts';
 import { persistedProductIds } from '../src/lib/product-id.ts';
 
 const sessionToken = 'test-session';
@@ -58,10 +58,13 @@ test('settings writes and reads stay in their workflow; parts retain existing va
   await setAiImageDefaultPrompt._handler(ctx, { sessionToken, scope: 'gallery', aiImageDefaultPrompt: 'Gallery prompt' });
   await setShopifyPublishTarget._handler(ctx, { sessionToken, scope: 'refurbished', shopifyPublishTarget: 'published' });
   await setShopifyInventoryLocationId._handler(ctx, { sessionToken, shopifyInventoryLocationId: location });
+  await setShopifyProductTemplateSuffix._handler(ctx, { sessionToken, shopifyProductTemplateSuffix: 'refurbished' });
   assert.equal((await getWorkflowSettings(ctx, 'parts')).aiImageDefaultPrompt, 'Existing parts prompt');
   assert.equal((await getWorkflowSettings(ctx, 'gallery')).aiImageDefaultPrompt, 'Gallery prompt');
   assert.equal((await getWorkflowSettings(ctx, 'gallery')).shopifyInventoryLocationId, undefined);
+  assert.equal((await getWorkflowSettings(ctx, 'parts')).shopifyProductTemplateSuffix, '');
   assert.equal((await getWorkflowSettings(ctx, 'refurbished')).shopifyInventoryLocationId, location);
+  assert.equal((await getWorkflowSettings(ctx, 'refurbished')).shopifyProductTemplateSuffix, 'refurbished');
   assert.equal((await getWorkflowSettings(ctx, 'refurbished')).aiImageDefaultPrompt, REFURBISHED_IMAGE_PROMPT);
 });
 
@@ -147,8 +150,9 @@ test('Shopify receives a condition reference and initial quantity only when crea
   const shop = { accessToken: 'test', shopDomain: 'test.myshopify.com' };
   const conditionReference = await resolveConditionReference(shop, 'good');
   assert.deepEqual(requests.at(-1).variables, { handle: { type: 'condition', handle: 'good' } });
-  await createShopifyProduct(shop, { title: 'Drill', handle: 'ref-1', publishTarget: 'draft', conditionReference, tags: ['Single Listing', 'Refurbished'] });
+  await createShopifyProduct(shop, { title: 'Drill', handle: 'ref-1', publishTarget: 'draft', conditionReference, tags: ['Single Listing', 'Refurbished'], templateSuffix: 'refurbished' });
   assert.deepEqual(requests.at(-1).variables.product.metafields, [{ namespace: 'custom', key: 'condition', type: 'metaobject_reference', value: conditionReference }]);
+  assert.equal(requests.at(-1).variables.product.templateSuffix, 'refurbished');
   const variant = { sku: 'REF-1', barcode: 'REF-1', productId: 'product', price: 50 };
   await createShopifyVariant(shop, { ...variant, inventoryLocationId: location });
   assert.deepEqual(requests.at(-1).variables.variants[0].inventoryQuantities, [{ locationId: location, availableQuantity: 1 }]);
@@ -170,4 +174,24 @@ test('Shopify product type lookup follows pagination and rejects missing conditi
   assert.deepEqual(await getShopifyProductTypes(shop), ['Drill', 'Saw']);
   assert.equal(calls, 2);
   await assert.rejects(resolveConditionReference(shop, 'poor'), /was not found/);
+});
+
+test('Shopify product template lookup reads the main theme and normalizes suffixes', async t => {
+  let request;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    request = JSON.parse(options.body);
+    return new Response(JSON.stringify({ data: { themes: { nodes: [{ files: { nodes: [
+      { filename: 'templates/product.json' },
+      { filename: 'templates/product.refurbished.json' },
+      { filename: 'templates/product.wholesale.liquid' },
+      { filename: 'templates/collection.json' },
+    ] } }] } } }), { status: 200 });
+  });
+  const templates = await getShopifyProductTemplates({ accessToken: 'test', shopDomain: 'test.myshopify.com' });
+  assert.match(request.query, /roles: \[MAIN\]/);
+  assert.deepEqual(templates, [
+    { label: 'Default product template', suffix: '' },
+    { label: 'refurbished', suffix: 'refurbished' },
+    { label: 'wholesale', suffix: 'wholesale' },
+  ]);
 });

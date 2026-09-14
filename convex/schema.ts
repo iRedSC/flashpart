@@ -126,6 +126,8 @@ export default defineSchema({
     shopifyShopDomain: v.optional(v.string()),
     shopifyTokenLastFour: v.optional(v.string()),
     shopifyProductType: v.optional(v.string()),
+    /** Product theme template suffix. Empty or missing uses Shopify's default template. */
+    shopifyProductTemplateSuffix: v.optional(v.string()),
     shopifyDefaultTags: v.optional(v.string()),
     /** Shipping package GID or numeric id assigned to published variants. */
     shopifyShippingPackageId: v.optional(v.string()),

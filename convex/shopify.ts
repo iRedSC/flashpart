@@ -17,6 +17,7 @@ import {
 } from "./photoOwnership";
 import {
   getShopifyProductTypes,
+  getShopifyProductTemplates,
   getShopifyLocations,
   createShopifyFile,
   createStagedImageUpload,
@@ -37,6 +38,7 @@ const SHOPIFY_SCOPES = [
   "write_files",
   "read_publications",
   "write_publications",
+  "read_themes",
 ];
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
@@ -1132,6 +1134,24 @@ export const productTypes = action({
     const connection = await ctx.runQuery(shopifyModel.currentActiveConnection, args);
     if (!connection) throw new ConvexError("Connect Shopify to choose a product type.");
     return getShopifyProductTypes(connection);
+  },
+});
+export const productTemplates = action({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args): Promise<{ label: string; suffix: string }[]> => {
+    const connection = await ctx.runQuery(
+      shopifyModel.currentActiveConnection,
+      args,
+    );
+    if (!connection) {
+      throw new ConvexError("Connect Shopify to choose a product template.");
+    }
+    if (!connection.scopes.includes("read_themes")) {
+      throw new ConvexError(
+        "Reconnect Shopify in Shared settings to allow product template access.",
+      );
+    }
+    return getShopifyProductTemplates(connection);
   },
 });
 export const inventoryLocations = action({
