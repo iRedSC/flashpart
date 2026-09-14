@@ -9,6 +9,7 @@ import { processingPayload } from '../convex/photoAi.ts';
 import { buildAiGenerationRequest } from '../convex/photoAiConstants.ts';
 import { REFURBISHED_IMAGE_PROMPT } from '../convex/listingTypes.ts';
 import { createShopifyProduct, createShopifyVariant, updateShopifyVariant, resolveConditionReference, getShopifyProductTypes } from '../convex/shopifyClient.ts';
+import { persistedProductIds } from '../src/lib/product-id.ts';
 
 const sessionToken = 'test-session';
 async function context(seed = {}) {
@@ -39,6 +40,17 @@ async function context(seed = {}) {
 const tool = { _id: 'tool', sku: 'REF-1', name: 'Drill', price: 50, phase: 'captured', listingKind: 'refurbished', condition: 'good', photosComplete: true };
 const connection = { _id: 'connection', userId: 'user', isActive: true, createdAt: 1, scopes: ['read_metaobjects', 'read_locations', 'write_inventory'] };
 const location = 'gid://shopify/Location/123';
+
+test('photo batch queries exclude optimistic product placeholders', () => {
+  assert.deepEqual(
+    persistedProductIds([
+      { _id: 'persisted-product-id' },
+      { _id: 'optimistic-product-0' },
+      { _id: 'optimistic-product-42' },
+    ]),
+    ['persisted-product-id'],
+  );
+});
 
 test('settings writes and reads stay in their workflow; parts retain existing values', async () => {
   const ctx = await context({ appSettings: [{ _id: 'parts', key: 'singleton', duplicatePolicy: 'blockExisting', aiImageDefaultPrompt: 'Existing parts prompt', updatedAt: 0 }] });

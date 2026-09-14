@@ -19,6 +19,7 @@ import { useAppData } from "../data/app-data-provider";
 import { cropImageFileToSquare } from "../lib/capture-image";
 import { convexApi } from "../lib/convex-api";
 import { triggerHaptic } from "../lib/haptics";
+import { persistedProductIds } from "../lib/product-id";
 import {
   DEFAULT_AI_IMAGE_PROMPT,
   aiImageModelShortLabel,
@@ -707,9 +708,7 @@ export function ProductPhotoDialog({
     // Prefer a fresh batch so approve→next does not miss siblings still
     // needing review while the parent photosByProductId map is stale.
     try {
-      const productIds = products.map(
-        (entry) => entry._id as Id<"products">,
-      );
+      const productIds = persistedProductIds(products);
       if (productIds.length > 0) {
         const freshByProductId = await convex.query(
           convexApi.productPhotos.listForProducts,

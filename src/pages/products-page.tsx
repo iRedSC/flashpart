@@ -98,6 +98,7 @@ import {
 import { canArchive, isArchived, isDuplicateSkuError, isGroupArchived, type LastError } from "../lib/product-state";
 import { cn } from "../lib/utils";
 import { normalizeTagString } from "../lib/tags";
+import { persistedProductIds } from "../lib/product-id";
 import type { Id } from "../../convex/_generated/dataModel";
 
 type Product = ReturnType<typeof useAppData>["products"][number];
@@ -738,7 +739,7 @@ export function ProductsPage({ refurbished = false }: { refurbished?: boolean; }
     return byView.filter((product) => product.groupId === groupFilter);
   }, [groupFilter, products, viewFilter]);
   const filteredProductIds = React.useMemo(
-    () => filteredProducts.map((product) => product._id),
+    () => persistedProductIds(filteredProducts),
     [filteredProducts],
   );
   const photosByProductIdQuery = useQuery(
