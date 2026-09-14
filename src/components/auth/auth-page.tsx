@@ -1,5 +1,8 @@
 import * as React from "react";
-import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
+import {
+  browserSupportsWebAuthn,
+  WebAuthnAbortService,
+} from "@simplewebauthn/browser";
 import { Button } from "../ui/button";
 import {
   Card,
@@ -47,11 +50,7 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
     let cancelled = false;
 
     async function run() {
-      // WebAuthn can't be queried silently for existing credentials, so only
-      // auto-prompt when this device saved a passkey before (hint email is
-      // written exclusively after passkey creation/sign-in). Otherwise go
-      // straight to the OTP setup without popping a passkey dialog.
-      if (!readPasskeyHintEmail() || !browserSupportsWebAuthn()) {
+      if (authFlow !== "sign-in" || !browserSupportsWebAuthn()) {
         if (!cancelled) {
           setBoot("ready");
         }
@@ -59,7 +58,13 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
       }
 
       try {
-        await trySignIn();
+        if (readPasskeyHintEmail()) {
+          await trySignIn();
+        } else {
+          // Keep the email form visible while the browser offers any
+          // discoverable passkeys through its native autofill UI.
+          await trySignIn({ useBrowserAutofill: true });
+        }
       } catch {
         if (!cancelled) {
           setBoot("ready");
@@ -71,8 +76,9 @@ export function AuthPage({ onSignedIn }: AuthPageProps) {
 
     return () => {
       cancelled = true;
+      WebAuthnAbortService.cancelCeremony();
     };
-  }, [trySignIn]);
+  }, [authFlow, trySignIn]);
 
   function handleDifferentAccount() {
     clearPasskeyHintEmail();
