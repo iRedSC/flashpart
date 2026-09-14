@@ -898,6 +898,20 @@ export async function getShopifyProductTypes(connection: ShopifyConnection) {
   return [...new Set(values)].filter(Boolean).sort();
 }
 
+export async function getShopifyProductVendors(connection: ShopifyConnection) {
+  const values: string[] = [];
+  let after: string | null = null;
+  do {
+    const data: { productVendors: { nodes: string[]; pageInfo: { endCursor: string | null; hasNextPage: boolean; }; }; } = await shopifyGraphql(connection,
+      `query ProductVendors($after: String) { productVendors(first: 250, after: $after) { nodes pageInfo { endCursor hasNextPage } } }`, { after });
+    values.push(...data.productVendors.nodes);
+    after = data.productVendors.pageInfo.hasNextPage
+      ? data.productVendors.pageInfo.endCursor
+      : null;
+  } while (after);
+  return [...new Set(values)].filter(Boolean).sort();
+}
+
 export async function getShopifyProductTemplates(
   connection: ShopifyConnection,
 ) {

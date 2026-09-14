@@ -17,6 +17,7 @@ import {
 } from "./photoOwnership";
 import {
   getShopifyProductTypes,
+  getShopifyProductVendors,
   getShopifyProductTemplates,
   getShopifyLocations,
   createShopifyFile,
@@ -1134,6 +1135,17 @@ export const productTypes = action({
     const connection = await ctx.runQuery(shopifyModel.currentActiveConnection, args);
     if (!connection) throw new ConvexError("Connect Shopify to choose a product type.");
     return getShopifyProductTypes(connection);
+  },
+});
+export const productVendors = action({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args): Promise<string[]> => {
+    const connection = await ctx.runQuery(
+      shopifyModel.currentActiveConnection,
+      args,
+    );
+    if (!connection) throw new ConvexError("Connect Shopify to choose a vendor.");
+    return getShopifyProductVendors(connection);
   },
 });
 export const productTemplates = action({

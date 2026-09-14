@@ -8,8 +8,42 @@ export function ShopifyProductTypeSelect({ value, onChange }: {
   value: string;
   onChange: (value: string) => void;
 }) {
+  return (
+    <ShopifyCatalogValueSelect
+      kind="product type"
+      onChange={onChange}
+      value={value}
+    />
+  );
+}
+
+export function ShopifyVendorSelect({ value, onChange }: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <ShopifyCatalogValueSelect
+      kind="vendor"
+      onChange={onChange}
+      value={value}
+    />
+  );
+}
+
+function ShopifyCatalogValueSelect({
+  kind,
+  onChange,
+  value,
+}: {
+  kind: "product type" | "vendor";
+  value: string;
+  onChange: (value: string) => void;
+}) {
   const { session, shopifyConnection } = useAppData();
-  const load = useAction(convexApi.shopify.productTypes);
+  const loadProductTypes = useAction(convexApi.shopify.productTypes);
+  const loadProductVendors = useAction(convexApi.shopify.productVendors);
+  const load = kind === "vendor" ? loadProductVendors : loadProductTypes;
+  const pluralLabel = kind === "vendor" ? "vendors" : "product types";
   const [values, setValues] = React.useState<string[]>([]);
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
@@ -27,7 +61,11 @@ export function ShopifyProductTypeSelect({ value, onChange }: {
       .then(values => { if (!cancelled) setValues(values); })
       .catch(error => {
         if (!cancelled) {
-          setError(error instanceof Error ? error.message : "Could not load product types.");
+          setError(
+            error instanceof Error
+              ? error.message
+              : `Could not load ${pluralLabel}.`,
+          );
         }
       })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -53,14 +91,18 @@ export function ShopifyProductTypeSelect({ value, onChange }: {
       }}
     >
       <Input
-        aria-label="Product type"
+        aria-label={kind === "vendor" ? "Vendor" : "Product type"}
         role="combobox"
         aria-expanded={open}
         aria-controls={id}
         aria-autocomplete="list"
         aria-activedescendant={open && options[active] ? `${id}-${active}` : undefined}
         value={search}
-        placeholder={loading ? "Loading product types…" : "Search Shopify product types"}
+        placeholder={
+          loading
+            ? `Loading ${pluralLabel}…`
+            : `Search Shopify ${pluralLabel}`
+        }
         onFocus={() => { setOpen(true); setSearch(""); setActive(0); }}
         onChange={(event) => { setSearch(event.target.value); setActive(0); setOpen(true); }}
         onKeyDown={(event) => {
@@ -89,7 +131,7 @@ export function ShopifyProductTypeSelect({ value, onChange }: {
         <div
           id={id}
           role="listbox"
-          aria-label="Product types"
+          aria-label={kind === "vendor" ? "Vendors" : "Product types"}
           className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-white p-1 shadow-lg"
         >
           {options.map((option, index) => (
@@ -108,7 +150,7 @@ export function ShopifyProductTypeSelect({ value, onChange }: {
           ))}
           {!options.length && (
             <p className="p-3 text-sm text-slate-500">
-              {loading ? "Loading…" : error || "No matching product types"}
+              {loading ? "Loading…" : error || `No matching ${pluralLabel}`}
             </p>
           )}
         </div>

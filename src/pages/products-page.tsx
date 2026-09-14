@@ -1,5 +1,8 @@
 import { ConditionSelect } from "../components/condition-select";
-import { ShopifyProductTypeSelect } from "../components/shopify-product-type-select";
+import {
+  ShopifyProductTypeSelect,
+  ShopifyVendorSelect,
+} from "../components/shopify-product-type-select";
 import type { Condition } from "../../convex/listingTypes";
 import * as React from "react";
 import { useQuery } from "convex/react";
@@ -2307,13 +2310,11 @@ export function ProductsPage({ refurbished = false }: { refurbished?: boolean; }
               <label className="text-sm font-medium" htmlFor="add-part-vendor">
                 Vendor
               </label>
-              <Input
-                id="add-part-vendor"
-                onChange={(event) => {
-                  setAddPartVendor(event.currentTarget.value);
+              <ShopifyVendorSelect
+                onChange={(value) => {
+                  setAddPartVendor(value);
                   setAddPartError(null);
                 }}
-                placeholder="Optional vendor"
                 value={addPartVendor}
               />
             </div>

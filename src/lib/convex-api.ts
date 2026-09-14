@@ -228,6 +228,9 @@ export const convexApi = {
   },
   shopify: {
     productTypes: deployedFunction<typeof api.shopify.productTypes>("shopify.js:productTypes"),
+    productVendors: deployedFunction<typeof api.shopify.productVendors>(
+      "shopify.js:productVendors",
+    ),
     productTemplates: deployedFunction<typeof api.shopify.productTemplates>(
       "shopify.js:productTemplates",
     ),

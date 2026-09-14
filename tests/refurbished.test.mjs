@@ -8,7 +8,7 @@ import { enqueueCreateDrafts } from '../convex/listingJobs.ts';
 import { processingPayload } from '../convex/photoAi.ts';
 import { buildAiGenerationRequest } from '../convex/photoAiConstants.ts';
 import { REFURBISHED_IMAGE_PROMPT } from '../convex/listingTypes.ts';
-import { createShopifyProduct, createShopifyVariant, updateShopifyVariant, resolveConditionReference, getShopifyProductTypes, getShopifyProductTemplates } from '../convex/shopifyClient.ts';
+import { createShopifyProduct, createShopifyVariant, updateShopifyVariant, resolveConditionReference, getShopifyProductTypes, getShopifyProductTemplates, getShopifyProductVendors } from '../convex/shopifyClient.ts';
 import { persistedProductIds } from '../src/lib/product-id.ts';
 
 const sessionToken = 'test-session';
@@ -174,6 +174,17 @@ test('Shopify product type lookup follows pagination and rejects missing conditi
   assert.deepEqual(await getShopifyProductTypes(shop), ['Drill', 'Saw']);
   assert.equal(calls, 2);
   await assert.rejects(resolveConditionReference(shop, 'poor'), /was not found/);
+});
+
+test('Shopify vendor lookup follows pagination', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return new Response(JSON.stringify({ data: { productVendors: { nodes: calls === 1 ? ['Makita'] : ['DeWalt'], pageInfo: { hasNextPage: calls === 1, endCursor: calls === 1 ? 'next' : null } } } }));
+  });
+  const shop = { accessToken: 'test', shopDomain: 'test.myshopify.com' };
+  assert.deepEqual(await getShopifyProductVendors(shop), ['DeWalt', 'Makita']);
+  assert.equal(calls, 2);
 });
 
 test('Shopify product template lookup reads the main theme and normalizes suffixes', async t => {
