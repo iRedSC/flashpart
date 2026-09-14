@@ -4,27 +4,31 @@ import { useAppData } from "../data/app-data-provider";
 import { convexApi } from "../lib/convex-api";
 import { Input } from "./ui/input";
 
-export function ShopifyProductTypeSelect({ value, onChange }: {
+export function ShopifyProductTypeSelect({ value, onChange, onCommit }: {
   value: string;
   onChange: (value: string) => void;
+  onCommit?: (value: string) => void;
 }) {
   return (
     <ShopifyCatalogValueSelect
       kind="product type"
       onChange={onChange}
+      onCommit={onCommit}
       value={value}
     />
   );
 }
 
-export function ShopifyVendorSelect({ value, onChange }: {
+export function ShopifyVendorSelect({ value, onChange, onCommit }: {
   value: string;
   onChange: (value: string) => void;
+  onCommit?: (value: string) => void;
 }) {
   return (
     <ShopifyCatalogValueSelect
       kind="vendor"
       onChange={onChange}
+      onCommit={onCommit}
       value={value}
     />
   );
@@ -33,11 +37,13 @@ export function ShopifyVendorSelect({ value, onChange }: {
 function ShopifyCatalogValueSelect({
   kind,
   onChange,
+  onCommit,
   value,
 }: {
   kind: "product type" | "vendor";
   value: string;
   onChange: (value: string) => void;
+  onCommit?: (value: string) => void;
 }) {
   const { session, shopifyConnection } = useAppData();
   const loadProductTypes = useAction(convexApi.shopify.productTypes);
@@ -50,6 +56,8 @@ function ShopifyCatalogValueSelect({
   const [search, setSearch] = React.useState(value);
   const [open, setOpen] = React.useState(false);
   const [active, setActive] = React.useState(0);
+  const [dirty, setDirty] = React.useState(false);
+  const valueOnFocusRef = React.useRef(value);
   const id = React.useId();
 
   React.useEffect(() => { setSearch(value); }, [value]);
@@ -76,7 +84,18 @@ function ShopifyCatalogValueSelect({
 
   function choose(option: string) {
     onChange(option);
+    onCommit?.(option);
     setSearch(option);
+    setDirty(false);
+    setOpen(false);
+  }
+
+  function commitCustomValue() {
+    const nextValue = search.trim();
+    onChange(nextValue);
+    onCommit?.(nextValue);
+    setSearch(nextValue);
+    setDirty(false);
     setOpen(false);
   }
 
@@ -85,8 +104,11 @@ function ShopifyCatalogValueSelect({
       className="relative"
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) {
-          setOpen(false);
-          setSearch(value);
+          if (dirty) commitCustomValue();
+          else {
+            setOpen(false);
+            setSearch(value);
+          }
         }
       }}
     >
@@ -103,8 +125,21 @@ function ShopifyCatalogValueSelect({
             ? `Loading ${pluralLabel}…`
             : `Search Shopify ${pluralLabel}`
         }
-        onFocus={() => { setOpen(true); setSearch(""); setActive(0); }}
-        onChange={(event) => { setSearch(event.target.value); setActive(0); setOpen(true); }}
+        onFocus={() => {
+          valueOnFocusRef.current = value;
+          setOpen(true);
+          setSearch("");
+          setDirty(false);
+          setActive(0);
+        }}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          setSearch(nextValue);
+          setDirty(true);
+          onChange(nextValue);
+          setActive(0);
+          setOpen(true);
+        }}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown") {
             event.preventDefault();
@@ -118,12 +153,15 @@ function ShopifyCatalogValueSelect({
           if (event.key === "Enter" && open) {
             event.preventDefault();
             if (options[active]) choose(options[active]);
+            else if (dirty) commitCustomValue();
           }
           if (event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
+            onChange(valueOnFocusRef.current);
             setOpen(false);
-            setSearch(value);
+            setSearch(valueOnFocusRef.current);
+            setDirty(false);
           }
         }}
       />

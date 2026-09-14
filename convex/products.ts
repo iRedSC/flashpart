@@ -213,6 +213,10 @@ export const create = mutation({
       throw new ConvexError("Enter a valid price.");
     }
 
+    if (args.listingKind === "refurbished" && !args.condition) {
+      throw new ConvexError("Select a condition.");
+    }
+
     const existing = await ctx.db
       .query("products")
       .withIndex("by_sku", (q) => q.eq("sku", sku))

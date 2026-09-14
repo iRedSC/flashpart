@@ -95,6 +95,21 @@ test('create preserves refurbished identity and condition; condition changes req
   assert.equal(product.needsRepublish, true);
 });
 
+test('create rejects a refurbished listing without a condition', async () => {
+  const ctx = await context();
+  await assert.rejects(
+    create._handler(ctx, {
+      sessionToken,
+      sku: 'REF-1',
+      name: 'Drill',
+      price: 50,
+      listingKind: 'refurbished',
+    }),
+    /Select a condition/,
+  );
+  assert.equal((ctx.tables.products ?? []).length, 0);
+});
+
 test('refurbished capture has no app photo cap and adding a photo reopens completion', async () => {
   const originals = Array.from({ length: 25 }, (_, i) => ({ _id: `photo-${i}`, productId: 'tool', kind: 'original', status: 'ready', sortOrder: i, storageId: `storage-${i}` }));
   const ctx = await context({ products: [{ ...tool }], productPhotos: originals });

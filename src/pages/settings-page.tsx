@@ -117,6 +117,9 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
   );
   const [message, setMessage] = React.useState("");
   const [isConnecting, setIsConnecting] = React.useState(false);
+  const [productType, setProductType] = React.useState(
+    settings?.shopifyProductType ?? "Part",
+  );
   const [defaultTags, setDefaultTags] = React.useState(
     settings?.shopifyDefaultTags ?? "",
   );
@@ -160,6 +163,10 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
     settings?.aiImageWhitenBackground !== false;
   const selectedSalesChannels =
     settings?.shopifySalesChannels ?? DEFAULT_SHOPIFY_SALES_CHANNELS;
+
+  React.useEffect(() => {
+    setProductType(settings?.shopifyProductType ?? "Part");
+  }, [settings?.shopifyProductType]);
 
   React.useEffect(() => {
     setDefaultTags(settings?.shopifyDefaultTags ?? "");
@@ -327,7 +334,17 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
           <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
             <label className="grid gap-2 text-sm font-medium" htmlFor="product-type">
               Shopify product type
-                <ShopifyProductTypeSelect value={settings?.shopifyProductType ?? ""} onChange={value => { void setShopifyProductType(value).catch(() => undefined); }} />
+                <ShopifyProductTypeSelect
+                  value={productType}
+                  onChange={setProductType}
+                  onCommit={(value) => {
+                    const normalized = value.trim() || "Part";
+                    setProductType(normalized);
+                    if (normalized !== (settings?.shopifyProductType ?? "Part")) {
+                      void setShopifyProductType(normalized).catch(() => undefined);
+                    }
+                  }}
+                />
             </label>
             <p className="text-sm text-slate-500">
                 Default type when a listing is uploaded to Shopify. Individual listings

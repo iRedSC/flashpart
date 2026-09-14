@@ -1810,6 +1810,11 @@ export function ProductsPage({ refurbished = false }: { refurbished?: boolean; }
       return;
     }
 
+    if (refurbished && !addCondition) {
+      setAddPartError("Select a condition.");
+      return;
+    }
+
     setIsAddingPart(true);
     setAddPartError(null);
 
