@@ -138,7 +138,7 @@ export function DraftsPage() {
           {sync.status === "syncing" ? null : "Every draft has photos."}
         </div>
       ) : (
-        <ul className="grid gap-2">
+        <ul className="flex flex-col gap-2">
           {drafts.map((draft) => (
             <DraftRow
               key={draft._id}
@@ -188,32 +188,35 @@ function DraftRow({
   return (
     <li
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 transition-colors",
+        "flex min-w-0 items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 transition-colors md:items-center",
         step === "published" && "border-green-200 bg-green-50",
         error && "border-red-200",
       )}
     >
       <ProductThumbnail
-        className="h-14 w-14 shrink-0"
+        className="size-16 shrink-0"
         onClick={photoCount ? onOpenPhotos : onTakePhotos}
         photoCount={photoCount}
         photos={photos}
         product={product}
       />
-      <div className="min-w-0 flex-1">
-        <p className="line-clamp-2 text-sm font-medium" title={product.name}>{product.name}</p>
-        <p className="truncate text-xs text-slate-500">
-          <span className="font-mono">{product.sku || "No SKU"}</span> · ${product.price.toFixed(2)}
-        </p>
-        {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {adminUrl ? (
-          <Button asChild aria-label="Open in Shopify" size="icon" variant="ghost">
-            <a href={adminUrl} rel="noreferrer" target="_blank"><ExternalLink className="h-4 w-4" /></a>
-          </Button>
-        ) : null}
-        <DraftAction onOpenPhotos={onOpenPhotos} onPublish={onPublish} onTakePhotos={onTakePhotos} step={step} />
+      {/* Stacked on mobile so the name keeps the full width; inline on desktop. */}
+      <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row md:items-center md:gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="line-clamp-2 text-sm font-medium" title={product.name}>{product.name}</p>
+          <p className="truncate text-xs text-slate-500">
+            <span className="font-mono">{product.sku || "No SKU"}</span> · ${product.price.toFixed(2)}
+          </p>
+          {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+        </div>
+        <div className="flex shrink-0 flex-row-reverse items-center justify-between gap-1 md:flex-row">
+          {adminUrl ? (
+            <Button asChild aria-label="Open in Shopify" size="icon" variant="ghost">
+              <a href={adminUrl} rel="noreferrer" target="_blank"><ExternalLink className="h-4 w-4" /></a>
+            </Button>
+          ) : null}
+          <DraftAction onOpenPhotos={onOpenPhotos} onPublish={onPublish} onTakePhotos={onTakePhotos} step={step} />
+        </div>
       </div>
     </li>
   );

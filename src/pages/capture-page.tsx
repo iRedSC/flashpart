@@ -802,115 +802,118 @@ export function CapturePage() {
             </Button>
           )}
 
-          <div
-            className={cn(
-              "relative min-h-0 w-full flex-1 overflow-hidden rounded-2xl",
-              previewUrl
-                ? "bg-slate-950"
-                : cameraError
-                  ? "border-2 border-dashed border-slate-300 bg-white"
-                  : "bg-slate-950",
-            )}
-          >
-            <input
-              accept="image/*"
-              capture="environment"
-              className="sr-only"
-              key={`${currentProduct._id}-${originalCount}`}
-              onChange={handleFileChange}
-              ref={fileInputRef}
-              type="file"
-            />
-            {previewUrl ? (
-              <>
-                <img
-                  alt={`Captured photo for ${currentProduct.sku}`}
-                  className="absolute inset-0 h-full w-full object-cover"
-                  src={previewUrl}
-                />
-                <button
-                  className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur transition-colors active:bg-black/80"
-                  onClick={() => {
-                    setUploadError(null);
-                    setSelectedFile(null);
-                  }}
-                  type="button"
-                >
-                  <RefreshCcw className="h-3.5 w-3.5" />
-                  Retake
-                </button>
-              </>
-            ) : cameraError ? (
-              <button
-                className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-500 transition-transform active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={atMaxPhotos || isSaving || photosLoading}
-                onClick={() => fileInputRef.current?.click()}
-                type="button"
-              >
-                <Camera className="h-8 w-8" />
-                <span className="text-sm font-medium">
-                  {photosLoading
-                    ? "Loading photos…"
-                    : atMaxPhotos
-                      ? `Max ${maxProductPhotos} photos`
-                      : "Tap to take photo"}
-                </span>
-              </button>
-            ) : (
-              <>
-                <div
-                  ref={cameraPlaneRef}
-                  {...(canZoom
-                    ? { [ALLOW_CAMERA_PINCH_ATTR]: "" }
-                    : undefined)}
-                  className={cn("absolute inset-0", canZoom && "touch-none")}
-                >
-                  <video
-                    aria-label={
-                      canZoom
-                        ? "Camera preview. Pinch to zoom."
-                        : "Camera preview"
-                    }
-                    autoPlay
+          {/* Square frame, as large as fits: the saved photo is a center square crop. */}
+          <div className="flex min-h-0 flex-1 items-center justify-center [container-type:size]">
+            <div
+              className={cn(
+                "relative size-[min(100cqw,100cqh)] overflow-hidden rounded-2xl",
+                previewUrl
+                  ? "bg-slate-950"
+                  : cameraError
+                    ? "border-2 border-dashed border-slate-300 bg-white"
+                    : "bg-slate-950",
+              )}
+            >
+              <input
+                accept="image/*"
+                capture="environment"
+                className="sr-only"
+                key={`${currentProduct._id}-${originalCount}`}
+                onChange={handleFileChange}
+                ref={fileInputRef}
+                type="file"
+              />
+              {previewUrl ? (
+                <>
+                  <img
+                    alt={`Captured photo for ${currentProduct.sku}`}
                     className="absolute inset-0 h-full w-full object-cover"
-                    muted
-                    onCanPlay={() => setIsCameraReady(true)}
-                    playsInline
-                    ref={videoRef}
+                    src={previewUrl}
                   />
-                </div>
-                <div className="pointer-events-none absolute inset-0 border-[3px] border-white/70" />
-                {!isCameraReady || photosLoading ? (
-                  <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm font-medium text-white">
-                    {photosLoading ? "Loading photos…" : "Starting camera..."}
-                  </span>
-                ) : null}
-                {canZoom && isCameraReady && !photosLoading ? (
-                  <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-semibold tabular-nums text-white backdrop-blur">
-                    {zoom.toFixed(1)}x
-                  </span>
-                ) : null}
-                {photosLoading || originalCount > 0 ? (
-                  <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-semibold tabular-nums text-white backdrop-blur">
-                    {photosLoading
-                      ? (single ? "…" : `…/${maxProductPhotos}`)
-                      : single ? `${originalCount}` : `${originalCount}/${maxProductPhotos}`}
-                  </span>
-                ) : null}
+                  <button
+                    className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur transition-colors active:bg-black/80"
+                    onClick={() => {
+                      setUploadError(null);
+                      setSelectedFile(null);
+                    }}
+                    type="button"
+                  >
+                    <RefreshCcw className="h-3.5 w-3.5" />
+                    Retake
+                  </button>
+                </>
+              ) : cameraError ? (
                 <button
-                  aria-label="Open full device camera"
-                  className="absolute bottom-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur transition-colors active:bg-black/80 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-500 transition-transform active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={atMaxPhotos || isSaving || photosLoading}
-                  onClick={() => {
-                    triggerHaptic();
-                    fileInputRef.current?.click();
-                  }}
+                  onClick={() => fileInputRef.current?.click()}
                   type="button"
                 >
-                  <Maximize2 className="h-4 w-4" />
+                  <Camera className="h-8 w-8" />
+                  <span className="text-sm font-medium">
+                    {photosLoading
+                      ? "Loading photos…"
+                      : atMaxPhotos
+                        ? `Max ${maxProductPhotos} photos`
+                        : "Tap to take photo"}
+                  </span>
                 </button>
-              </>
-            )}
+              ) : (
+                <>
+                  <div
+                    ref={cameraPlaneRef}
+                    {...(canZoom
+                      ? { [ALLOW_CAMERA_PINCH_ATTR]: "" }
+                      : undefined)}
+                    className={cn("absolute inset-0", canZoom && "touch-none")}
+                  >
+                    <video
+                      aria-label={
+                        canZoom
+                          ? "Camera preview. Pinch to zoom."
+                          : "Camera preview"
+                      }
+                      autoPlay
+                      className="absolute inset-0 h-full w-full object-cover"
+                      muted
+                      onCanPlay={() => setIsCameraReady(true)}
+                      playsInline
+                      ref={videoRef}
+                    />
+                  </div>
+                  <div className="pointer-events-none absolute inset-0 border-[3px] border-white/70" />
+                  {!isCameraReady || photosLoading ? (
+                    <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm font-medium text-white">
+                      {photosLoading ? "Loading photos…" : "Starting camera..."}
+                    </span>
+                  ) : null}
+                  {canZoom && isCameraReady && !photosLoading ? (
+                    <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-semibold tabular-nums text-white backdrop-blur">
+                      {zoom.toFixed(1)}x
+                    </span>
+                  ) : null}
+                  {photosLoading || originalCount > 0 ? (
+                    <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-semibold tabular-nums text-white backdrop-blur">
+                      {photosLoading
+                        ? (single ? "…" : `…/${maxProductPhotos}`)
+                        : single ? `${originalCount}` : `${originalCount}/${maxProductPhotos}`}
+                    </span>
+                  ) : null}
+                  <button
+                    aria-label="Open full device camera"
+                    className="absolute bottom-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur transition-colors active:bg-black/80 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={atMaxPhotos || isSaving || photosLoading}
+                    onClick={() => {
+                      triggerHaptic();
+                      fileInputRef.current?.click();
+                    }}
+                    type="button"
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {uploadError ? (
