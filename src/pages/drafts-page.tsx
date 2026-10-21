@@ -54,17 +54,18 @@ export function DraftsPage() {
   // Published drafts stay visible for the visit they were published in, so the
   // result is seen before the row leaves the list.
   const [seenUnpublished] = React.useState(() => new Set<string>());
+  const shopDomain = shopifyConnection?.shopDomain;
 
   const drafts = React.useMemo(
     () =>
       products
-        .filter((product) => product.listingKind === "shopifyDraft" && product.archivedAt === undefined)
+        .filter((product) => product.listingKind === "shopifyDraft" && product.shopifyDraftShop === shopDomain && product.archivedAt === undefined)
         .filter((product) => {
           if (product.phase !== "published") seenUnpublished.add(product._id);
           return seenUnpublished.has(product._id);
         })
         .sort((left, right) => left.name.localeCompare(right.name)),
-    [products, seenUnpublished],
+    [products, seenUnpublished, shopDomain],
   );
   const draftIds = React.useMemo(() => persistedProductIds(drafts), [drafts]);
   const photosQuery = useQuery(

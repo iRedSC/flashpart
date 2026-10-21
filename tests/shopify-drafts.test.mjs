@@ -10,7 +10,7 @@ import { recordConvexCapture } from '../convex/captures.ts';
 import { enqueueCreateDrafts, jobPayload, markJobFailed, markJobRunning, markJobSucceeded, processQueuedJob } from '../convex/listingJobs.ts';
 
 const shop = { accessToken: 'test', shopDomain: 'test.myshopify.com' };
-const draft = { _id: 'draft', listingKind: 'shopifyDraft', shopifyDraftId: 'gid://shopify/Product/1', shopifyVariantId: 'gid://shopify/ProductVariant/1', sku: 'D-1', name: 'Pump', price: 20, phase: 'imported', createdAt: 1, updatedAt: 1 };
+const draft = { _id: 'draft', listingKind: 'shopifyDraft', shopifyDraftId: 'gid://shopify/Product/1', shopifyDraftShop: 'test.myshopify.com', shopifyVariantId: 'gid://shopify/ProductVariant/1', sku: 'D-1', name: 'Pump', price: 20, phase: 'imported', createdAt: 1, updatedAt: 1 };
 const remote = (id, patch = {}) => ({ shopifyProductId: `gid://shopify/Product/${id}`, name: `Product ${id}`, sku: `D-${id}`, price: 10, ...patch });
 const approvedPhotos = [
   { _id: 'original', productId: 'draft', kind: 'original', status: 'ready', storageId: 'blob', sortOrder: 0, createdAt: 1 },
@@ -35,7 +35,7 @@ test('Shopify draft lookup skips drafts with media and follows pagination', asyn
   assert.deepEqual(drafts[0], { shopifyProductId: 'gid://shopify/Product/1', shopifyVariantId: 'v1', name: ' Pump 1', sku: 'P-1', price: 12.5, vendor: undefined, productType: 'Pump' });
 });
 
-test('sync adds new drafts, refreshes changed ones, and drops only rows without local work', async () => {
+test('sync adds new drafts, refreshes changed ones, and drops only rows without local work in this shop', async () => {
   const ctx = await context({
     products: [
       { ...draft },
@@ -43,18 +43,20 @@ test('sync adds new drafts, refreshes changed ones, and drops only rows without 
       { ...draft, _id: 'photographed', shopifyDraftId: 'gid://shopify/Product/8' },
       { ...draft, _id: 'published', shopifyDraftId: 'gid://shopify/Product/7', phase: 'published' },
       { _id: 'part', sku: 'PART', name: 'Part', price: 1, phase: 'imported' },
+      { ...draft, _id: 'other-shop', shopifyDraftShop: 'other.myshopify.com', shopifyDraftId: 'gid://shopify/Product/6' },
     ],
     productPhotos: [{ _id: 'p', productId: 'photographed', kind: 'original', status: 'ready', sortOrder: 0 }],
   });
-  const result = await applySync._handler(ctx, { drafts: [remote(1, { name: 'Pump v2', price: 25 }), remote(2)] });
+  const result = await applySync._handler(ctx, { shopDomain: 'test.myshopify.com', drafts: [remote(1, { name: 'Pump v2', price: 25 }), remote(2)] });
   assert.deepEqual(result, { added: 1, removed: 1 });
-  assert.deepEqual(ctx.tables.products.map(p => p._id).sort(), ['draft', 'part', 'photographed', 'products-1', 'published']);
+  assert.deepEqual(ctx.tables.products.map(p => p._id).sort(), ['draft', 'other-shop', 'part', 'photographed', 'products-1', 'published']);
   const refreshed = await ctx.db.get('draft');
   assert.equal(refreshed.name, 'Pump v2');
   assert.equal(refreshed.price, 25);
   const added = await ctx.db.get('products-1');
   assert.equal(added.listingKind, 'shopifyDraft');
   assert.equal(added.shopifyDraftId, 'gid://shopify/Product/2');
+  assert.equal(added.shopifyDraftShop, 'test.myshopify.com');
   assert.equal(added.shopifyProductId, undefined, 'unpublished drafts must not look linked');
 });
 
@@ -70,9 +72,9 @@ test('drafts are photographed one at a time without a group or photo cap, and st
   assert.equal((await ctx.db.get('draft')).name, 'Pump');
 });
 
-test('publishing a draft attaches approved photos, then activates it without rewriting Shopify data', async t => {
+async function publishDraft(t, product) {
   const connection = { _id: 'connection', userId: 'user', isActive: true, createdAt: 1, scopes: [], accessToken: 'test', shopDomain: shop.shopDomain };
-  const ctx = await context({ products: [{ ...draft }], productPhotos: approvedPhotos, shopifyConnections: [connection] });
+  const ctx = await context({ products: [product], productPhotos: approvedPhotos, shopifyConnections: [connection] });
   await enqueueCreateDrafts._handler(ctx, { sessionToken, productIds: ['draft'] });
   const jobId = ctx.tables.listingJobs[0]._id;
   const requests = [];
@@ -89,15 +91,28 @@ test('publishing a draft attaches approved photos, then activates it without rew
   const handlers = { jobPayload, markJobRunning, markJobSucceeded, markJobFailed };
   const run = async (ref, args) => handlers[getFunctionName(ref).split(':')[1]]._handler(ctx, args);
   await processQueuedJob._handler({ runQuery: run, runMutation: run, runAction: async (_ref, { photoId }) => ({ shopifyFileId: `file-${photoId}` }) }, { jobId });
+  return { ctx, requests };
+}
+
+test('publishing a draft attaches photos and channels while still a draft, activates last, and never rewrites Shopify data', async t => {
+  const { ctx, requests } = await publishDraft(t, { ...draft });
 
   assert.equal(ctx.tables.listingJobs[0].error, undefined);
   const operations = requests.map(r => r.query.match(/(?:mutation|query) (\w+)/)[1]);
-  assert.deepEqual(operations.slice(0, 2), ['fileUpdate', 'Activate']);
-  assert.deepEqual(requests[1].variables.product, { id: draft.shopifyDraftId, status: 'ACTIVE' });
+  assert.equal(operations.at(-1), 'Activate', 'activation must be the final Shopify call');
+  assert.equal(operations[0], 'fileUpdate');
+  assert.deepEqual(requests.at(-1).variables.product, { id: draft.shopifyDraftId, status: 'ACTIVE' });
   assert.ok(!operations.some(name => /productCreate|productVariants/.test(name)));
   const published = await ctx.db.get('draft');
   assert.equal(published.phase, 'published');
   assert.equal(published.shopifyStatus, 'published');
   assert.equal(published.shopifyProductId, draft.shopifyDraftId);
   assert.equal(published.pendingOperation, undefined);
+});
+
+test('a draft from another Shopify store is never published through the current one', async t => {
+  const { ctx, requests } = await publishDraft(t, { ...draft, shopifyDraftShop: 'other.myshopify.com' });
+  assert.equal(requests.length, 0);
+  assert.match(ctx.tables.listingJobs[0].error, /different Shopify store/);
+  assert.equal((await ctx.db.get('draft')).phase, 'imported');
 });

@@ -697,18 +697,22 @@ export const processQueuedJob = internalAction({
         if (!useProductPhotos || !shopifyProductId || !connectionId) {
           throw new Error("Take photos before publishing this draft.");
         }
+        if (payload.product.shopifyDraftShop !== payload.connection.shopDomain) {
+          throw new Error("This draft belongs to a different Shopify store. Reconnect that store to publish it.");
+        }
         publishFileIds = await promotePhotos(ctx, approvedAiPhotoIds, connectionId);
-        // Attach before activating so the listing never goes live without photos.
+        // Every step that can fail runs while the product is still a draft.
+        // Activation goes last so a failure never leaves it live but unrecorded.
         for (const fileId of publishFileIds) {
           await addFileReferenceToProduct(payload.connection, { fileId, productId: shopifyProductId });
         }
-        const activated = await activateShopifyProduct(payload.connection, shopifyProductId);
         if (payload.settings.shopifySalesChannels.length > 0) {
           await publishProductToSalesChannels(payload.connection, {
             channelIds: payload.settings.shopifySalesChannels,
             productId: shopifyProductId,
           });
         }
+        const activated = await activateShopifyProduct(payload.connection, shopifyProductId);
         await ctx.runMutation(listingJobModel.markJobSucceeded, {
           jobId: args.jobId,
           publishFileIds,

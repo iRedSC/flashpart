@@ -168,6 +168,8 @@ export default defineSchema({
     listingKind: v.optional(listingKind),
     /** Shopify product this row was imported from (shopifyDraft listings only). */
     shopifyDraftId: v.optional(v.string()),
+    /** Shop domain shopifyDraftId belongs to; drafts never cross stores. */
+    shopifyDraftShop: v.optional(v.string()),
     condition: v.optional(condition),
     photosComplete: v.optional(v.boolean()),
     sku: v.string(),

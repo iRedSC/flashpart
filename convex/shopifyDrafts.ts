@@ -28,23 +28,24 @@ export const sync = action({
     const connection = await ctx.runQuery(currentActiveConnection, args);
     if (!connection) throw new ConvexError("Connect Shopify to load drafts.");
     const drafts = await listUnphotographedDrafts(connection);
-    return await ctx.runMutation(applySyncRef, { drafts });
+    return await ctx.runMutation(applySyncRef, { drafts, shopDomain: connection.shopDomain });
   },
 });
 
 /**
- * Mirror the remote list. Rows that left it (photographed, published, or
+ * Mirror the remote list for one shop; other shops' drafts are untouched. Rows that left it (photographed, published, or
  * deleted in Shopify) are dropped unless they hold local work: photos, a
  * publish in flight, or a publish record.
  */
 export const applySync = internalMutation({
-  args: { drafts: v.array(shopifyDraft) },
+  args: { drafts: v.array(shopifyDraft), shopDomain: v.string() },
   handler: async (ctx, args): Promise<SyncResult> => {
     const now = Date.now();
     const local = await ctx.db
       .query("products")
       .withIndex("by_listing_kind", (q) => q.eq("listingKind", "shopifyDraft"))
-      .collect();
+      .collect()
+      .then((rows) => rows.filter((row) => row.shopifyDraftShop === args.shopDomain));
     const localByDraftId = new Map(local.map((row) => [row.shopifyDraftId, row]));
     const remoteIds = new Set(args.drafts.map((draft) => draft.shopifyProductId));
     let added = 0;
@@ -58,6 +59,7 @@ export const applySync = internalMutation({
           ...fields,
           listingKind: "shopifyDraft",
           shopifyDraftId: draft.shopifyProductId,
+          shopifyDraftShop: args.shopDomain,
           phase: "imported",
           createdAt: now,
           updatedAt: now,
