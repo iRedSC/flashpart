@@ -1,4 +1,4 @@
-import { condition } from "./listingTypes";
+import { condition, listingKind } from "./listingTypes";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { aiImageEditStrength, aiImageModel } from "./photoAiConstants";
@@ -165,7 +165,9 @@ export default defineSchema({
     .index("by_shop_domain", ["shopDomain"]),
 
   products: defineTable({
-    listingKind: v.optional(v.literal("refurbished")),
+    listingKind: v.optional(listingKind),
+    /** Shopify product this row was imported from (shopifyDraft listings only). */
+    shopifyDraftId: v.optional(v.string()),
     condition: v.optional(condition),
     photosComplete: v.optional(v.boolean()),
     sku: v.string(),
@@ -208,7 +210,9 @@ export default defineSchema({
   })
     .index("by_sku", ["sku"])
     .index("by_group", ["groupId"])
-    .index("by_phase", ["phase"]),
+    .index("by_phase", ["phase"])
+    .index("by_shopify_draft", ["shopifyDraftId"])
+    .index("by_listing_kind", ["listingKind"]),
 
   groups: defineTable({
     name: v.string(),

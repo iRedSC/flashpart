@@ -13,11 +13,12 @@ import {
   type LastError,
 } from "../lib/product-state";
 import { DropdownMenuItem } from "./ui/dropdown-menu";
+import { listingPolicy, meetsKindPublishRequirements, type Condition, type StoredListingKind } from "../../convex/listingTypes";
 
 type Product = {
   _id: string;
-  listingKind?: "refurbished";
-  condition?: string;
+  listingKind?: StoredListingKind;
+  condition?: Condition;
   photosComplete?: boolean;
   aiImageStatus?: "pending" | "generating" | "ready" | "failed";
   aiShopifyFileId?: string | null;
@@ -59,7 +60,7 @@ export function ProductRowActionItems({
   product: Product;
 }) {
   const navigate = useNavigate();
-  const refurbished = product.listingKind === "refurbished";
+  const { singleProductCapture } = listingPolicy(product);
   const archived = isArchived(product);
   const archiveAllowed = canArchive(product);
   const photosLoading = photos === undefined;
@@ -73,7 +74,7 @@ export function ProductRowActionItems({
     shopifyProductId: product.shopifyProductId ?? undefined,
   };
   const canPublish =
-    !photosLoading && (!refurbished || Boolean(product.condition && product.photosComplete)) && canPublishProduct(productFields, photos);
+    !photosLoading && meetsKindPublishRequirements(product) && canPublishProduct(productFields, photos);
   const canRepublish =
     !photosLoading && canRepublishProduct(productFields, photos);
   const hasPhotoRows = (photos?.length ?? 0) > 0;
@@ -85,8 +86,8 @@ export function ProductRowActionItems({
 
   return (
     <>
-      {refurbished && !product.shopifyProductId && !archived && <DropdownMenuItem onSelect={() => navigate(`/capture/refurbished/${product._id}`)}><Camera />Take photos</DropdownMenuItem>}
-      {!refurbished && <DropdownMenuItem onSelect={onAddToGroup}>
+      {singleProductCapture && !product.shopifyProductId && !archived && <DropdownMenuItem onSelect={() => navigate(`/capture/product/${product._id}`)}><Camera />Take photos</DropdownMenuItem>}
+      {!singleProductCapture && <DropdownMenuItem onSelect={onAddToGroup}>
         <FolderPlus />
         Add to group
       </DropdownMenuItem>}

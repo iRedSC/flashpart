@@ -1,3 +1,4 @@
+import { listingKindOf } from "./listingTypes";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
@@ -133,7 +134,7 @@ export const assignFirstUngrouped = mutation({
     const products = await ctx.db.query("products").collect();
     const candidates = products.filter(
       (product) =>
-        product.listingKind !== "refurbished" && product.groupId === undefined && product.archivedAt === undefined,
+        listingKindOf(product) === "part" && product.groupId === undefined && product.archivedAt === undefined,
     );
     const now = Date.now();
 

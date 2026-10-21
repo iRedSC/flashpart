@@ -1,3 +1,4 @@
+import { listingPolicy } from "./listingTypes";
 import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import { mutation } from "./_generated/server";
@@ -104,7 +105,7 @@ export const recordConvexCapture = mutation({
       throw new Error("Product not found");
     }
 
-    if (!args.groupId && product.listingKind !== "refurbished") throw new Error("Choose a capture group.");
+    if (!args.groupId && !listingPolicy(product).singleProductCapture) throw new Error("Choose a capture group.");
 
     if (
       args.completeWithoutPhoto &&

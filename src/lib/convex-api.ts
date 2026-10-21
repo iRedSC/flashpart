@@ -226,6 +226,9 @@ export const convexApi = {
       typeof api.settings.setMaxProductPhotos
     >("settings.js:setMaxProductPhotos"),
   },
+  shopifyDrafts: {
+    sync: deployedFunction<typeof api.shopifyDrafts.sync>("shopifyDrafts.js:sync"),
+  },
   shopify: {
     productTypes: deployedFunction<typeof api.shopify.productTypes>("shopify.js:productTypes"),
     productVendors: deployedFunction<typeof api.shopify.productVendors>(

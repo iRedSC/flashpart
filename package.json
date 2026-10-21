@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test:refurbished": "node --import ./tests/register-typescript.mjs --test tests/refurbished.test.mjs"
+    "test": "node --import ./tests/register-typescript.mjs --test tests/*.test.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",

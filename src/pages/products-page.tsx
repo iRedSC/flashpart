@@ -3,7 +3,7 @@ import {
   ShopifyProductTypeSelect,
   ShopifyVendorSelect,
 } from "../components/shopify-product-type-select";
-import type { Condition } from "../../convex/listingTypes";
+import { listingKindOf, meetsKindPublishRequirements, type Condition } from "../../convex/listingTypes";
 import * as React from "react";
 import { useQuery } from "convex/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -712,7 +712,7 @@ export function ProductsPage({ refurbished = false }: { refurbished?: boolean; }
     unarchiveProducts,
     updateProduct,
   } = useAppData();
-  const products = React.useMemo(() => allProducts.filter(product => (product.listingKind === "refurbished") === refurbished), [allProducts, refurbished]);
+  const products = React.useMemo(() => allProducts.filter(product => listingKindOf(product) === (refurbished ? "refurbished" : "part")), [allProducts, refurbished]);
   const shopDomain = shopifyConnection?.shopDomain ?? null;
   const navigate = useNavigate();
   const parentRef = React.useRef<HTMLDivElement>(null);
@@ -1313,7 +1313,7 @@ export function ProductsPage({ refurbished = false }: { refurbished?: boolean; }
     .filter(
       (product) =>
         !isArchived(product) &&
-        (product.listingKind !== "refurbished" || Boolean(product.condition && product.photosComplete)) &&
+        meetsKindPublishRequirements(product) &&
         canPublishProduct(
           {
             aiImageStatus: product.aiImageStatus,
@@ -1685,7 +1685,7 @@ export function ProductsPage({ refurbished = false }: { refurbished?: boolean; }
   }
 
   async function handleCaptureSelected() {
-    if (refurbished && selectedProductIds.length === 1) { navigate(`/capture/refurbished/${selectedProductIds[0]}`); return; }
+    if (refurbished && selectedProductIds.length === 1) { navigate(`/capture/product/${selectedProductIds[0]}`); return; }
     if (selectedProductIds.length === 0) {
       return;
     }

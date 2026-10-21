@@ -970,3 +970,47 @@ export async function resolveConditionReference(connection: ShopifyConnection, h
   if (!data.metaobjectByHandle) throw new ConvexError(`Shopify condition "${handle}" was not found. Check the condition metaobject entries.`);
   return data.metaobjectByHandle.id;
 }
+
+export type ShopifyDraft = {
+  shopifyProductId: string;
+  shopifyVariantId?: string;
+  name: string;
+  sku: string;
+  price: number;
+  vendor?: string;
+  productType?: string;
+};
+
+/** Draft products in Shopify that have no media yet. */
+export async function listUnphotographedDrafts(connection: ShopifyConnection) {
+  type Page = { products: { nodes: { id: string; title: string; vendor: string; productType: string; mediaCount: { count: number } | null; variants: { nodes: { id: string; sku: string | null; price: string }[] } }[]; pageInfo: { endCursor: string | null; hasNextPage: boolean } } };
+  const drafts: ShopifyDraft[] = [];
+  let after: string | null = null;
+  do {
+    const data: Page = await shopifyGraphql<Page>(connection,
+      `query Drafts($after: String) { products(first: 100, after: $after, query: "status:draft") { nodes { id title vendor productType mediaCount { count } variants(first: 1) { nodes { id sku price } } } pageInfo { endCursor hasNextPage } } }`, { after });
+    for (const product of data.products.nodes) {
+      if ((product.mediaCount?.count ?? 0) > 0) continue;
+      const variant = product.variants.nodes[0];
+      drafts.push({
+        shopifyProductId: product.id,
+        shopifyVariantId: variant?.id,
+        name: product.title,
+        sku: variant?.sku?.trim() ?? "",
+        price: Number(variant?.price ?? 0) || 0,
+        vendor: product.vendor.trim() || undefined,
+        productType: product.productType.trim() || undefined,
+      });
+    }
+    after = data.products.pageInfo.hasNextPage ? data.products.pageInfo.endCursor : null;
+  } while (after);
+  return drafts;
+}
+
+export async function activateShopifyProduct(connection: ShopifyConnection, productId: string) {
+  const data = await shopifyGraphql<{ productUpdate: { product: { id: string; handle: string; status: string } | null } }>(connection,
+    `mutation Activate($product: ProductUpdateInput!) { productUpdate(product: $product) { product { id handle status } userErrors { field message } } }`,
+    { product: { id: productId, status: "ACTIVE" } });
+  if (!data.productUpdate.product) throw new ConvexError("Shopify did not publish the draft.");
+  return data.productUpdate.product;
+}
