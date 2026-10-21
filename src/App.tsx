@@ -15,6 +15,7 @@ import { convexApi } from "./lib/convex-api";
 import { usePreventPinchZoom } from "./lib/use-prevent-pinch-zoom";
 import { useIsMobile } from "./lib/use-is-mobile";
 import { CapturePage } from "./pages/capture-page";
+import { DraftsPage } from "./pages/drafts-page";
 import { GroupsPage } from "./pages/groups-page";
 import { PhotosPage } from "./pages/photos-page";
 import { ProductsPage } from "./pages/products-page";
@@ -90,7 +91,8 @@ function AuthenticatedApp() {
               <Route index element={<RootRedirect />} />
               <Route path="/products" element={<ProductsPage key="parts" />} />
               <Route path="/refurbished" element={<ProductsPage key="refurbished" refurbished />} />
-              <Route path="/capture/refurbished/:productId" element={<CapturePage />} />
+              <Route path="/drafts" element={<DraftsPage />} />
+              <Route path="/capture/product/:productId" element={<CapturePage />} />
               <Route path="/groups" element={<GroupsPage />} />
               <Route path="/photos" element={<PhotosPage />} />
               <Route path="/settings" element={<SettingsPage />} />

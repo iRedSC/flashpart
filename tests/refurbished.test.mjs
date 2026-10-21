@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hashValue } from '../convex/authUtils.ts';
 import { getWorkflowSettings, setAiImageDefaultPrompt, setShopifyPublishTarget, setShopifyInventoryLocationId, setShopifyProductTemplateSuffix } from '../convex/settings.ts';
 import { create, update, finishPhotos, importProducts } from '../convex/products.ts';
 import { reserveOriginalSlot } from '../convex/productPhotos.ts';
@@ -11,32 +10,8 @@ import { REFURBISHED_IMAGE_PROMPT } from '../convex/listingTypes.ts';
 import { createShopifyProduct, createShopifyVariant, updateShopifyVariant, resolveConditionReference, getShopifyProductTypes, getShopifyProductTemplates, getShopifyProductVendors } from '../convex/shopifyClient.ts';
 import { persistedProductIds } from '../src/lib/product-id.ts';
 
-const sessionToken = 'test-session';
-async function context(seed = {}) {
-  let serial = 0;
-  const tables = { authSessions: [{ _id: 'session', tokenHash: await hashValue(sessionToken), userId: 'user', expiresAt: Date.now() + 60000 }], ...seed };
-  const scheduled = [];
-  const db = {
-    query(table) {
-      let rows = [...(tables[table] ?? [])];
-      const query = {
-        withIndex(_name, predicate) {
-          const filter = { eq(key, value) { rows = rows.filter(row => row[key] === value); return filter; } };
-          predicate?.(filter); return query;
-        },
-        order() { return query; },
-        collect: async () => rows,
-        first: async () => rows[0] ?? null,
-        unique: async () => { assert.ok(rows.length <= 1); return rows[0] ?? null; },
-      };
-      return query;
-    },
-    get: async id => Object.values(tables).flat().find(row => row._id === id) ?? null,
-    insert: async (table, value) => { const _id = `${table}-${++serial}`; (tables[table] ??= []).push({ ...value, _id }); return _id; },
-    patch: async (id, patch) => { const row = await db.get(id); assert.ok(row, id); Object.assign(row, patch); },
-  };
-  return { db, tables, scheduled, scheduler: { runAfter: async (...args) => scheduled.push(args) }, storage: { getUrl: async id => `https://test.invalid/${id}` } };
-}
+import { context, sessionToken } from './convex-context.mjs';
+
 const tool = { _id: 'tool', sku: 'REF-1', name: 'Drill', price: 50, phase: 'captured', listingKind: 'refurbished', condition: 'good', photosComplete: true };
 const connection = { _id: 'connection', userId: 'user', isActive: true, createdAt: 1, scopes: ['read_metaobjects', 'read_locations', 'write_inventory'] };
 const location = 'gid://shopify/Location/123';

@@ -1,7 +1,8 @@
-import { productSettingsScope } from "./listingTypes";
+import { listingPolicy, productSettingsScope } from "./listingTypes";
 import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import type { Id } from "./_generated/dataModel";
+import type { ActionCtx } from "./_generated/server";
 import {
   internalAction,
   internalMutation,
@@ -11,6 +12,7 @@ import {
 } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
 import {
+  activateShopifyProduct,
   resolveConditionReference,
   getShopifyLocations,
   addFileReferenceToProduct,
@@ -568,6 +570,27 @@ function publishGateErrorMessage(
   }
 }
 
+async function promotePhotos(
+  ctx: ActionCtx,
+  photoIds: Id<"productPhotos">[],
+  connectionId: Id<"shopifyConnections">,
+) {
+  const fileIds: string[] = [];
+  for (const photoId of photoIds) {
+    const promoted = (await ctx.runAction(promotePhotoInternal, {
+      photoId,
+      connectionId,
+    })) as { shopifyFileId: string };
+
+    if (!promoted?.shopifyFileId) {
+      throw new Error("Failed to promote an AI photo to Shopify.");
+    }
+
+    fileIds.push(promoted.shopifyFileId);
+  }
+  return fileIds;
+}
+
 export const processQueuedJob = internalAction({
   args: {
     jobId: v.id("listingJobs"),
@@ -665,6 +688,43 @@ export const processQueuedJob = internalAction({
         }
       }
 
+      const connectionId = payload.job.shopifyConnectionId as
+        | Id<"shopifyConnections">
+        | undefined;
+
+      if (listingPolicy(payload.product).fromShopify) {
+        const shopifyProductId = payload.product.shopifyDraftId;
+        if (!useProductPhotos || !shopifyProductId || !connectionId) {
+          throw new Error("Take photos before publishing this draft.");
+        }
+        if (payload.product.shopifyDraftShop !== payload.connection.shopDomain) {
+          throw new Error("This draft belongs to a different Shopify store. Reconnect that store to publish it.");
+        }
+        publishFileIds = await promotePhotos(ctx, approvedAiPhotoIds, connectionId);
+        // Every step that can fail runs while the product is still a draft.
+        // Activation goes last so a failure never leaves it live but unrecorded.
+        for (const fileId of publishFileIds) {
+          await addFileReferenceToProduct(payload.connection, { fileId, productId: shopifyProductId });
+        }
+        if (payload.settings.shopifySalesChannels.length > 0) {
+          await publishProductToSalesChannels(payload.connection, {
+            channelIds: payload.settings.shopifySalesChannels,
+            productId: shopifyProductId,
+          });
+        }
+        const activated = await activateShopifyProduct(payload.connection, shopifyProductId);
+        await ctx.runMutation(listingJobModel.markJobSucceeded, {
+          jobId: args.jobId,
+          publishFileIds,
+          result: { handle: activated.handle, mode: "activated", publishFileIds },
+          shopifyProductHandle: activated.handle,
+          shopifyProductId,
+          shopifyStatus: "published",
+          shopifyVariantId: payload.product.shopifyVariantId,
+        });
+        return;
+      }
+
       const handle = skuToShopifyHandle(payload.product.sku);
 
       if (!handle) {
@@ -700,27 +760,11 @@ export const processQueuedJob = internalAction({
 
       // Promote only after duplicate-SKU / handle guards pass.
       if (useProductPhotos) {
-        const connectionId = payload.job.shopifyConnectionId as
-          | Id<"shopifyConnections">
-          | undefined;
-
         if (!connectionId) {
           throw new Error("Listing job is missing Shopify connection data.");
         }
 
-        publishFileIds = [];
-        for (const photoId of approvedAiPhotoIds) {
-          const promoted = (await ctx.runAction(promotePhotoInternal, {
-            photoId,
-            connectionId,
-          })) as { shopifyFileId: string };
-
-          if (!promoted?.shopifyFileId) {
-            throw new Error("Failed to promote an AI photo to Shopify.");
-          }
-
-          publishFileIds.push(promoted.shopifyFileId);
-        }
+        publishFileIds = await promotePhotos(ctx, approvedAiPhotoIds, connectionId);
       }
 
       const publishTarget = payload.settings.shopifyPublishTarget;

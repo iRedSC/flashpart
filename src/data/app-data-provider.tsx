@@ -1,5 +1,5 @@
 import { useLocation } from "react-router-dom";
-import type { Condition, SettingsScope } from "../../convex/listingTypes";
+import { listingKindOf, listingPolicy, type Condition, type SettingsScope } from "../../convex/listingTypes";
 import * as React from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
@@ -1339,7 +1339,7 @@ export function AppDataProvider({
         const candidateIds = optimisticData.products
           .filter(
             (product) =>
-              product.listingKind !== "refurbished" && product.groupId === undefined && product.archivedAt === undefined,
+              listingKindOf(product) === "part" && product.groupId === undefined && product.archivedAt === undefined,
           )
           .map((product) => product._id);
 
@@ -1541,7 +1541,7 @@ export function AppDataProvider({
           (entry) => entry._id === args.productId,
         );
 
-        if (!product?.groupId && product?.listingKind !== "refurbished") {
+        if (!product || (!product.groupId && !listingPolicy(product).singleProductCapture)) {
           throw new Error(
             "This product is not in a group. Assign it to a group before adding photos.",
           );
@@ -1586,7 +1586,7 @@ export function AppDataProvider({
           (entry) => entry._id === args.productId,
         );
 
-        if (!product?.groupId && product?.listingKind !== "refurbished") {
+        if (!product || (!product.groupId && !listingPolicy(product).singleProductCapture)) {
           throw new Error(
             "This product is not in a group. Assign it to a group before replacing photos.",
           );

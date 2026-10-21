@@ -1,4 +1,4 @@
-import { Wrench, Boxes, Images, ListChecks, Settings } from "lucide-react";
+import { Wrench, Boxes, FilePenLine, Images, ListChecks, Settings } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { Button } from "../ui/button";
 import { LogoMark } from "../logo-mark";
@@ -9,6 +9,7 @@ import { MutationErrorBanner } from "./mutation-error-banner";
 const navigation = [
   { to: "/products", label: "Parts", icon: Boxes },
   { to: "/refurbished", label: "Refurbished", icon: Wrench },
+  { to: "/drafts", label: "Drafts", icon: FilePenLine },
   { to: "/groups", label: "Groups", icon: ListChecks },
   { to: "/photos", label: "Photos", icon: Images },
   { to: "/settings", label: "Settings", icon: Settings },

@@ -1,4 +1,4 @@
-import { condition, type Condition } from "./listingTypes";
+import { condition, listingKindOf, listingPolicy, type Condition } from "./listingTypes";
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
@@ -98,6 +98,10 @@ export const update = mutation({
 
     if (!product) {
       throw new ConvexError("Product not found.");
+    }
+
+    if (listingPolicy(product).fromShopify) {
+      throw new ConvexError("Edit Shopify drafts in Shopify.");
     }
 
     const patch: {
@@ -275,7 +279,7 @@ export const importProducts = mutation({
         .first();
 
       if (existing) {
-        if (args.existingEntryBehavior === "ignore" || existing.listingKind === "refurbished") {
+        if (args.existingEntryBehavior === "ignore" || listingKindOf(existing) !== "part") {
           ignored += 1;
           continue;
         }
@@ -510,7 +514,7 @@ export const finishPhotos = mutation({
   handler: async (ctx, args) => {
     await requireSessionUser(ctx, args.sessionToken);
     const product = await ctx.db.get(args.productId);
-    if (product?.listingKind !== "refurbished") throw new ConvexError("Refurbished listing not found.");
+    if (!product || !listingPolicy(product).singleProductCapture) throw new ConvexError("Listing not found.");
     const photos = await ctx.db.query("productPhotos").withIndex("by_product_kind", q => q.eq("productId", args.productId).eq("kind", "original")).collect();
     if (!photos.length || photos.some(p => p.status === "uploading" || p.status === "failed")) throw new ConvexError("Save all photos before finishing.");
     await ctx.db.patch(product._id, { photosComplete: true, updatedAt: Date.now() });

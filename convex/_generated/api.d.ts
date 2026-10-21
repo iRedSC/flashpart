@@ -29,6 +29,7 @@ import type * as products from "../products.js";
 import type * as settings from "../settings.js";
 import type * as shopify from "../shopify.js";
 import type * as shopifyClient from "../shopifyClient.js";
+import type * as shopifyDrafts from "../shopifyDrafts.js";
 import type * as shopifyModel from "../shopifyModel.js";
 import type * as shopifyPublishSettings from "../shopifyPublishSettings.js";
 import type * as tags from "../tags.js";
@@ -62,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   settings: typeof settings;
   shopify: typeof shopify;
   shopifyClient: typeof shopifyClient;
+  shopifyDrafts: typeof shopifyDrafts;
   shopifyModel: typeof shopifyModel;
   shopifyPublishSettings: typeof shopifyPublishSettings;
   tags: typeof tags;

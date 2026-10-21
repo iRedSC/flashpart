@@ -9,6 +9,8 @@ import {
   query,
 } from "./_generated/server";
 import { requireSessionUser } from "./authUtils";
+import { listingPolicy } from "./listingTypes";
+import { skuToShopifyHandle } from "./shopifyClient";
 import { maybeUnarchiveGroupForActiveProduct } from "./groups";
 import type { AiImageModelId } from "./photoAiConstants";
 import { aiImageModel } from "./photoAiConstants";
@@ -25,7 +27,6 @@ import {
   resolveMaxProductPhotos,
 } from "./settings";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const processProductPhotoRef = makeFunctionReference(
   "photoAiProcess.js:processProductPhoto",
@@ -1177,7 +1178,9 @@ async function insertReservedOriginalPair(
   // overshoot. Abandoned empty slots are GC'd after ABANDONED_UPLOAD_TTL_MS.
   const originals = await getOriginalPhotos(ctx, args.productId);
 
-  if (product.listingKind !== "refurbished" && originals.length >= maxPhotos) {
+  const { singleProductCapture } = listingPolicy(product);
+
+  if (!singleProductCapture && originals.length >= maxPhotos) {
     throw new ConvexError(
       `This product already has the maximum of ${maxPhotos} photos.`,
     );
@@ -1191,7 +1194,7 @@ async function insertReservedOriginalPair(
   const now = Date.now();
   const isFirstMultiPhotoRows = originals.length === 0;
 
-  if (product.listingKind === "refurbished") await ctx.db.patch(product._id, { photosComplete: false });
+  if (singleProductCapture) await ctx.db.patch(product._id, { photosComplete: false });
   const ownership = productPhotoOwnership(args.productId);
 
   const originalPhotoId = await ctx.db.insert("productPhotos", {
@@ -1547,7 +1550,8 @@ export const getPhotoForPromote = internalQuery({
 
     return {
       photo,
-      sku: product?.sku ?? galleryHint,
+      // Shopify drafts may have no SKU; name the file after the title instead.
+      sku: product ? product.sku || skuToShopifyHandle(product.name) || "product" : galleryHint,
     };
   },
 });

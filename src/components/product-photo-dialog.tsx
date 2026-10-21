@@ -1,4 +1,4 @@
-import { REFURBISHED_IMAGE_PROMPT } from "../../convex/listingTypes";
+import { listingKindOf, listingPolicy, REFURBISHED_IMAGE_PROMPT } from "../../convex/listingTypes";
 import { useNavigate } from "react-router-dom";
 import * as React from "react";
 import { useConvex, useQuery } from "convex/react";
@@ -226,8 +226,9 @@ export function ProductPhotoDialog({
   const products = React.useMemo(() => allProducts.filter(entry => entry.listingKind === product?.listingKind), [allProducts, product?.listingKind]);
   const convex = useConvex();
   const defaultPrompt =
-    settings?.aiImageDefaultPrompt?.trim() || (product?.listingKind === "refurbished" ? REFURBISHED_IMAGE_PROMPT : DEFAULT_AI_IMAGE_PROMPT);
-  const maxProductPhotos = product?.listingKind === "refurbished" ? Infinity : settings?.maxProductPhotos ?? 5;
+    settings?.aiImageDefaultPrompt?.trim() || (listingKindOf(product) === "refurbished" ? REFURBISHED_IMAGE_PROMPT : DEFAULT_AI_IMAGE_PROMPT);
+  const singleProductCapture = listingPolicy(product).singleProductCapture;
+  const maxProductPhotos = singleProductCapture ? Infinity : settings?.maxProductPhotos ?? 5;
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const initializedForProductRef = React.useRef<string | null>(null);
   /** After add, focus the new pair once listByProduct includes this original. */
@@ -273,7 +274,7 @@ export function ProductPhotoDialog({
     [photos, product],
   );
   const showCaptureTile = Boolean(
-    product?.listingKind === "refurbished" && !product.shopifyProductId,
+    singleProductCapture && product && !product.shopifyProductId,
   );
   const carouselPairCount = pairs.length + (showCaptureTile ? 1 : 0);
 
@@ -445,7 +446,7 @@ export function ProductPhotoDialog({
       !aiFailed,
   );
   const canTakePhoto = Boolean(
-    product?.groupId || product?.listingKind === "refurbished",
+    product?.groupId || singleProductCapture,
   );
   const isBusy =
     isSaving || isRegenerating || isWhitening || isApproving || isDeleting;
@@ -573,7 +574,7 @@ export function ProductPhotoDialog({
   }
 
   function handleTakePhoto(mode: CaptureMode = "add") {
-    if (product?.listingKind === "refurbished" && mode === "add") { navigate(`/capture/refurbished/${product._id}`); return; }
+    if (product && singleProductCapture && mode === "add") { navigate(`/capture/product/${product._id}`); return; }
 
     if (mode === "add" && !canAddPhoto) {
       return;
@@ -588,7 +589,7 @@ export function ProductPhotoDialog({
   }
 
   async function handleSave() {
-    if (!product || (!product.groupId && product.listingKind !== "refurbished") || !captureFile || isBusy) {
+    if (!product || (!product.groupId && !singleProductCapture) || !captureFile || isBusy) {
       return;
     }
 
