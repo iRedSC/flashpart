@@ -3,6 +3,7 @@ import { listingKindOf, listingPolicy, type Condition, type SettingsScope } from
 import * as React from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
+import { ConvexError } from "convex/values";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { AuthSession } from "../lib/auth-session";
 import { convexApi } from "../lib/convex-api";
@@ -232,6 +233,8 @@ type AppDataContextValue = {
 const AppDataContext = React.createContext<AppDataContextValue | null>(null);
 
 function messageFromError(error: unknown) {
+  // ConvexError carries the user-facing text in data; its message is wrapped in request metadata.
+  if (error instanceof ConvexError && typeof error.data === "string") return error.data;
   return error instanceof Error ? error.message : "The change could not be saved.";
 }
 
