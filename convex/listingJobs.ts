@@ -1,5 +1,5 @@
 import { listingPolicy, productSettingsScope } from "./listingTypes";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import type { Id } from "./_generated/dataModel";
 import type { ActionCtx } from "./_generated/server";
@@ -89,7 +89,7 @@ export const enqueueCreateDrafts = mutation({
       .at(0);
 
     if (!connection) {
-      throw new Error("Connect Shopify before publishing products.");
+      throw new ConvexError("Connect Shopify before publishing products.");
     }
 
     const now = Date.now();
@@ -107,10 +107,10 @@ export const enqueueCreateDrafts = mutation({
 
       if (product.listingKind === "refurbished") {
         const settings = await getWorkflowSettings(ctx, "refurbished");
-        if (!product.condition) throw new Error(`Select a condition before publishing ${product.sku}.`);
-        if (!product.photosComplete) throw new Error(`Finish taking photos before publishing ${product.sku}.`);
-        if (!settings.shopifyInventoryLocationId) throw new Error("Choose an inventory location in Refurbished settings.");
-        if (!["read_metaobjects", "read_locations", "write_inventory"].every(scope => connection.scopes.includes(scope))) throw new Error("Reconnect Shopify in Shared settings to enable refurbished listings.");
+        if (!product.condition) throw new ConvexError(`Select a condition before publishing ${product.sku}.`);
+        if (!product.photosComplete) throw new ConvexError(`Finish taking photos before publishing ${product.sku}.`);
+        if (!settings.shopifyInventoryLocationId) throw new ConvexError("Choose an inventory location in Refurbished settings.");
+        if (!["read_metaobjects", "read_locations", "write_inventory"].every(scope => connection.scopes.includes(scope))) throw new ConvexError("Reconnect Shopify in Shared settings to enable refurbished listings.");
       }
 
       // Already linked to Shopify: only allow when the caller explicitly
@@ -181,7 +181,7 @@ export const enqueueCreateDrafts = mutation({
     }
 
     if (missingCaptureProducts.length > 0) {
-      throw new Error(
+      throw new ConvexError(
         missingCaptureProducts.length === 1
           ? `Capture a Shopify-hosted photo before publishing ${missingCaptureProducts[0].sku}.`
           : `Capture Shopify-hosted photos for ${missingCaptureProducts.length.toLocaleString()} products before publishing.`,
@@ -189,7 +189,7 @@ export const enqueueCreateDrafts = mutation({
     }
 
     if (aiNotReadyProducts.length > 0) {
-      throw new Error(
+      throw new ConvexError(
         aiNotReadyProducts.length === 1
           ? `Wait for photo upload/AI generation to finish for ${aiNotReadyProducts[0].sku} before publishing.`
           : `Wait for photo upload/AI generation to finish for ${aiNotReadyProducts.length.toLocaleString()} products before publishing.`,
@@ -197,7 +197,7 @@ export const enqueueCreateDrafts = mutation({
     }
 
     if (needsReviewProducts.length > 0) {
-      throw new Error(
+      throw new ConvexError(
         needsReviewProducts.length === 1
           ? `Review and approve the AI photo for ${needsReviewProducts[0].sku} before publishing.`
           : `Review and approve AI photos for ${needsReviewProducts.length.toLocaleString()} products before publishing.`,
