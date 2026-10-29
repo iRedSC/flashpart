@@ -1,4 +1,5 @@
 import { listingPolicy, productSettingsScope } from "./listingTypes";
+import { hasShopifyScopes, REFURBISHED_SCOPES } from "./shopifyScopes";
 import { ConvexError, v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import type { Id } from "./_generated/dataModel";
@@ -110,7 +111,7 @@ export const enqueueCreateDrafts = mutation({
         if (!product.condition) throw new ConvexError(`Select a condition before publishing ${product.sku}.`);
         if (!product.photosComplete) throw new ConvexError(`Finish taking photos before publishing ${product.sku}.`);
         if (!settings.shopifyInventoryLocationId) throw new ConvexError("Choose an inventory location in Refurbished settings.");
-        if (!["read_metaobjects", "read_locations", "write_inventory"].every(scope => connection.scopes.includes(scope))) throw new ConvexError("Reconnect Shopify in Shared settings to enable refurbished listings.");
+        if (!hasShopifyScopes(connection.scopes, REFURBISHED_SCOPES)) throw new ConvexError("Reconnect Shopify in Shared settings to enable refurbished listings.");
       }
 
       // Already linked to Shopify: only allow when the caller explicitly
