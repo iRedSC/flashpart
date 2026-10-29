@@ -27,6 +27,7 @@ import {
   type AiImageModelId,
 } from "../lib/ai-image-settings";
 import { convexApi } from "../lib/convex-api";
+import { hasShopifyScopes, REFURBISHED_SCOPES } from "../../convex/shopifyScopes";
 import {
   DEFAULT_SHOPIFY_SALES_CHANNELS,
   SHOPIFY_SALES_CHANNEL_OPTIONS,
@@ -657,7 +658,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
                 Disconnect
               </Button>
             </div>
-                {shopifyConnection && !["read_metaobjects", "read_locations", "write_inventory", "read_themes"].every(scope => shopifyConnection.scopes.includes(scope)) && <p className="text-sm text-amber-700">Reconnect this store to enable refurbished conditions, inventory locations, and product templates.</p>}
+                {shopifyConnection && !hasShopifyScopes(shopifyConnection.scopes, [...REFURBISHED_SCOPES, "read_themes"]) && <p className="text-sm text-amber-700">Reconnect this store to enable refurbished conditions, inventory locations, and product templates.</p>}
           </form>
             )}
 

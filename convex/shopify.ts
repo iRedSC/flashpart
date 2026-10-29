@@ -9,6 +9,7 @@ import {
   query,
 } from "./_generated/server";
 import type { ActionCtx } from "./_generated/server";
+import { hasShopifyScopes } from "./shopifyScopes";
 import type { Id } from "./_generated/dataModel";
 import { requireSessionUser } from "./authUtils";
 import {
@@ -1158,7 +1159,7 @@ export const productTemplates = action({
     if (!connection) {
       throw new ConvexError("Connect Shopify to choose a product template.");
     }
-    if (!connection.scopes.includes("read_themes")) {
+    if (!hasShopifyScopes(connection.scopes, ["read_themes"])) {
       throw new ConvexError(
         "Reconnect Shopify in Shared settings to allow product template access.",
       );
@@ -1171,7 +1172,7 @@ export const inventoryLocations = action({
   handler: async (ctx, args): Promise<{ id: string; name: string; }[]> => {
     const connection = await ctx.runQuery(shopifyModel.currentActiveConnection, args);
     if (!connection) throw new ConvexError("Connect Shopify to choose an inventory location.");
-    if (!connection.scopes.includes("read_locations")) throw new ConvexError("Reconnect Shopify in Shared settings to allow location access.");
+    if (!hasShopifyScopes(connection.scopes, ["read_locations"])) throw new ConvexError("Reconnect Shopify in Shared settings to allow location access.");
     return getShopifyLocations(connection);
   },
 });
