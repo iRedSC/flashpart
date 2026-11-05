@@ -147,6 +147,7 @@ export const processingPayload = internalQuery({
           product.aiImagePrompt ??
           aiSettings.aiImageDefaultPrompt,
         aiImageWhitenBackground: aiSettings.aiImageWhitenBackground,
+        aiImageAutoEdit: aiSettings.aiImageAutoEdit,
         originalPhotoId: original._id,
         originalStorageId: original.storageId,
         originalUrl: original.url,

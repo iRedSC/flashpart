@@ -28,6 +28,7 @@ const MAX_MAX_PRODUCT_PHOTOS = 20;
 
 const defaultSettings = {
   key: "singleton" as const,
+  aiImageAutoEdit: true,
   aiImageDefaultPrompt: DEFAULT_AI_IMAGE_PROMPT,
   aiImageEditStrength: DEFAULT_AI_IMAGE_EDIT_STRENGTH as AiImageEditStrength,
   aiImageModel: GEMINI_IMAGE_MODEL as AiImageModelId,
@@ -71,6 +72,7 @@ export function resolveMaxProductPhotos(
 
 export function resolveAiImageSettings(
   settings: {
+    aiImageAutoEdit?: boolean;
     aiImageDefaultPrompt?: string;
     aiImageEditStrength?: AiImageEditStrength;
     aiImageModel?: AiImageModelId;
@@ -87,8 +89,10 @@ export function resolveAiImageSettings(
     settings?.aiImageUpgradeModelOnRegen === true;
   // Default on: missing/undefined keeps today's always-whiten behavior.
   const aiImageWhitenBackground = settings?.aiImageWhitenBackground !== false;
+  const aiImageAutoEdit = settings?.aiImageAutoEdit !== false;
 
   return {
+    aiImageAutoEdit,
     aiImageDefaultPrompt,
     aiImageEditStrength,
     aiImageModel,
@@ -111,25 +115,42 @@ export function defaultsForScope(scope: SettingsScope = "parts") {
   };
 }
 
+/**
+ * Settings a scope used before it had its own tab, kept until its first
+ * independent save so adding the tab changes nothing.
+ */
+async function inheritedFromParts(ctx: QueryCtx | MutationCtx, scope: SettingsScope) {
+  if (scope === "gallery") return resolveAiImageSettings(await getSettingsDocument(ctx, "parts"));
+  if (scope === "drafts") {
+    // Drafts read Parts' image, archive and sales channel settings before this tab existed.
+    const parts = await getSettingsDocument(ctx, "parts");
+    if (!parts) return {};
+    return {
+      ...resolveAiImageSettings(parts),
+      ...(parts.autoArchiveComplete !== undefined && { autoArchiveComplete: parts.autoArchiveComplete }),
+      ...(parts.shopifySalesChannels && { shopifySalesChannels: parts.shopifySalesChannels }),
+    };
+  }
+  return {};
+}
+
 export async function getWorkflowSettings(ctx: QueryCtx | MutationCtx, scope: SettingsScope = "parts") {
   const stored = await getSettingsDocument(ctx, scope);
-  // Preserve the gallery's existing image defaults until its first independent save.
-  const galleryDefaults = !stored && scope === "gallery"
-    ? resolveAiImageSettings(await getSettingsDocument(ctx, "parts"))
-    : {};
-  return { ...defaultsForScope(scope), ...galleryDefaults, ...stored };
+  const inherited = stored ? {} : await inheritedFromParts(ctx, scope);
+  return { ...defaultsForScope(scope), ...inherited, ...stored };
 }
 
 async function getSettingsForWrite(ctx: MutationCtx, scope: SettingsScope = "parts") {
   const stored = await getSettingsDocument(ctx, scope);
-  // Gallery used the shared image settings before workflow tabs existed.
-  // Freeze those values before the first Parts edit so the tabs are independent.
-  if (scope === "parts" && !(await getSettingsDocument(ctx, "gallery"))) {
-    await ctx.db.insert("appSettings", {
-      ...defaultsForScope("gallery"),
-      ...resolveAiImageSettings(stored),
-      updatedAt: Date.now(),
-    });
+  // Freeze inherited values before the first Parts edit so the tabs stay independent.
+  if (scope === "parts") {
+    for (const dependent of ["gallery", "drafts"] as const) {
+      if (await getSettingsDocument(ctx, dependent)) continue;
+      await ctx.db.insert("appSettings", {
+        ...await getWorkflowSettings(ctx, dependent),
+        updatedAt: Date.now(),
+      });
+    }
   }
   return stored;
 }
@@ -527,6 +548,34 @@ export const setAiImageWhitenBackground = mutation({
     }
 
     return { aiImageWhitenBackground: args.aiImageWhitenBackground };
+  },
+});
+
+export const setAiImageAutoEdit = mutation({
+  args: {
+    aiImageAutoEdit: v.boolean(),
+    scope: v.optional(settingsScope),
+    sessionToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireSessionUser(ctx, args.sessionToken);
+    const settings = await getSettingsForWrite(ctx, args.scope);
+    const now = Date.now();
+
+    if (settings) {
+      await ctx.db.patch(settings._id, {
+        aiImageAutoEdit: args.aiImageAutoEdit,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("appSettings", {
+        ...await getWorkflowSettings(ctx, args.scope),
+        aiImageAutoEdit: args.aiImageAutoEdit,
+        updatedAt: now,
+      });
+    }
+
+    return { aiImageAutoEdit: args.aiImageAutoEdit };
   },
 });
 

@@ -362,14 +362,18 @@ export const processProductPhoto = internalAction({
           throw new ConvexError("Original product photo is missing image data.");
         }
 
-        const generated = await generateEditedImage({
-          preserveWear: "preserveWear" in payload && payload.preserveWear === true,
-          editStrength: payload.aiImageEditStrength,
-          imageData: originalData,
-          mimeType: originalMimeType,
-          model: payload.aiImageModel,
-          prompt: payload.aiImagePrompt,
-        });
+        // A regen is an explicit request for AI; first captures follow the settings.
+        const useAi = args.isRegeneration === true || payload.aiImageAutoEdit;
+        const generated = useAi
+          ? await generateEditedImage({
+              preserveWear: "preserveWear" in payload && payload.preserveWear === true,
+              editStrength: payload.aiImageEditStrength,
+              imageData: originalData,
+              mimeType: originalMimeType,
+              model: payload.aiImageModel,
+              prompt: payload.aiImagePrompt,
+            })
+          : { data: originalData, mimeType: originalMimeType };
         // Regens skip auto-whiten; first captures follow the settings toggle.
         const shouldWhiten =
           !args.isRegeneration && payload.aiImageWhitenBackground !== false;
@@ -389,7 +393,7 @@ export const processProductPhoto = internalAction({
             storageId,
             url: url ?? undefined,
             aiGeneration,
-            aiModel: payload.aiImageModel,
+            aiModel: useAi ? payload.aiImageModel : undefined,
           });
         } catch (markError) {
           // Row missing or mark failed after store: drop the new blob.
