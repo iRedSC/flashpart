@@ -222,6 +222,9 @@ export const convexApi = {
     setAiImageWhitenBackground: deployedFunction<
       typeof api.settings.setAiImageWhitenBackground
     >("settings.js:setAiImageWhitenBackground"),
+    setAiImageAutoEdit: deployedFunction<
+      typeof api.settings.setAiImageAutoEdit
+    >("settings.js:setAiImageAutoEdit"),
     setMaxProductPhotos: deployedFunction<
       typeof api.settings.setMaxProductPhotos
     >("settings.js:setMaxProductPhotos"),

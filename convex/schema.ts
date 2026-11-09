@@ -105,7 +105,7 @@ export default defineSchema({
     .index("by_token_hash", ["tokenHash"]),
 
   appSettings: defineTable({
-    key: v.union(v.literal("singleton"), v.literal("refurbished"), v.literal("gallery")),
+    key: v.union(v.literal("singleton"), v.literal("refurbished"), v.literal("gallery"), v.literal("drafts")),
     shopifyInventoryLocationId: v.optional(v.string()),
     aiImageDefaultPrompt: v.optional(v.string()),
     aiImageEditStrength: v.optional(aiImageEditStrength),
@@ -113,6 +113,8 @@ export default defineSchema({
     aiImageUpgradeModelOnRegen: v.optional(v.boolean()),
     /** Pull near-white AI backgrounds to pure white after generation. */
     aiImageWhitenBackground: v.optional(v.boolean()),
+    /** Edit new captures with AI. Off keeps the original (whitened when that is on); regen still uses AI. */
+    aiImageAutoEdit: v.optional(v.boolean()),
     duplicatePolicy,
     maxProductPhotos: v.optional(v.number()),
     shopifyPublishTarget: v.optional(shopifyPublishTarget),

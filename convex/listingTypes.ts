@@ -1,7 +1,7 @@
 import { v, type Infer } from "convex/values";
 
 export const settingsScope = v.union(
-  v.literal("parts"), v.literal("refurbished"), v.literal("gallery"),
+  v.literal("parts"), v.literal("refurbished"), v.literal("gallery"), v.literal("drafts"),
 );
 export type SettingsScope = Infer<typeof settingsScope>;
 export const condition = v.union(
@@ -47,7 +47,7 @@ export const LISTING_KINDS: Record<ListingKind, {
 }> = {
   part: { label: "Part", listPath: "/products", settingsScope: "parts", singleProductCapture: false, fromShopify: false },
   refurbished: { label: "Refurbished tool", listPath: "/refurbished", settingsScope: "refurbished", singleProductCapture: true, fromShopify: false },
-  shopifyDraft: { label: "Shopify draft", listPath: "/drafts", settingsScope: "parts", singleProductCapture: true, fromShopify: true },
+  shopifyDraft: { label: "Shopify draft", listPath: "/drafts", settingsScope: "drafts", singleProductCapture: true, fromShopify: true },
 };
 
 export function listingPolicy(product: HasListingKind) {

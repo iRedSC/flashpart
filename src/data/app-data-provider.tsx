@@ -160,6 +160,9 @@ type AppDataContextValue = {
   setAiImageWhitenBackground: (
     aiImageWhitenBackground: boolean,
   ) => Promise<{ aiImageWhitenBackground: boolean } | null>;
+  setAiImageAutoEdit: (
+    aiImageAutoEdit: boolean,
+  ) => Promise<{ aiImageAutoEdit: boolean } | null>;
   setMaxProductPhotos: (
     maxProductPhotos: number,
   ) => Promise<{ maxProductPhotos: number } | null>;
@@ -388,7 +391,8 @@ export function AppDataProvider({
   const location = useLocation();
   const tab = new URLSearchParams(location.search).get("tab");
   const settingsScope: SettingsScope = location.pathname.includes("/refurbished") || (location.pathname === "/settings" && tab === "refurbished")
-    ? "refurbished" : location.pathname === "/photos" || (location.pathname === "/settings" && tab === "gallery") ? "gallery" : "parts";
+    ? "refurbished" : location.pathname === "/photos" || (location.pathname === "/settings" && tab === "gallery") ? "gallery"
+    : location.pathname === "/drafts" || (location.pathname === "/settings" && tab === "drafts") ? "drafts" : "parts";
   const queryArgs = React.useMemo(
     () => ({ sessionToken: session.sessionToken }),
     [session.sessionToken],
@@ -476,6 +480,9 @@ export function AppDataProvider({
   );
   const setAiImageWhitenBackgroundMutation = useMutation(
     convexApi.settings.setAiImageWhitenBackground,
+  );
+  const setAiImageAutoEditMutation = useMutation(
+    convexApi.settings.setAiImageAutoEdit,
   );
   const setMaxProductPhotosMutation = useMutation(
     convexApi.settings.setMaxProductPhotos,
@@ -1244,6 +1251,26 @@ export function AppDataProvider({
             }),
           label: "Saving whiten background",
         }),
+      setAiImageAutoEdit: (aiImageAutoEdit) =>
+        runOptimistic({
+          apply: (state) => ({
+            ...state,
+            settings: state.settings?.key === (settingsScope === "parts" ? "singleton" : settingsScope)
+              ? {
+                  ...state.settings,
+                  aiImageAutoEdit,
+                  updatedAt: Date.now(),
+                }
+              : state.settings,
+          }),
+          commit: () =>
+            setAiImageAutoEditMutation({
+              scope: settingsScope,
+              aiImageAutoEdit,
+              sessionToken: session.sessionToken,
+            }),
+          label: "Saving AI editing",
+        }),
       setMaxProductPhotos: (maxProductPhotos) =>
         runOptimistic({
           apply: (state) => ({
@@ -1841,6 +1868,7 @@ export function AppDataProvider({
       setAiImageModelMutation,
       setAiImageUpgradeModelOnRegenMutation,
       setAiImageWhitenBackgroundMutation,
+      setAiImageAutoEditMutation,
       setMaxProductPhotosMutation,
       setDuplicatePolicyMutation,
       setAutoArchiveCompleteMutation,

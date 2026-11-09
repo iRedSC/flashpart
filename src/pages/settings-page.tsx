@@ -37,16 +37,20 @@ import {
 export function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const selected = params.get("tab");
-  const tab = selected === "parts" || selected === "refurbished" || selected === "gallery" ? selected : "shared";
+  const tab = SETTINGS_TABS.find((value) => value === selected) ?? "shared";
   return <div className="flex min-h-0 flex-1 flex-col gap-4">
     <nav aria-label="Settings sections" className="flex shrink-0 gap-1 border-b border-slate-200">
-      {(["shared", "parts", "refurbished", "gallery"] as const).map(value => <button key={value} type="button" aria-current={tab === value ? "page" : undefined} className={`px-3 py-3 text-sm font-medium capitalize ${tab === value ? "border-b-2 border-slate-950 text-slate-950" : "text-slate-500"}`} onClick={() => setParams({ tab: value })}>{value}</button>)}
+      {SETTINGS_TABS.map(value => <button key={value} type="button" aria-current={tab === value ? "page" : undefined} className={`px-3 py-3 text-sm font-medium capitalize ${tab === value ? "border-b-2 border-slate-950 text-slate-950" : "text-slate-500"}`} onClick={() => setParams({ tab: value })}>{value}</button>)}
     </nav>
     <SettingsPanel key={tab} tab={tab} />
   </div>;
 }
 
-function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gallery"; }) {
+const SETTINGS_TABS = ["shared", "parts", "refurbished", "drafts", "gallery"] as const;
+
+function SettingsPanel({ tab }: { tab: (typeof SETTINGS_TABS)[number] }) {
+  // Drafts already exist in Shopify; publishing only adds photos and activates them.
+  const fromShopify = tab === "drafts";
   const {
     disconnectShopify,
     setAiImageDefaultPrompt,
@@ -54,6 +58,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
     setAiImageModel,
     setAiImageUpgradeModelOnRegen,
     setAiImageWhitenBackground,
+    setAiImageAutoEdit,
     setAutoArchiveComplete,
     setAutoArchiveCompleteGroups,
     setDuplicatePolicy,
@@ -162,6 +167,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
     settings?.aiImageUpgradeModelOnRegen === true;
   const aiImageWhitenBackground =
     settings?.aiImageWhitenBackground !== false;
+  const aiImageAutoEdit = settings?.aiImageAutoEdit !== false;
   const selectedSalesChannels =
     settings?.shopifySalesChannels ?? DEFAULT_SHOPIFY_SALES_CHANNELS;
 
@@ -251,7 +257,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
         </h2>
       </div>
 
-      {(tab === "parts" || tab === "refurbished") && (
+      {(tab === "parts" || tab === "refurbished" || fromShopify) && (
       <Card>
         <CardHeader>
           <CardTitle>Listing defaults</CardTitle>
@@ -260,6 +266,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          {!fromShopify && <>
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
             <div>
               <p className="font-medium">
@@ -297,6 +304,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
               }
             />
           </div>
+          </>}
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
             <div>
               <p className="font-medium">Auto-archive complete items</p>
@@ -332,6 +340,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
             />
           </div>
             )}
+          {!fromShopify && (
           <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
             <label className="grid gap-2 text-sm font-medium" htmlFor="product-type">
               Shopify product type
@@ -352,6 +361,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
               can override this.
             </p>
           </div>
+          )}
             {tab === "refurbished" && <label className="grid gap-2 text-sm font-medium">Product template
               <select aria-label="Product template" className="h-10 rounded-md border border-slate-200 bg-white px-3" value={settings?.shopifyProductTemplateSuffix ?? ""} onChange={event => {
                 setProductTemplateError("");
@@ -363,6 +373,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
               <span className="text-sm font-normal text-slate-500">Applied to every refurbished product created or updated in Shopify.</span>
               {productTemplateError && <span className="text-red-600">{productTemplateError}</span>}
             </label>}
+          {!fromShopify && (
           <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
             <label className="grid gap-2 text-sm font-medium" htmlFor="default-tags">
               Default Shopify tags
@@ -383,6 +394,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
               {tab === "refurbished" && " Single Listing and Refurbished are always added."}
             </p>
           </div>
+          )}
             {tab === "refurbished" && <label className="grid gap-2 text-sm font-medium">Inventory location
               <select aria-label="Inventory location" className="h-10 rounded-md border border-slate-200 bg-white px-3" value={settings?.shopifyInventoryLocationId ?? ""} onChange={event => {
                 setLocationError("");
@@ -406,6 +418,23 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          {fromShopify && (
+          <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
+            <div>
+              <p className="font-medium">Automatically apply AI editing</p>
+              <p className="text-sm text-slate-500">
+                When off, the original photo is used. Regenerate still uses AI.
+              </p>
+            </div>
+            <Switch
+              aria-label="Automatically apply AI editing"
+              checked={aiImageAutoEdit}
+              onCheckedChange={(checked) =>
+                void setAiImageAutoEdit(checked).catch(() => undefined)
+              }
+            />
+          </div>
+          )}
           <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
             <label className="grid gap-2 text-sm font-medium" htmlFor="ai-image-model">
               Gemini model
@@ -453,15 +482,15 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
           </div>
           <div className="flex items-center justify-between gap-6 rounded-lg border border-slate-200 p-4">
             <div>
-              <p className="font-medium">Whiten background</p>
+              <p className="font-medium">Automatically apply whitening</p>
               <p className="text-sm text-slate-500">
-                After the first AI generation, pull slightly off-white corners to
-                pure white. Regenerations skip this; use Whiten in the photo
-                dialog when you need it.
+                Pull slightly off-white backgrounds of new photos to pure white.
+                Regenerations skip this; use Whiten in the photo dialog when you
+                need it.
               </p>
             </div>
             <Switch
-              aria-label="Whiten background"
+              aria-label="Automatically apply whitening"
               checked={aiImageWhitenBackground}
               onCheckedChange={(checked) =>
                 void setAiImageWhitenBackground(checked).catch(() => undefined)
@@ -664,6 +693,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
 
             {tab !== "shared" && <>
           <div className="mt-6 grid gap-4 border-t border-slate-200 pt-6">
+            {!fromShopify && (
             <div className="grid gap-2 rounded-lg border border-slate-200 p-4">
               <label
                 className="grid gap-2 text-sm font-medium"
@@ -694,6 +724,7 @@ function SettingsPanel({ tab }: { tab: "shared" | "parts" | "refurbished" | "gal
                 numeric ID from Shopify admin.
               </p>
             </div>
+            )}
 
             <div className="grid gap-3 rounded-lg border border-slate-200 p-4">
               <div>
